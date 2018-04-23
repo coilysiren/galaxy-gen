@@ -1,0 +1,6 @@
+[package]
+name = "galaxyGen"
+version = "0.1.0"
+authors = ["Lynn Cyrin <firemagelynn@gmail.com>"]
+
+[dependencies]
