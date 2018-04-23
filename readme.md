@@ -1,6 +1,6 @@
 # galaxyGen
 
-`rust => wasm` implementation of [python galaxySim](https://github.com/lynncyrin/galaxySim)
+`{ rust => wasm }` implementation of [python galaxySim](https://github.com/lynncyrin/galaxySim)
 
 ## commands
 
