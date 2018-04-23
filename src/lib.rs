@@ -5,11 +5,6 @@ extern crate wasm_bindgen;
 use wasm_bindgen::prelude::*;
 
 #[wasm_bindgen]
-extern {
-    fn alert(s: &str);
-}
-
-#[wasm_bindgen]
-pub fn greet(name: &str) {
-    alert(&format!("no way!!! {}?!", name));
+pub fn inform_logger(name: &str) -> String {
+    return format!("cat {} scratched the post", name)
 }
