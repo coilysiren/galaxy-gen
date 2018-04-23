@@ -1,5 +1,3 @@
-const jsWasmPromise = import("./assets/built-wasm/galaxy_gen");
+import { MainScript } from "./main";
 
-jsWasmPromise.then((rust) => {
-  console.log(rust.inform_logger("Rust and WebAssembly?"));
-});
+new MainScript(import("./assets/built-wasm/galaxy_gen"))

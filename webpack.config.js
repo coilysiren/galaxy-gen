@@ -7,6 +7,14 @@ module.exports = {
       path: path.resolve(__dirname, 'dist'),
     filename: 'main.js'
   },
+  resolve: {
+    extensions: [".ts", ".js", ".wasm"]
+  },
+  module: {
+    rules: [
+      { test: /\.ts$/, loader: "ts-loader" }
+    ]
+  },
   plugins: [
     new HtmlWebpackPlugin()
   ],

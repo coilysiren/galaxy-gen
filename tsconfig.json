@@ -1,7 +1,13 @@
 {
+  "files": [
+    "client/bootstrap.js",
+  ],
   "compileOnSave": true,
   "compilerOptions": {
+    "listEmittedFiles": true,
+    "listFiles": true,
     "allowJs": true,
+    "checkJs": true,
     "alwaysStrict": true,
     "sourceMap": true,
     "inlineSources": true,
@@ -11,12 +17,12 @@
     "moduleResolution": "node",
     "emitDecoratorMetadata": true,
     "experimentalDecorators": true,
-    "target": "es6",
+    "target": "esnext",
     "typeRoots": [
       "node_modules/@types",
     ],
     "lib": [
-      "es2017",
+      "es7",
       "dom"
     ]
   },
