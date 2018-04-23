@@ -2,4 +2,5 @@
 **/*.rs.bk
 node_modules
 *.wasm
-built-wasm/
+client/built-wasm/*.js
+client/built-wasm/*.wasm
