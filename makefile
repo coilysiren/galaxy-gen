@@ -11,6 +11,3 @@ watch: ## watch
 
 build: ## build
 	cargo +nightly build --release --target wasm32-unknown-unknown && wasm-bindgen target/wasm32-unknown-unknown/release/galaxy_gen.wasm --out-dir client/assets/built-wasm
-
-check-typescript: ## check-typescript
-	npx --no-install tsc -p tsconfig.json && cat dist/out-tsc/bootstrap.js
