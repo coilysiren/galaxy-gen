@@ -1,11 +1,9 @@
 import { Component, OnInit } from "@angular/core";
-import "assets/curled/fontawesome.js";
+const jsWasmPromise: any = import("./../assets/built-wasm/galaxy_gen");
 
 @Component({
   selector: "app-root",
   template: `
-    <header-component></header-component>
-    <router-outlet></router-outlet>
   `,
   styles: [
     "./base.scss",
@@ -14,7 +12,7 @@ import "assets/curled/fontawesome.js";
 export class AppComponent implements OnInit {
 
   public ngOnInit(): void {
-    import("assets/built-wasm/galaxy_gen").then((js: any) => {
+    jsWasmPromise.then((js: any) => {
       js.greet("Rust and WebAssembly?");
     });
   }
