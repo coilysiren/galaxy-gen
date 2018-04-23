@@ -1,4 +1,3 @@
-const index = import("./index");
-index.then(() => {
-  console.log("Loaded...");
+import("./built-wasm/galaxy_gen").then((js) => {
+  js.greet("Rust and WebAssembly!");
 });
