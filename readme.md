@@ -4,4 +4,4 @@ Rust implementation of [python galaxySim](https://github.com/lynncyrin/galaxySim
 
 ## commands
 
-see [makefile](makefile)
+see [package.json::scripts](package.json)
