@@ -1,12 +1,27 @@
 {
+  "name": "galaxy_gen",
+  "version": "0.0.0",
+  "engines": {
+    "node": "9.5.0",
+    "npm": "5.8.0"
+  },
   "scripts": {
-    "serve": "webpack-dev-server",
-    "build-debug": "cargo +nightly build --target wasm32-unknown-unknown && wasm-bindgen target/wasm32-unknown-unknown/debug/galaxy_gen.wasm --out-dir client/built-wasm",
-    "build-release": "cargo +nightly build --release --target wasm32-unknown-unknown && wasm-bindgen target/wasm32-unknown-unknown/release/galaxy_gen.wasm --out-dir client/built-wasm"
+    "start": "ng serve --port 8080 --open",
+    "build-debug": "cargo +nightly build --target wasm32-unknown-unknown && wasm-bindgen target/wasm32-unknown-unknown/debug/galaxy_gen.wasm --out-dir client/assets/built-wasm",
+    "build-release": "cargo +nightly build --release --target wasm32-unknown-unknown && wasm-bindgen target/wasm32-unknown-unknown/release/galaxy_gen.wasm --out-dir client/assets/built-wasm"
   },
   "devDependencies": {
-    "webpack": "^4.0.1",
-    "webpack-cli": "^2.0.10",
-    "webpack-dev-server": "^3.1.0"
+    "webpack": "^3",
+    "@angular/common": "^5.2.10",
+    "@angular/compiler": "^5.2.10",
+    "@angular/core": "^5.2.10",
+    "@angular/platform-browser": "^5.2.10",
+    "@angular/platform-browser-dynamic": "^5.2.10",
+    "@angular/cli": "^1",
+    "@angular/compiler-cli": "^5.2.10",
+    "express": "^4",
+    "zone.js": "^0.8.26",
+    "tslint": "^5",
+    "typescript": "<2.7"
   }
 }

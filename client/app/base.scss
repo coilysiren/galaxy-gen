@@ -1,0 +1,25 @@
+@import "./_variables.scss";
+
+* {
+  font-family: $font-body;
+}
+
+h1,
+h2,
+h3,
+h4,
+h5 {
+  &,
+  & * {
+    font-family: $font-headers;
+    text-align: center;
+  }
+}
+
+code,
+pre {
+  &,
+  & * {
+    font-family: $font-code;
+  }
+}
