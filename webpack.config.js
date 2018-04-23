@@ -1,10 +1,10 @@
 const path = require("path");
 
 module.exports = {
-  entry: "./client/bootstrap.js",
+  entry: "./bootstrap.js",
   output: {
     path: path.resolve(__dirname, "dist"),
-    filename: "client/bootstrap.js",
+    filename: "bootstrap.js",
   },
   mode: "development"
 };
