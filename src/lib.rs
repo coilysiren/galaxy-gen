@@ -7,14 +7,30 @@ use wasm_bindgen::prelude::*;
 struct Universe {
     width: u8,
     height: u8,
-    cells: Vec<bool>,
+    cells: Vec<u8>,
 }
 
 impl Universe {
+    pub fn new(height: u8, width: u8) -> Universe {
+        let cells = (0..width * height)
+            .map(|i| {
+                if i % 2 == 0 || i % 7 == 0 {
+                    return 0
+                } else {
+                    return 1
+                }
+            })
+            .collect();
+
+        return Universe {
+            width,
+            height,
+            cells,
+        }
+    }
 }
 
 #[wasm_bindgen]
-pub fn inform_logger(name: &str) -> String {
-    let _boolean: bool = true;
-    return format!("cat {} scratched the post", name)
+pub fn show_universe(height: u8, width: u8) -> Vec<u8> {
+    return Universe::new(height, width).cells
 }
