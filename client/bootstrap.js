@@ -1,3 +1,3 @@
-import("./built-wasm/galaxy_gen").then((js) => {
+import("./assets/built-wasm/galaxy_gen").then((js) => {
   js.greet("Rust and WebAssembly?");
 });
