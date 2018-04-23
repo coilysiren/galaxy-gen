@@ -2,5 +2,5 @@
 **/*.rs.bk
 node_modules
 *.wasm
-client/assets/built-wasm/*.js
-client/assets/built-wasm/*.wasm
+client/built-wasm/*.js
+client/built-wasm/*.wasm
