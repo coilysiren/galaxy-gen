@@ -4,7 +4,7 @@
 
 ## commands
 
-see [package.json::scripts](package.json)
+see [makefile](makefile)
 
 ## references
 
