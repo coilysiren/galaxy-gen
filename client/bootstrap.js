@@ -1,3 +1,3 @@
 import { MainScript } from "./main";
 
-new MainScript(import("./assets/built-wasm/galaxy_gen"))
+import("./assets/built-wasm/galaxy_gen").then((rust) => new MainScript(rust));
