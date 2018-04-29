@@ -3,17 +3,16 @@
 
 module.exports = function (config) {
   config.set({
-    basePath: "./../",
-    frameworks: [
-      "jasmine",
-    ],
     plugins: [
       require('karma-jasmine'),
       require('karma-firefox-launcher'),
       require("karma-spec-reporter"),
     ],
+    frameworks: [
+      "jasmine",
+    ],
     files: [
-      './main.spec.ts',
+      './*.spec.js',
     ],
     reporters: [
       "spec",
