@@ -34,3 +34,18 @@ impl Universe {
 pub fn show_universe(height: u8, width: u8) -> Vec<u8> {
     return Universe::new(height, width).cells
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_inital_generation() {
+        show_universe(64, 64);
+    }
+    #[test]
+    #[should_panic]
+    fn test_input_bounds() {
+        show_universe(1000, 1000);
+    }
+}
