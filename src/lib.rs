@@ -12,7 +12,8 @@ struct Universe {
 
 impl Universe {
     pub fn new(height: u8, width: u8) -> Universe {
-        let cells = (0..width * height)
+        let cells = vec!(0; (width * height) as usize)
+            .into_iter()
             .map(|i| {
                 if i % 2 == 0 || i % 7 == 0 {
                     return 0
