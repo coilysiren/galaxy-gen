@@ -1,6 +1,7 @@
 #![feature(proc_macro, wasm_custom_section, wasm_import_module)]
 
 extern crate wasm_bindgen;
+extern crate rand;
 
 use wasm_bindgen::prelude::*;
 
@@ -28,7 +29,7 @@ impl Universe {
             cells,
         }
     }
-    pub fn cells(&self) -> *const u8 {
+    pub fn cells_pointer(&self) -> *const u8 {
         self.cells.as_ptr()
     }
 }

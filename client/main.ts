@@ -29,8 +29,12 @@ export class MainScript {
   private cells(): Uint8Array {
     return new Uint8Array(
       this.wasmBinary.memory.buffer,
-      this.universe.cells(),
-      this.universeSize ** 2,
+      this.universe.cells_pointer(),
+      this.memoryRange,
     );
+  }
+
+  private get memoryRange(): number {
+    return this.universeSize ** 2;
   }
 }
