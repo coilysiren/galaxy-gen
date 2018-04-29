@@ -8,7 +8,7 @@ watch: ## watch
 		-x "check" \
 		-x "test" \
 		-x "build --target wasm32-unknown-unknown" \
-		-s "wasm-bindgen target/wasm32-unknown-unknown/debug/galaxy_gen.wasm --typescript --debug --out-dir client/assets/built-wasm" \
+		-s "wasm-bindgen target/wasm32-unknown-unknown/debug/galaxy_gen.wasm --typescript --debug --out-dir client/assets/built-wasm --browser --no-modules" \
 		-s "npx --no-install webpack-dev-server"
 
 build: ## build

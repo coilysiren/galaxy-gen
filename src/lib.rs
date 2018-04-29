@@ -5,14 +5,13 @@ extern crate wasm_bindgen;
 use wasm_bindgen::prelude::*;
 
 struct Universe {
-    width: u8,
-    height: u8,
+    size: u8,
     cells: Vec<u8>,
 }
 
 impl Universe {
-    pub fn new(height: u8, width: u8) -> Universe {
-        let cells = vec!(0; (width * height) as usize)
+    pub fn new(size: u8) -> Universe {
+        let cells = vec!(0; (size.pow(2)) as usize)
             .into_iter()
             .map(|i| {
                 if i % 2 == 0 || i % 7 == 0 {
@@ -22,18 +21,16 @@ impl Universe {
                 }
             })
             .collect();
-
         return Universe {
-            width,
-            height,
+            size,
             cells,
         }
     }
 }
 
 #[wasm_bindgen]
-pub fn show_universe(height: u8, width: u8) -> Vec<u8> {
-    return Universe::new(height, width).cells
+pub fn show_universe(size: u8) -> Vec<u8> {
+    return Universe::new(size).cells
 }
 
 #[cfg(test)]
@@ -42,11 +39,11 @@ mod tests {
 
     #[test]
     fn test_inital_generation() {
-        show_universe(10, 10);
+        show_universe(10);
     }
     #[test]
     #[should_panic]
     fn test_input_bounds() {
-        show_universe(64, 64);
+        show_universe(64);
     }
 }

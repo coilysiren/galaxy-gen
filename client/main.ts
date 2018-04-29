@@ -5,9 +5,10 @@ export class MainScript {
 
   constructor(rust: typeof Rust) {
     this.rust = rust;
+    console.log(this.show_universe(10));
   }
 
-  public show_universe(height: number, width: number): Uint8Array {
-    return this.rust.show_universe(10, 10);
+  public show_universe(size: number): Uint8Array {
+    return this.rust.show_universe(10);
   }
 }
