@@ -46,7 +46,6 @@ mod tests {
     }
     #[test]
     #[should_panic]
-    #[allow(overflowing_literals)]
     fn test_input_bounds() {
         show_universe(64, 64);
     }
