@@ -42,12 +42,12 @@ mod tests {
 
     #[test]
     fn test_inital_generation() {
-        show_universe(64, 64);
+        show_universe(10, 10);
     }
     #[test]
     #[should_panic]
     #[allow(overflowing_literals)]
     fn test_input_bounds() {
-        show_universe(1000, 1000);
+        show_universe(64, 64);
     }
 }
