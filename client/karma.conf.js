@@ -3,20 +3,30 @@
 
 module.exports = function (config) {
   config.set({
+    basePath: "./../",
     plugins: [
       require('karma-jasmine'),
       require('karma-firefox-launcher'),
+      require("karma-typescript"),
       require("karma-spec-reporter"),
     ],
     frameworks: [
       "jasmine",
+      "karma-typescript",
     ],
+    preprocessors: {
+      "**/*.ts": "karma-typescript"
+    },
     files: [
-      './*.spec.js',
+      'client/**/*.spec.js',
     ],
     reporters: [
       "spec",
     ],
+    client: {
+      captureConsole: true,
+      clearConsole: false,
+    },
     port: 9876,
     colors: true,
     logLevel: config.LOG_INFO,
