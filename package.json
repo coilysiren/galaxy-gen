@@ -7,6 +7,7 @@
   },
   "devDependencies": {
     "@types/node": "^9",
+    "@types/webassembly-js-api": "0.0.1",
     "html-webpack-plugin": "^3.2.0",
     "ts-loader": "^4.2.0",
     "tslint": "^5.9.1",
@@ -15,4 +16,3 @@
     "webpack-serve": "^0.3.1"
   }
 }
- 

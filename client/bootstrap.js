@@ -5,5 +5,10 @@
 
 import { MainScript } from "./main";
 
-import("./assets/built-wasm/galaxy_gen")
-  .then((wasmBinds) => new MainScript(wasmBinds));
+(async () => {
+  new MainScript(
+    await import("./assets/built-wasm/galaxy_gen"),
+    // @ts-ignore: ignore `module not found` for the wasm file
+    await import("./assets/built-wasm/galaxy_gen_bg.wasm")
+  );
+})();
