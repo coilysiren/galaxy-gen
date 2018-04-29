@@ -1,14 +1,18 @@
-import * as Rust from "./assets/built-wasm/galaxy_gen";
+import * as IWasmBinds from "./assets/built-wasm/galaxy_gen";
 
+/**
+ * MainScript is constructed with already compiled wasm
+ * and does business logic with that wasm
+ */
 export class MainScript {
-  private rust: typeof Rust;
+  private wasmBinds: typeof IWasmBinds;
 
-  constructor(rust: typeof Rust) {
-    this.rust = rust;
+  constructor(wasmBinds: typeof IWasmBinds) {
+    this.wasmBinds = wasmBinds;
     console.log(this.show_universe(10));
   }
 
   public show_universe(size: number): Uint8Array {
-    return this.rust.show_universe(10);
+    return this.wasmBinds.show_universe(10);
   }
 }
