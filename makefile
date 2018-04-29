@@ -6,6 +6,7 @@ help:
 watch: ## watch
 	cargo +nightly watch \
 		-x "check" \
+		-x "test" \
 		-x "build --target wasm32-unknown-unknown" \
 		-s "wasm-bindgen target/wasm32-unknown-unknown/debug/galaxy_gen.wasm --typescript --debug --out-dir client/assets/built-wasm" \
 		-s "npx --no-install webpack-dev-server"
