@@ -6,13 +6,15 @@ import * as IWasmBinds from "./assets/built-wasm/galaxy_gen";
  */
 export class MainScript {
   private wasmBinds: typeof IWasmBinds;
+  private universe: IWasmBinds.Universe;
 
   constructor(wasmBinds: typeof IWasmBinds) {
     this.wasmBinds = wasmBinds;
-    console.log(this.show_universe(10));
+    this.start();
   }
 
-  public show_universe(size: number): Uint8Array {
-    return this.wasmBinds.show_universe(10);
+  public start(): void {
+    this.universe = this.wasmBinds.Universe.new(10);
+    console.log(this.universe.cells());
   }
 }
