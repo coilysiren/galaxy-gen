@@ -15,8 +15,8 @@ impl Universe {
     pub fn new(size: u8) -> Universe {
         return Universe {
             size,
-            cells: vec!(0; (size.pow(2)) as usize),
-        }
+            cells: vec![0; size.pow(2) as usize],
+        };
     }
     pub fn cells_pointer(&self) -> *const u8 {
         self.cells.as_ptr()
