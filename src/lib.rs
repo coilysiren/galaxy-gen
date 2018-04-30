@@ -14,23 +14,20 @@ pub struct Universe {
 #[wasm_bindgen]
 impl Universe {
     pub fn new(size: u8) -> Universe {
-        let cells = vec!(0; (size.pow(2)) as usize)
-            .into_iter()
-            .map(|i| {
-                if i % 2 == 0 || i % 7 == 0 {
-                    return 0
-                } else {
-                    return 1
-                }
-            })
-            .collect();
         return Universe {
             size,
-            cells,
+            cells: vec!(0; (size.pow(2)) as usize),
         }
     }
     pub fn cells_pointer(&self) -> *const u8 {
         self.cells.as_ptr()
+    }
+    pub fn seed(&mut self) {
+        for cell_index in 0..self.size.pow(2) {
+            if cell_index % 3 == 0 {
+                self.cells[cell_index as usize] = 1;
+            }
+        }
     }
 }
 

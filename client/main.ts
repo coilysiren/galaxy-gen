@@ -23,6 +23,7 @@ export class MainScript {
   private start(size: number): void {
     this.universeSize = size;
     this.universe = this.wasmJSApi.Universe.new(size);
+    this.universe.seed();
     console.log(this.cells());
   }
 
