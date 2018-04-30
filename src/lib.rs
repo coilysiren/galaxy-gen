@@ -39,8 +39,8 @@ mod tests {
     }
     #[test]
     #[should_panic]
-    fn test_input_bounds() {
-        Universe::new(64);
+    fn test_out_of_bounds_input_panics() {
+        Universe::new(100000);
     }
     #[test]
     fn test_seed_no_panic() {
