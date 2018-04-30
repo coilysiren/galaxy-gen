@@ -33,14 +33,25 @@ impl Universe {
 #[cfg(test)]
 mod tests {
     use super::*;
-
     #[test]
-    fn test_inital_generation() {
+    fn test_inital_generation_no_panic() {
         Universe::new(10);
     }
     #[test]
     #[should_panic]
     fn test_input_bounds() {
         Universe::new(64);
+    }
+    #[test]
+    fn test_seed_no_panic() {
+        Universe::new(10).seed();
+    }
+    #[test]
+    fn test_seed_alters_data() {
+        let mut universe = Universe::new(10);
+        let cells_before = universe.cells.clone();
+        universe.seed();
+        let cells_after = universe.cells.clone();
+        assert_ne!(cells_before, cells_after);
     }
 }
