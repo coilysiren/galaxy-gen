@@ -6,20 +6,24 @@ use wasm_bindgen::prelude::*;
 
 #[wasm_bindgen]
 pub struct Universe {
-    size: u8,
-    cells: Vec<u8>,
+    size: u16,
+    cells: Vec<u16>,
 }
+
+// gas 0 - 99
+// rock 100 - 9999
+// star 10000 - 65536
 
 #[wasm_bindgen]
 impl Universe {
-    pub fn new(size: u8) -> Universe {
+    pub fn new(size: u16) -> Universe {
         return Universe {
             size,
             cells: vec![0; size.pow(2) as usize],
         };
     }
     pub fn new_stable_case_one() -> Universe {
-        let size = (3 as u8).pow(2);
+        let size = (3 as u16).pow(2);
         let mut universe = Universe {
             size,
             cells: vec![1; size.pow(2) as usize],
@@ -27,7 +31,7 @@ impl Universe {
         universe.cells[4 as usize] = 10;
         return universe;
     }
-    pub fn cells_pointer(&self) -> *const u8 {
+    pub fn cells_pointer(&self) -> *const u16 {
         return self.cells.as_ptr();
     }
     pub fn seed(&mut self) {
@@ -41,13 +45,14 @@ impl Universe {
         let mut next = self.cells.clone();
         for index in 0..(self.size - 1) {
             let cell = self.cells[index as usize];
+            let neighbours = self.neighbours(index, 1);
         }
         self.cells = next;
     }
 }
 
 impl Universe {
-    fn neighbours(&self, index: u8, reach: u8) -> Vec<(u8, u8)> {
+    fn neighbours(&self, index: u16, reach: u16) -> Vec<(u16, u16)> {
         let mut neighbours = Vec::new();
         let (index_row, index_col) = self.index_to_row_col(index);
         let (row_start, row_end) = self.reach_range(index_row, reach);
@@ -61,19 +66,19 @@ impl Universe {
         }
         return neighbours;
     }
-    fn row_col_to_index(&self, row: u8, col: u8) -> u8 {
+    fn row_col_to_index(&self, row: u16, col: u16) -> u16 {
         return row * self.size + col;
     }
-    fn index_to_row_col(&self, index: u8) -> (u8, u8) {
+    fn index_to_row_col(&self, index: u16) -> (u16, u16) {
         return (index / self.size, index % self.size);
     }
-    fn reach_range(&self, index: u8, reach: u8) -> (u8, u8) {
+    fn reach_range(&self, index: u16, reach: u16) -> (u16, u16) {
         return (
             self.reach_range_start(index, reach),
             self.reach_range_end(index, reach),
         );
     }
-    fn reach_range_start(&self, index: u8, reach: u8) -> u8 {
+    fn reach_range_start(&self, index: u16, reach: u16) -> u16 {
         let start;
         if index < reach {
             start = 0;
@@ -82,7 +87,7 @@ impl Universe {
         }
         return start;
     }
-    fn reach_range_end(&self, index: u8, reach: u8) -> u8 {
+    fn reach_range_end(&self, index: u16, reach: u16) -> u16 {
         let end;
         if index + reach > self.size {
             end = self.size - 1;
