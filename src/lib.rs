@@ -47,14 +47,18 @@ impl Universe {
 }
 
 impl Universe {
-    fn neighbours(&self, index: u8, reach: u8) -> Vec<u8> {
+    fn neighbours(&self, index: u8, reach: u8) -> Vec<(u8, u8)> {
         let mut neighbours = Vec::new();
-
         let (index_row, index_col) = self.index_to_row_col(index);
         let (row_start, row_end) = self.reach_range(index_row, reach);
         let (col_start, col_end) = self.reach_range(index_col, reach);
-
-        neighbours.push(5);
+        for row in row_start..=row_end {
+            for col in col_start..=col_end {
+                if (row, col) != (index_row, index_col) {
+                    neighbours.push((row, col));
+                }
+            }
+        }
         return neighbours;
     }
     fn row_col_to_index(&self, row: u8, col: u8) -> u8 {
@@ -130,47 +134,47 @@ mod tests {
 
     #[test]
     fn test_index_to_row_col_start() {
-        let mut universe = Universe::new(3);
+        let universe = Universe::new(3);
         assert_eq!(universe.index_to_row_col(0), (0, 0));
     }
     #[test]
     fn test_row_col_to_index_start() {
-        let mut universe = Universe::new(3);
+        let universe = Universe::new(3);
         assert_eq!(universe.row_col_to_index(0, 0), 0);
     }
 
     #[test]
     fn test_index_to_row_col_center() {
-        let mut universe = Universe::new(3);
+        let universe = Universe::new(3);
         assert_eq!(universe.index_to_row_col(4), (1, 1));
     }
     #[test]
     fn test_row_col_to_index_center() {
-        let mut universe = Universe::new(3);
+        let universe = Universe::new(3);
         assert_eq!(universe.row_col_to_index(1, 1), 4);
     }
 
     #[test]
     fn test_index_to_row_col_end() {
-        let mut universe = Universe::new(3);
+        let universe = Universe::new(3);
         assert_eq!(universe.index_to_row_col(8), (2, 2));
     }
     #[test]
     fn test_row_col_to_index_end() {
-        let mut universe = Universe::new(3);
+        let universe = Universe::new(3);
         assert_eq!(universe.row_col_to_index(2, 2), 8);
     }
 
     #[test]
     fn test_index_edge_transform_top_right() {
-        let mut universe = Universe::new(3);
+        let universe = Universe::new(3);
         let index = 2;
         let (start, end) = universe.index_to_row_col(index);
         assert_eq!(universe.row_col_to_index(start, end), index);
     }
     #[test]
     fn test_index_edge_transform_bottom_left() {
-        let mut universe = Universe::new(3);
+        let universe = Universe::new(3);
         let index = 6;
         let (start, end) = universe.index_to_row_col(index);
         assert_eq!(universe.row_col_to_index(start, end), index);
@@ -178,34 +182,50 @@ mod tests {
 
     #[test]
     fn test_reach_range_start_edge() {
-        let mut universe = Universe::new(3);
+        let universe = Universe::new(3);
         assert_eq!(universe.reach_range_start(0, 99), 0);
     }
     #[test]
     fn test_reach_range_start_overflow() {
-        let mut universe = Universe::new(3);
+        let universe = Universe::new(3);
         assert_eq!(universe.reach_range_start(1, 99), 0);
     }
     #[test]
     fn test_reach_range_start_contained() {
-        let mut universe = Universe::new(10);
+        let universe = Universe::new(10);
         assert_eq!(universe.reach_range_start(4, 2), 2);
     }
 
     #[test]
     fn test_reach_range_end_edge() {
-        let mut universe = Universe::new(3);
+        let universe = Universe::new(3);
         assert_eq!(universe.reach_range_end(2, 99), 2);
     }
     #[test]
     fn test_reach_range_end_overflow() {
-        let mut universe = Universe::new(3);
+        let universe = Universe::new(3);
         assert_eq!(universe.reach_range_end(0, 99), 2);
     }
     #[test]
     fn test_reach_range_end_contained() {
-        let mut universe = Universe::new(10);
+        let universe = Universe::new(10);
         assert_eq!(universe.reach_range_end(2, 2), 4);
+    }
+
+    #[test]
+    fn test_neighbor_size() {
+        let universe = Universe::new(10);
+        assert_eq!(universe.neighbours(0, 1).len(), 3);
+    }
+    #[test]
+    fn test_neighbor_size_larger() {
+        let universe = Universe::new(10);
+        assert_eq!(universe.neighbours(0, 2).len(), 8);
+    }
+    #[test]
+    fn test_neighbor_size_center() {
+        let universe = Universe::new(3);
+        assert_eq!(universe.neighbours(4, 1).len(), 8);
     }
 
 }
