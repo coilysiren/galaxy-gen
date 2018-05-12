@@ -1,7 +1,5 @@
 {
-  "files": [
-    "client/bootstrap.js",
-  ],
+  "files": ["client/bootstrap.js"],
   "compileOnSave": true,
   "compilerOptions": {
     "listEmittedFiles": true,
@@ -18,15 +16,8 @@
     "emitDecoratorMetadata": true,
     "experimentalDecorators": true,
     "target": "esnext",
-    "typeRoots": [
-      "node_modules/@types",
-    ],
-    "lib": [
-      "es7",
-      "dom"
-    ]
+    "typeRoots": ["node_modules/@types"],
+    "lib": ["es7", "dom"]
   },
-  "exclude": [
-    "node_modules"
-  ]
+  "exclude": ["node_modules"]
 }

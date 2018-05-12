@@ -1,22 +1,18 @@
 const path = require("path");
-const HtmlWebpackPlugin = require('html-webpack-plugin');
+const HtmlWebpackPlugin = require("html-webpack-plugin");
 
 module.exports = {
-  entry: './client/bootstrap.js',
+  entry: "./client/bootstrap.js",
   output: {
-    path: path.resolve(__dirname, 'dist'),
-    filename: 'main.js'
+    path: path.resolve(__dirname, "dist"),
+    filename: "main.js"
   },
   resolve: {
     extensions: [".ts", ".js", ".wasm"]
   },
   module: {
-    rules: [
-      { test: /\.ts$/, loader: "ts-loader" }
-    ]
+    rules: [{ test: /\.ts$/, loader: "ts-loader" }]
   },
-  plugins: [
-    new HtmlWebpackPlugin()
-  ],
+  plugins: [new HtmlWebpackPlugin()],
   mode: "development"
 };

@@ -17,10 +17,10 @@ export class MainScript {
   constructor(wasmJSApi: typeof IWasmJSApi, wasmBinary: IWasmBinary) {
     this.wasmJSApi = wasmJSApi;
     this.wasmBinary = wasmBinary;
-    this.start(10);
+    this.generateData(10);
   }
 
-  private start(size: number): void {
+  private generateData(size: number): void {
     this.universeSize = size;
     this.universe = this.wasmJSApi.Universe.new(size);
     this.universe.seed();
@@ -31,7 +31,7 @@ export class MainScript {
     return new Uint8Array(
       this.wasmBinary.memory.buffer,
       this.universe.cells_pointer(),
-      this.memoryRange,
+      this.memoryRange
     );
   }
 
