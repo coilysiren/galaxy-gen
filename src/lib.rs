@@ -5,39 +5,62 @@ extern crate wasm_bindgen;
 use wasm_bindgen::prelude::*;
 
 #[wasm_bindgen]
-pub struct Universe {
-    size: u16,
-    cells: Vec<u16>,
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Cell(u16);
+
+#[wasm_bindgen]
+impl Cell {
+    // wrong string creation method???
+    pub fn get_type(&self) -> String {
+        if self.0 < 100 {
+            return String::from("gas");
+        } else if self.0 < 10000 {
+            return String::from("rock");
+        } else {
+            return String::from("star");
+        }
+    }
+    pub fn is_gas(&self) -> bool {
+        return self.get_type() == "gas";
+    }
+    pub fn is_rock(&self) -> bool {
+        return self.get_type() == "rock";
+    }
+    pub fn is_star(&self) -> bool {
+        return self.get_type() == "star";
+    }
 }
 
-// gas 0 - 99
-// rock 100 - 9999
-// star 10000 - 65536
+#[wasm_bindgen]
+pub struct Universe {
+    size: u16,
+    cells: Vec<Cell>,
+}
 
 #[wasm_bindgen]
 impl Universe {
     pub fn new(size: u16) -> Universe {
         return Universe {
             size,
-            cells: vec![0; size.pow(2) as usize],
+            cells: vec![Cell { 0: 0 }; size.pow(2) as usize],
         };
     }
     pub fn new_stable_case_one() -> Universe {
         let size = (3 as u16).pow(2);
         let mut universe = Universe {
             size,
-            cells: vec![1; size.pow(2) as usize],
+            cells: vec![Cell { 0: 1 }; size.pow(2) as usize],
         };
-        universe.cells[4 as usize] = 10;
+        universe.cells[4 as usize] = Cell { 0: 10 };
         return universe;
     }
-    pub fn cells_pointer(&self) -> *const u16 {
+    pub fn cells_pointer(&self) -> *const Cell {
         return self.cells.as_ptr();
     }
     pub fn seed(&mut self) {
         for cell_index in 0..self.size.pow(2) {
             if cell_index % 3 == 0 {
-                self.cells[cell_index as usize] = 1;
+                self.cells[cell_index as usize] = Cell { 0: 1 };
             }
         }
     }
@@ -101,6 +124,22 @@ impl Universe {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn test_gas_cell() {
+        let cell = Cell { 0: 0 };
+        assert_eq!(cell.is_gas(), true);
+    }
+    #[test]
+    fn test_rock_cell() {
+        let cell = Cell { 0: 9999 };
+        assert_eq!(cell.is_rock(), true);
+    }
+    #[test]
+    fn test_star_cell() {
+        let cell = Cell { 0: 59999 };
+        assert_eq!(cell.is_star(), true);
+    }
 
     #[test]
     fn test_inital_generation_no_panic() {
