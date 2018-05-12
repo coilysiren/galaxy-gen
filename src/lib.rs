@@ -157,9 +157,8 @@ impl Universe {
 }
 
 #[cfg(test)]
-mod tests {
+mod tests_cell_types {
     use super::*;
-
     #[test]
     fn test_gas_cell() {
         let cell = Cell { mass: 1 };
@@ -175,12 +174,15 @@ mod tests {
         let cell = Cell { mass: 59999 };
         assert_eq!(cell.is_star(), true);
     }
+}
 
+#[cfg(test)]
+mod tests_intial_generation {
+    use super::*;
     #[test]
     fn test_inital_generation_no_panic() {
         Universe::new(10);
     }
-
     #[test]
     fn test_seed_no_panic() {
         Universe::new(10).seed();
@@ -199,12 +201,15 @@ mod tests {
         let cells_after = universe.cells.clone();
         assert_ne!(cells_before, cells_after);
     }
-
     #[test]
     fn test_stable_case_one_no_panics() {
         Universe::new_stable_case_one();
     }
+}
 
+#[cfg(test)]
+mod tests_indexing {
+    use super::*;
     #[test]
     fn test_index_to_row_col_start() {
         let universe = Universe::new(3);
@@ -215,7 +220,6 @@ mod tests {
         let universe = Universe::new(3);
         assert_eq!(universe.row_col_to_index(0, 0), 0);
     }
-
     #[test]
     fn test_index_to_row_col_center() {
         let universe = Universe::new(3);
@@ -226,7 +230,6 @@ mod tests {
         let universe = Universe::new(3);
         assert_eq!(universe.row_col_to_index(1, 1), 4);
     }
-
     #[test]
     fn test_index_to_row_col_end() {
         let universe = Universe::new(3);
@@ -237,7 +240,6 @@ mod tests {
         let universe = Universe::new(3);
         assert_eq!(universe.row_col_to_index(2, 2), 8);
     }
-
     #[test]
     fn test_index_edge_transform_top_right() {
         let universe = Universe::new(3);
@@ -252,7 +254,11 @@ mod tests {
         let (start, end) = universe.index_to_row_col(index);
         assert_eq!(universe.row_col_to_index(start, end), index);
     }
+}
 
+#[cfg(test)]
+mod tests_neighbors_and_reach {
+    use super::*;
     #[test]
     fn test_reach_range_start_edge() {
         let universe = Universe::new(3);
@@ -268,7 +274,6 @@ mod tests {
         let universe = Universe::new(10);
         assert_eq!(universe.reach_range_start(4, 2), 2);
     }
-
     #[test]
     fn test_reach_range_end_edge() {
         let universe = Universe::new(3);
@@ -284,7 +289,6 @@ mod tests {
         let universe = Universe::new(10);
         assert_eq!(universe.reach_range_end(2, 2), 4);
     }
-
     #[test]
     fn test_neighbor_size() {
         let universe = Universe::new(10);
@@ -300,7 +304,6 @@ mod tests {
         let universe = Universe::new(3);
         assert_eq!(universe.neighbours(4, 1).len(), 8);
     }
-
     #[test]
     fn test_neighbor_size_differs_for_different_types() {
         let mut universe = Universe::new(100);
@@ -317,7 +320,6 @@ mod tests {
         assert_ne!(gas_neighbours, star_neighbours);
         assert_ne!(rock_neighbours, star_neighbours);
     }
-
     #[test]
     fn test_neighbor_size_same_for_small_universe() {
         let mut universe = Universe::new(3);
@@ -329,5 +331,4 @@ mod tests {
         let rock_neighbours = universe.neighbours_of_my_type(0).len();
         assert_eq!(gas_neighbours, rock_neighbours);
     }
-
 }
