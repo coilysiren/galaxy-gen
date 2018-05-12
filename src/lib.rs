@@ -180,12 +180,6 @@ mod tests {
     fn test_inital_generation_no_panic() {
         Universe::new(10);
     }
-    #[test]
-    #[should_panic]
-    #[allow(overflowing_literals)]
-    fn test_out_of_bounds_input_panics() {
-        Universe::new(100000);
-    }
 
     #[test]
     fn test_seed_no_panic() {
