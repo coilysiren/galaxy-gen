@@ -10,7 +10,7 @@ watch: ## watch
 
 watch-rust-tests:
 	cargo +nightly watch \
-		-x "test -- --nocapture"
+		-x "test -- --color always --nocapture"
 
 watch-rust:
 	cargo +nightly watch \

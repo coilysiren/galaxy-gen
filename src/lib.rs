@@ -60,28 +60,35 @@ impl Universe {
         return neighbours;
     }
     fn reach_range(&self, index: u8, reach: u8) -> (u8, u8) {
+        return (
+            self.reach_range_start(index, reach),
+            self.reach_range_end(index, reach),
+        );
+    }
+    fn reach_range_start(&self, index: u8, reach: u8) -> u8 {
         let start;
-        let end;
-
         if index < reach {
             start = reach - index;
         } else {
             start = index - reach;
         }
-
+        return start;
+    }
+    fn reach_range_end(&self, index: u8, reach: u8) -> u8 {
+        let end;
         if index + reach > self.size {
             end = self.size - 1;
         } else {
             end = index + reach;
         }
-
-        return (start, end);
+        return end;
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
     #[test]
     fn test_inital_generation_no_panic() {
         Universe::new(10);
@@ -92,6 +99,7 @@ mod tests {
     fn test_out_of_bounds_input_panics() {
         Universe::new(100000);
     }
+
     #[test]
     fn test_seed_no_panic() {
         Universe::new(10).seed();
@@ -110,8 +118,42 @@ mod tests {
         let cells_after = universe.cells.clone();
         assert_ne!(cells_before, cells_after);
     }
+
     #[test]
     fn test_stable_case_one_no_panics() {
         Universe::new_stable_case_one();
     }
+
+    #[test]
+    fn test_reach_range_start_edge() {
+        let mut universe = Universe::new(3);
+        assert_eq!(universe.reach_range_start(0, 99), 0);
+    }
+    #[test]
+    fn test_reach_range_start_overflow() {
+        let mut universe = Universe::new(3);
+        assert_eq!(universe.reach_range_start(1, 99), 0);
+    }
+    #[test]
+    fn test_reach_range_start_contained() {
+        let mut universe = Universe::new(3);
+        assert_eq!(universe.reach_range_start(2, 1), 1);
+    }
+
+    #[test]
+    fn test_reach_range_end_edge() {
+        let mut universe = Universe::new(3);
+        assert_eq!(universe.reach_range_end(2, 99), 3);
+    }
+    #[test]
+    fn test_reach_range_end_overflow() {
+        let mut universe = Universe::new(3);
+        assert_eq!(universe.reach_range_end(0, 99), 2);
+    }
+    #[test]
+    fn test_reach_range_end_contained() {
+        let mut universe = Universe::new(3);
+        assert_eq!(universe.reach_range_end(1, 1), 1);
+    }
+
 }
