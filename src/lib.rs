@@ -126,6 +126,20 @@ mod tests {
     }
 
     #[test]
+    fn test_index_to_row_col_start() {
+        let mut universe = Universe::new(3);
+        assert_eq!(universe.index_to_row_col(0), (0, 0));
+    }
+    fn test_index_to_row_col_center() {
+        let mut universe = Universe::new(3);
+        assert_eq!(universe.index_to_row_col(4), (1, 1));
+    }
+    fn test_index_to_row_col_end() {
+        let mut universe = Universe::new(3);
+        assert_eq!(universe.index_to_row_col(8), (2, 2));
+    }
+
+    #[test]
     fn test_reach_range_start_edge() {
         let mut universe = Universe::new(3);
         assert_eq!(universe.reach_range_start(0, 99), 0);
