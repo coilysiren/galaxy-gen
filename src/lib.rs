@@ -47,27 +47,27 @@ impl Cell {
 }
 
 #[wasm_bindgen]
-pub struct Universe {
+pub struct Galaxy {
     size: u16,
     cells: Vec<Cell>,
 }
 
 #[wasm_bindgen]
-impl Universe {
-    pub fn new(size: u16) -> Universe {
-        return Universe {
+impl Galaxy {
+    pub fn new(size: u16) -> Galaxy {
+        return Galaxy {
             size,
             cells: vec![Cell { mass: 0 }; (size as u32).pow(2) as usize],
         };
     }
-    pub fn new_stable_case_one() -> Universe {
+    pub fn new_stable_case_one() -> Galaxy {
         let size = (3 as u16).pow(2);
-        let mut universe = Universe {
+        let mut galaxy = Galaxy {
             size,
             cells: vec![Cell { mass: 1 }; size.pow(2) as usize],
         };
-        universe.cells[4 as usize] = Cell { mass: 10 };
-        return universe;
+        galaxy.cells[4 as usize] = Cell { mass: 10 };
+        return galaxy;
     }
     pub fn cells_pointer(&self) -> *const Cell {
         return self.cells.as_ptr();
@@ -89,7 +89,7 @@ impl Universe {
     }
 }
 
-impl Universe {
+impl Galaxy {
     fn reach_of_type(&self, type_index: u8) -> u16 {
         match type_index {
             0 => self.size / 100 + 1,
@@ -181,29 +181,29 @@ mod tests_intial_generation {
     use super::*;
     #[test]
     fn test_inital_generation_no_panic() {
-        Universe::new(10);
+        Galaxy::new(10);
     }
     #[test]
     fn test_seed_no_panic() {
-        Universe::new(10).seed();
+        Galaxy::new(10).seed();
     }
     #[test]
     fn test_seed_tick_no_panic() {
-        let mut universe = Universe::new(10);
-        universe.seed();
-        universe.tick();
+        let mut galaxy = Galaxy::new(10);
+        galaxy.seed();
+        galaxy.tick();
     }
     #[test]
     fn test_seed_alters_data() {
-        let mut universe = Universe::new(10);
-        let cells_before = universe.cells.clone();
-        universe.seed();
-        let cells_after = universe.cells.clone();
+        let mut galaxy = Galaxy::new(10);
+        let cells_before = galaxy.cells.clone();
+        galaxy.seed();
+        let cells_after = galaxy.cells.clone();
         assert_ne!(cells_before, cells_after);
     }
     #[test]
     fn test_stable_case_one_no_panics() {
-        Universe::new_stable_case_one();
+        Galaxy::new_stable_case_one();
     }
 }
 
@@ -212,47 +212,47 @@ mod tests_indexing {
     use super::*;
     #[test]
     fn test_index_to_row_col_start() {
-        let universe = Universe::new(3);
-        assert_eq!(universe.index_to_row_col(0), (0, 0));
+        let galaxy = Galaxy::new(3);
+        assert_eq!(galaxy.index_to_row_col(0), (0, 0));
     }
     #[test]
     fn test_row_col_to_index_start() {
-        let universe = Universe::new(3);
-        assert_eq!(universe.row_col_to_index(0, 0), 0);
+        let galaxy = Galaxy::new(3);
+        assert_eq!(galaxy.row_col_to_index(0, 0), 0);
     }
     #[test]
     fn test_index_to_row_col_center() {
-        let universe = Universe::new(3);
-        assert_eq!(universe.index_to_row_col(4), (1, 1));
+        let galaxy = Galaxy::new(3);
+        assert_eq!(galaxy.index_to_row_col(4), (1, 1));
     }
     #[test]
     fn test_row_col_to_index_center() {
-        let universe = Universe::new(3);
-        assert_eq!(universe.row_col_to_index(1, 1), 4);
+        let galaxy = Galaxy::new(3);
+        assert_eq!(galaxy.row_col_to_index(1, 1), 4);
     }
     #[test]
     fn test_index_to_row_col_end() {
-        let universe = Universe::new(3);
-        assert_eq!(universe.index_to_row_col(8), (2, 2));
+        let galaxy = Galaxy::new(3);
+        assert_eq!(galaxy.index_to_row_col(8), (2, 2));
     }
     #[test]
     fn test_row_col_to_index_end() {
-        let universe = Universe::new(3);
-        assert_eq!(universe.row_col_to_index(2, 2), 8);
+        let galaxy = Galaxy::new(3);
+        assert_eq!(galaxy.row_col_to_index(2, 2), 8);
     }
     #[test]
     fn test_index_edge_transform_top_right() {
-        let universe = Universe::new(3);
+        let galaxy = Galaxy::new(3);
         let index = 2;
-        let (start, end) = universe.index_to_row_col(index);
-        assert_eq!(universe.row_col_to_index(start, end), index);
+        let (start, end) = galaxy.index_to_row_col(index);
+        assert_eq!(galaxy.row_col_to_index(start, end), index);
     }
     #[test]
     fn test_index_edge_transform_bottom_left() {
-        let universe = Universe::new(3);
+        let galaxy = Galaxy::new(3);
         let index = 6;
-        let (start, end) = universe.index_to_row_col(index);
-        assert_eq!(universe.row_col_to_index(start, end), index);
+        let (start, end) = galaxy.index_to_row_col(index);
+        assert_eq!(galaxy.row_col_to_index(start, end), index);
     }
 }
 
@@ -261,74 +261,74 @@ mod tests_neighbors_and_reach {
     use super::*;
     #[test]
     fn test_reach_range_start_edge() {
-        let universe = Universe::new(3);
-        assert_eq!(universe.reach_range_start(0, 99), 0);
+        let galaxy = Galaxy::new(3);
+        assert_eq!(galaxy.reach_range_start(0, 99), 0);
     }
     #[test]
     fn test_reach_range_start_overflow() {
-        let universe = Universe::new(3);
-        assert_eq!(universe.reach_range_start(1, 99), 0);
+        let galaxy = Galaxy::new(3);
+        assert_eq!(galaxy.reach_range_start(1, 99), 0);
     }
     #[test]
     fn test_reach_range_start_contained() {
-        let universe = Universe::new(10);
-        assert_eq!(universe.reach_range_start(4, 2), 2);
+        let galaxy = Galaxy::new(10);
+        assert_eq!(galaxy.reach_range_start(4, 2), 2);
     }
     #[test]
     fn test_reach_range_end_edge() {
-        let universe = Universe::new(3);
-        assert_eq!(universe.reach_range_end(2, 99), 2);
+        let galaxy = Galaxy::new(3);
+        assert_eq!(galaxy.reach_range_end(2, 99), 2);
     }
     #[test]
     fn test_reach_range_end_overflow() {
-        let universe = Universe::new(3);
-        assert_eq!(universe.reach_range_end(0, 99), 2);
+        let galaxy = Galaxy::new(3);
+        assert_eq!(galaxy.reach_range_end(0, 99), 2);
     }
     #[test]
     fn test_reach_range_end_contained() {
-        let universe = Universe::new(10);
-        assert_eq!(universe.reach_range_end(2, 2), 4);
+        let galaxy = Galaxy::new(10);
+        assert_eq!(galaxy.reach_range_end(2, 2), 4);
     }
     #[test]
     fn test_neighbor_size() {
-        let universe = Universe::new(10);
-        assert_eq!(universe.neighbours(0, 1).len(), 3);
+        let galaxy = Galaxy::new(10);
+        assert_eq!(galaxy.neighbours(0, 1).len(), 3);
     }
     #[test]
     fn test_neighbor_size_larger() {
-        let universe = Universe::new(10);
-        assert_eq!(universe.neighbours(0, 2).len(), 8);
+        let galaxy = Galaxy::new(10);
+        assert_eq!(galaxy.neighbours(0, 2).len(), 8);
     }
     #[test]
     fn test_neighbor_size_center() {
-        let universe = Universe::new(3);
-        assert_eq!(universe.neighbours(4, 1).len(), 8);
+        let galaxy = Galaxy::new(3);
+        assert_eq!(galaxy.neighbours(4, 1).len(), 8);
     }
     #[test]
     fn test_neighbor_size_differs_for_different_types() {
-        let mut universe = Universe::new(100);
+        let mut galaxy = Galaxy::new(100);
         // gas
-        universe.cells[0 as usize] = Cell { mass: 1 };
-        let gas_neighbours = universe.neighbours_of_my_type(0).len();
+        galaxy.cells[0 as usize] = Cell { mass: 1 };
+        let gas_neighbours = galaxy.neighbours_of_my_type(0).len();
         // rock
-        universe.cells[0 as usize] = Cell { mass: 9999 };
-        let rock_neighbours = universe.neighbours_of_my_type(0).len();
+        galaxy.cells[0 as usize] = Cell { mass: 9999 };
+        let rock_neighbours = galaxy.neighbours_of_my_type(0).len();
         // star
-        universe.cells[0 as usize] = Cell { mass: 59999 };
-        let star_neighbours = universe.neighbours_of_my_type(0).len();
+        galaxy.cells[0 as usize] = Cell { mass: 59999 };
+        let star_neighbours = galaxy.neighbours_of_my_type(0).len();
         assert_ne!(gas_neighbours, rock_neighbours);
         assert_ne!(gas_neighbours, star_neighbours);
         assert_ne!(rock_neighbours, star_neighbours);
     }
     #[test]
-    fn test_neighbor_size_same_for_small_universe() {
-        let mut universe = Universe::new(3);
+    fn test_neighbor_size_same_for_small_galaxy() {
+        let mut galaxy = Galaxy::new(3);
         // gas
-        universe.cells[0 as usize] = Cell { mass: 1 };
-        let gas_neighbours = universe.neighbours_of_my_type(0).len();
+        galaxy.cells[0 as usize] = Cell { mass: 1 };
+        let gas_neighbours = galaxy.neighbours_of_my_type(0).len();
         // rock
-        universe.cells[0 as usize] = Cell { mass: 9999 };
-        let rock_neighbours = universe.neighbours_of_my_type(0).len();
+        galaxy.cells[0 as usize] = Cell { mass: 9999 };
+        let rock_neighbours = galaxy.neighbours_of_my_type(0).len();
         assert_eq!(gas_neighbours, rock_neighbours);
     }
 }
