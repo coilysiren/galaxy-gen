@@ -50,14 +50,15 @@ impl Universe {
     fn neighbours(&self, index: u8, reach: u8) -> Vec<u8> {
         let mut neighbours = Vec::new();
 
-        let index_row = index % self.size;
-        let index_col = index / self.size;
-
+        let (index_row, index_col) = self.index_to_row_col(index);
         let (row_start, row_end) = self.reach_range(index_row, reach);
         let (col_start, col_end) = self.reach_range(index_col, reach);
 
         neighbours.push(5);
         return neighbours;
+    }
+    fn index_to_row_col(&self, index: u8) -> (u8, u8) {
+        return (index % self.size, index / self.size);
     }
     fn reach_range(&self, index: u8, reach: u8) -> (u8, u8) {
         return (
@@ -68,7 +69,7 @@ impl Universe {
     fn reach_range_start(&self, index: u8, reach: u8) -> u8 {
         let start;
         if index < reach {
-            start = reach - index;
+            start = 0;
         } else {
             start = index - reach;
         }
@@ -136,14 +137,14 @@ mod tests {
     }
     #[test]
     fn test_reach_range_start_contained() {
-        let mut universe = Universe::new(3);
-        assert_eq!(universe.reach_range_start(2, 1), 1);
+        let mut universe = Universe::new(10);
+        assert_eq!(universe.reach_range_start(4, 2), 2);
     }
 
     #[test]
     fn test_reach_range_end_edge() {
         let mut universe = Universe::new(3);
-        assert_eq!(universe.reach_range_end(2, 99), 3);
+        assert_eq!(universe.reach_range_end(2, 99), 2);
     }
     #[test]
     fn test_reach_range_end_overflow() {
@@ -152,8 +153,8 @@ mod tests {
     }
     #[test]
     fn test_reach_range_end_contained() {
-        let mut universe = Universe::new(3);
-        assert_eq!(universe.reach_range_end(1, 1), 1);
+        let mut universe = Universe::new(10);
+        assert_eq!(universe.reach_range_end(2, 2), 4);
     }
 
 }
