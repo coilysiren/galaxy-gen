@@ -17,7 +17,6 @@ export class MainScript {
   constructor(wasmJSApi: typeof IWasmJSApi, wasmBinary: IWasmBinary) {
     this.wasmJSApi = wasmJSApi;
     this.wasmBinary = wasmBinary;
-    this.generateData(10);
   }
 
   public cells(): Uint8Array {
@@ -28,11 +27,10 @@ export class MainScript {
     );
   }
 
-  private generateData(size: number): void {
+  public generateData(size: number): void {
     this.universeSize = size;
     this.universe = this.wasmJSApi.Universe.new(size);
     this.universe.seed();
-    console.log(this.cells());
   }
 
   private get memoryRange(): number {
