@@ -8,6 +8,18 @@ use wasm_bindgen::prelude::*;
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Cell {
     mass: u16,
+    accel_mangitude: u16,
+    accel_degree: u16,
+}
+
+impl Default for Cell {
+    fn default() -> Cell {
+        Cell {
+            mass: 0,
+            accel_mangitude: 0,
+            accel_degree: 0,
+        }
+    }
 }
 
 #[wasm_bindgen]
@@ -57,16 +69,31 @@ impl Galaxy {
     pub fn new(size: u16) -> Galaxy {
         return Galaxy {
             size,
-            cells: vec![Cell { mass: 0 }; (size as u32).pow(2) as usize],
+            cells: vec![
+                Cell {
+                    mass: 0,
+                    ..Default::default()
+                };
+                (size as u32).pow(2) as usize
+            ],
         };
     }
     pub fn new_stable_case_one() -> Galaxy {
         let size = (3 as u16).pow(2);
         let mut galaxy = Galaxy {
             size,
-            cells: vec![Cell { mass: 1 }; size.pow(2) as usize],
+            cells: vec![
+                Cell {
+                    mass: 1,
+                    ..Default::default()
+                };
+                size.pow(2) as usize
+            ],
         };
-        galaxy.cells[4 as usize] = Cell { mass: 10 };
+        galaxy.cells[4 as usize] = Cell {
+            mass: 10,
+            ..Default::default()
+        };
         return galaxy;
     }
     pub fn cells_pointer(&self) -> *const Cell {
@@ -75,7 +102,10 @@ impl Galaxy {
     pub fn seed(&mut self) {
         for cell_index in 0..self.size.pow(2) {
             if cell_index % 3 == 0 {
-                self.cells[cell_index as usize] = Cell { mass: 1 };
+                self.cells[cell_index as usize] = Cell {
+                    mass: 1,
+                    ..Default::default()
+                };
             }
         }
     }
@@ -161,17 +191,26 @@ mod tests_cell_types {
     use super::*;
     #[test]
     fn test_gas_cell() {
-        let cell = Cell { mass: 1 };
+        let cell = Cell {
+            mass: 1,
+            ..Default::default()
+        };
         assert_eq!(cell.is_gas(), true);
     }
     #[test]
     fn test_rock_cell() {
-        let cell = Cell { mass: 9999 };
+        let cell = Cell {
+            mass: 9999,
+            ..Default::default()
+        };
         assert_eq!(cell.is_rock(), true);
     }
     #[test]
     fn test_star_cell() {
-        let cell = Cell { mass: 59999 };
+        let cell = Cell {
+            mass: 59999,
+            ..Default::default()
+        };
         assert_eq!(cell.is_star(), true);
     }
 }
@@ -308,13 +347,22 @@ mod tests_neighbors_and_reach {
     fn test_neighbor_size_differs_for_different_types() {
         let mut galaxy = Galaxy::new(100);
         // gas
-        galaxy.cells[0 as usize] = Cell { mass: 1 };
+        galaxy.cells[0 as usize] = Cell {
+            mass: 1,
+            ..Default::default()
+        };
         let gas_neighbours = galaxy.neighbours_of_my_type(0).len();
         // rock
-        galaxy.cells[0 as usize] = Cell { mass: 9999 };
+        galaxy.cells[0 as usize] = Cell {
+            mass: 9999,
+            ..Default::default()
+        };
         let rock_neighbours = galaxy.neighbours_of_my_type(0).len();
         // star
-        galaxy.cells[0 as usize] = Cell { mass: 59999 };
+        galaxy.cells[0 as usize] = Cell {
+            mass: 59999,
+            ..Default::default()
+        };
         let star_neighbours = galaxy.neighbours_of_my_type(0).len();
         assert_ne!(gas_neighbours, rock_neighbours);
         assert_ne!(gas_neighbours, star_neighbours);
@@ -324,10 +372,16 @@ mod tests_neighbors_and_reach {
     fn test_neighbor_size_same_for_small_galaxy() {
         let mut galaxy = Galaxy::new(3);
         // gas
-        galaxy.cells[0 as usize] = Cell { mass: 1 };
+        galaxy.cells[0 as usize] = Cell {
+            mass: 1,
+            ..Default::default()
+        };
         let gas_neighbours = galaxy.neighbours_of_my_type(0).len();
         // rock
-        galaxy.cells[0 as usize] = Cell { mass: 9999 };
+        galaxy.cells[0 as usize] = Cell {
+            mass: 9999,
+            ..Default::default()
+        };
         let rock_neighbours = galaxy.neighbours_of_my_type(0).len();
         assert_eq!(gas_neighbours, rock_neighbours);
     }
