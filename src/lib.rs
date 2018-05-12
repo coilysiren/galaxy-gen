@@ -12,14 +12,13 @@ pub struct Cell {
 
 #[wasm_bindgen]
 impl Cell {
-    // wasteful, avoid using
-    pub fn get_type(&self) -> String {
+    pub fn get_type(&self) -> u8 {
         if self.mass < 100 {
-            return String::from("gas");
+            return 0;
         } else if self.mass < 10000 {
-            return String::from("rock");
+            return 1;
         } else {
-            return String::from("star");
+            return 2;
         }
     }
     pub fn is_gas(&self) -> bool {
@@ -58,7 +57,7 @@ impl Universe {
     pub fn new(size: u16) -> Universe {
         return Universe {
             size,
-            cells: vec![Cell { mass: 0 }; size.pow(2) as usize],
+            cells: vec![Cell { mass: 0 }; (size as u32).pow(2) as usize],
         };
     }
     pub fn new_stable_case_one() -> Universe {
@@ -91,6 +90,26 @@ impl Universe {
 }
 
 impl Universe {
+    fn reach_of_type(&self, type_index: u8) -> u16 {
+        match type_index {
+            0 => self.size / 100 + 1,
+            1 => self.size / 10 + 1,
+            2 => self.size,
+            _ => unreachable!(),
+        }
+    }
+    fn neighbours_of_my_type(&self, index: u16) -> Vec<(u16, u16)> {
+        return self.neighbours_of_type(index, self.cells[index as usize].get_type());
+    }
+    fn neighbours_of_type(&self, index: u16, type_index: u8) -> Vec<(u16, u16)> {
+        let mut neighbours_of_type = Vec::new();
+        for neighbour in self.neighbours(index, self.reach_of_type(type_index)) {
+            if self.cells[index as usize].check_if_type(type_index) {
+                neighbours_of_type.push(neighbour);
+            }
+        }
+        return neighbours_of_type;
+    }
     fn neighbours(&self, index: u16, reach: u16) -> Vec<(u16, u16)> {
         let mut neighbours = Vec::new();
         let (index_row, index_col) = self.index_to_row_col(index);
@@ -143,7 +162,7 @@ mod tests {
 
     #[test]
     fn test_gas_cell() {
-        let cell = Cell { mass: 0 };
+        let cell = Cell { mass: 1 };
         assert_eq!(cell.is_gas(), true);
     }
     #[test]
@@ -286,6 +305,35 @@ mod tests {
     fn test_neighbor_size_center() {
         let universe = Universe::new(3);
         assert_eq!(universe.neighbours(4, 1).len(), 8);
+    }
+
+    #[test]
+    fn test_neighbor_size_differs_for_different_types() {
+        let mut universe = Universe::new(100);
+        // gas
+        universe.cells[0 as usize] = Cell { mass: 1 };
+        let gas_neighbours = universe.neighbours_of_my_type(0).len();
+        // rock
+        universe.cells[0 as usize] = Cell { mass: 9999 };
+        let rock_neighbours = universe.neighbours_of_my_type(0).len();
+        // star
+        universe.cells[0 as usize] = Cell { mass: 59999 };
+        let star_neighbours = universe.neighbours_of_my_type(0).len();
+        assert_ne!(gas_neighbours, rock_neighbours);
+        assert_ne!(gas_neighbours, star_neighbours);
+        assert_ne!(rock_neighbours, star_neighbours);
+    }
+
+    #[test]
+    fn test_neighbor_size_same_for_small_universe() {
+        let mut universe = Universe::new(3);
+        // gas
+        universe.cells[0 as usize] = Cell { mass: 1 };
+        let gas_neighbours = universe.neighbours_of_my_type(0).len();
+        // rock
+        universe.cells[0 as usize] = Cell { mass: 9999 };
+        let rock_neighbours = universe.neighbours_of_my_type(0).len();
+        assert_eq!(gas_neighbours, rock_neighbours);
     }
 
 }
