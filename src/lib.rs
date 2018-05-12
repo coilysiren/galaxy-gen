@@ -6,28 +6,44 @@ use wasm_bindgen::prelude::*;
 
 #[wasm_bindgen]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct Cell(u16);
+pub struct Cell {
+    mass: u16,
+}
 
 #[wasm_bindgen]
 impl Cell {
-    // wrong string creation method???
+    // wasteful, avoid using
     pub fn get_type(&self) -> String {
-        if self.0 < 100 {
+        if self.mass < 100 {
             return String::from("gas");
-        } else if self.0 < 10000 {
+        } else if self.mass < 10000 {
             return String::from("rock");
         } else {
             return String::from("star");
         }
     }
     pub fn is_gas(&self) -> bool {
-        return self.get_type() == "gas";
+        return self.check_if_type(0);
     }
     pub fn is_rock(&self) -> bool {
-        return self.get_type() == "rock";
+        return self.check_if_type(1);
     }
     pub fn is_star(&self) -> bool {
-        return self.get_type() == "star";
+        return self.check_if_type(2);
+    }
+}
+
+impl Cell {
+    fn check_if_type(&self, type_index: u8) -> bool {
+        if (type_index == 0) & (self.mass < 100) {
+            return true;
+        } else if (type_index == 1) & (self.mass >= 100) & (self.mass < 10000) {
+            return true;
+        } else if (type_index == 2) & (self.mass >= 10000) {
+            return true;
+        } else {
+            return false;
+        }
     }
 }
 
@@ -42,16 +58,16 @@ impl Universe {
     pub fn new(size: u16) -> Universe {
         return Universe {
             size,
-            cells: vec![Cell { 0: 0 }; size.pow(2) as usize],
+            cells: vec![Cell { mass: 0 }; size.pow(2) as usize],
         };
     }
     pub fn new_stable_case_one() -> Universe {
         let size = (3 as u16).pow(2);
         let mut universe = Universe {
             size,
-            cells: vec![Cell { 0: 1 }; size.pow(2) as usize],
+            cells: vec![Cell { mass: 1 }; size.pow(2) as usize],
         };
-        universe.cells[4 as usize] = Cell { 0: 10 };
+        universe.cells[4 as usize] = Cell { mass: 10 };
         return universe;
     }
     pub fn cells_pointer(&self) -> *const Cell {
@@ -60,7 +76,7 @@ impl Universe {
     pub fn seed(&mut self) {
         for cell_index in 0..self.size.pow(2) {
             if cell_index % 3 == 0 {
-                self.cells[cell_index as usize] = Cell { 0: 1 };
+                self.cells[cell_index as usize] = Cell { mass: 1 };
             }
         }
     }
@@ -127,17 +143,17 @@ mod tests {
 
     #[test]
     fn test_gas_cell() {
-        let cell = Cell { 0: 0 };
+        let cell = Cell { mass: 0 };
         assert_eq!(cell.is_gas(), true);
     }
     #[test]
     fn test_rock_cell() {
-        let cell = Cell { 0: 9999 };
+        let cell = Cell { mass: 9999 };
         assert_eq!(cell.is_rock(), true);
     }
     #[test]
     fn test_star_cell() {
-        let cell = Cell { 0: 59999 };
+        let cell = Cell { mass: 59999 };
         assert_eq!(cell.is_star(), true);
     }
 
