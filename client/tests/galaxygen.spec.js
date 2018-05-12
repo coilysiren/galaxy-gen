@@ -1,3 +1,5 @@
+/* eslint-disable */
+
 import { MainScript } from "./../main.ts";
 import * as assert from "assert";
 
