@@ -4,4 +4,4 @@
 
 `main.ts` is [typescript](https://www.typescriptlang.org/) because typescript is good and pure :sparkles:
 
-`tests/*` are karma tests, they run a chrome browser and execute the `wasm` + `js` there.
+`tests/*` are [mocha](https://mochajs.org/) tests in a [karma](https://karma-runner.github.io/) runner, they run a chrome browser and execute the `wasm` + `js` there.
