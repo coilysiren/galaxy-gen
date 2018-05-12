@@ -8,6 +8,10 @@ watch: ## watch
 	make watch-client &
 	make watch-js-tests &
 
+watch-rust-tests:
+	cargo +nightly watch \
+		-x "test -- --nocapture"
+
 watch-rust:
 	cargo +nightly watch \
 		-x "check" \
