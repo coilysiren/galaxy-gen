@@ -1,30 +1,28 @@
 // Karma configuration
 // Generated on Fri May 11 2018 21:05:49 GMT-0700 (PDT)
 
+webpackConfig = require("./../../webpack.config");
+
 module.exports = function(config) {
   config.set({
     basePath: "./../../",
     browsers: ["Chrome"],
-    frameworks: ["jasmine", "karma-typescript"],
-    plugins: [
-      require("karma-jasmine"),
-      require("karma-chrome-launcher"),
-      require("karma-spec-reporter"),
-      require("karma-typescript")
-    ],
-    files: ["client/tests/*spec.ts"],
+    frameworks: ["mocha"],
+    files: ["client/tests/*spec.js"],
     preprocessors: {
-      "./**/*.ts": "karma-typescript"
+      "./**/*.js": ["webpack"],
+      "./**/*.ts": ["webpack"]
     },
-    reporters: ["spec", "karma-typescript"],
+    reporters: ["spec"],
     port: 9876,
     colors: true,
     logLevel: config.LOG_INFO,
-    autoWatch: false,
-    singleRun: true,
+    autoWatch: true,
+    singleRun: false,
     concurrency: Infinity,
     karmaTypescriptConfig: {
       tsconfig: "client/tests/tsconfig.json"
-    }
+    },
+    webpack: webpackConfig
   });
 };

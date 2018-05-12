@@ -20,19 +20,19 @@ export class MainScript {
     this.generateData(10);
   }
 
-  private generateData(size: number): void {
-    this.universeSize = size;
-    this.universe = this.wasmJSApi.Universe.new(size);
-    this.universe.seed();
-    console.log(this.cells());
-  }
-
-  private cells(): Uint8Array {
+  public cells(): Uint8Array {
     return new Uint8Array(
       this.wasmBinary.memory.buffer,
       this.universe.cells_pointer(),
       this.memoryRange
     );
+  }
+
+  private generateData(size: number): void {
+    this.universeSize = size;
+    this.universe = this.wasmJSApi.Universe.new(size);
+    this.universe.seed();
+    console.log(this.cells());
   }
 
   private get memoryRange(): number {
