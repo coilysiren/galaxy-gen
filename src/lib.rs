@@ -57,8 +57,11 @@ impl Universe {
         neighbours.push(5);
         return neighbours;
     }
+    fn row_col_to_index(&self, row: u8, col: u8) -> u8 {
+        return row * self.size + col;
+    }
     fn index_to_row_col(&self, index: u8) -> (u8, u8) {
-        return (index % self.size, index / self.size);
+        return (index / self.size, index % self.size);
     }
     fn reach_range(&self, index: u8, reach: u8) -> (u8, u8) {
         return (
@@ -130,13 +133,47 @@ mod tests {
         let mut universe = Universe::new(3);
         assert_eq!(universe.index_to_row_col(0), (0, 0));
     }
+    #[test]
+    fn test_row_col_to_index_start() {
+        let mut universe = Universe::new(3);
+        assert_eq!(universe.row_col_to_index(0, 0), 0);
+    }
+
+    #[test]
     fn test_index_to_row_col_center() {
         let mut universe = Universe::new(3);
         assert_eq!(universe.index_to_row_col(4), (1, 1));
     }
+    #[test]
+    fn test_row_col_to_index_center() {
+        let mut universe = Universe::new(3);
+        assert_eq!(universe.row_col_to_index(1, 1), 4);
+    }
+
+    #[test]
     fn test_index_to_row_col_end() {
         let mut universe = Universe::new(3);
         assert_eq!(universe.index_to_row_col(8), (2, 2));
+    }
+    #[test]
+    fn test_row_col_to_index_end() {
+        let mut universe = Universe::new(3);
+        assert_eq!(universe.row_col_to_index(2, 2), 8);
+    }
+
+    #[test]
+    fn test_index_edge_transform_top_right() {
+        let mut universe = Universe::new(3);
+        let index = 2;
+        let (start, end) = universe.index_to_row_col(index);
+        assert_eq!(universe.row_col_to_index(start, end), index);
+    }
+    #[test]
+    fn test_index_edge_transform_bottom_left() {
+        let mut universe = Universe::new(3);
+        let index = 6;
+        let (start, end) = universe.index_to_row_col(index);
+        assert_eq!(universe.row_col_to_index(start, end), index);
     }
 
     #[test]
