@@ -19,7 +19,7 @@ impl Universe {
         };
     }
     pub fn cells_pointer(&self) -> *const u8 {
-        self.cells.as_ptr()
+        return self.cells.as_ptr();
     }
     pub fn seed(&mut self) {
         for cell_index in 0..self.size.pow(2) {
