@@ -40,31 +40,42 @@ impl Universe {
     pub fn tick(&mut self) {
         let mut next = self.cells.clone();
         for index in 0..(self.size - 1) {
-            print!("[ tick ] {} => ", index);
-            // for col in 0..self.width {
-            //     let idx = self.get_index(row, col);
-            //     let cell = self.cells[idx];
-            //     let live_neighbors = self.live_neighbor_count(row, col);
-            //     let next_cell = match (cell, live_neighbors) {
-            //         // Rule 1: Any live cell with fewer than two live neighbours
-            //         // dies, as if caused by underpopulation.
-            //         (Cell::Alive, x) if x < 2 => Cell::Dead,
-            //         // Rule 2: Any live cell with two or three live neighbours
-            //         // lives on to the next generation.
-            //         (Cell::Alive, 2) | (Cell::Alive, 3) => Cell::Alive,
-            //         // Rule 3: Any live cell with more than three live
-            //         // neighbours dies, as if by overpopulation.
-            //         (Cell::Alive, x) if x > 3 => Cell::Dead,
-            //         // Rule 4: Any dead cell with exactly three live neighbours
-            //         // becomes a live cell, as if by reproduction.
-            //         (Cell::Dead, 3) => Cell::Alive,
-            //         // All other cells remain in the same state.
-            //         (otherwise, _) => otherwise,
-            //     };
-            //     next[idx] = next_cell;
-            // }
+            let cell = self.cells[index as usize];
         }
         self.cells = next;
+    }
+}
+
+impl Universe {
+    fn neighbours(&self, index: u8, reach: u8) -> Vec<u8> {
+        let mut neighbours = Vec::new();
+
+        let index_row = index % self.size;
+        let index_col = index / self.size;
+
+        let (row_start, row_end) = self.reach_range(index_row, reach);
+        let (col_start, col_end) = self.reach_range(index_col, reach);
+
+        neighbours.push(5);
+        return neighbours;
+    }
+    fn reach_range(&self, index: u8, reach: u8) -> (u8, u8) {
+        let start;
+        let end;
+
+        if index < reach {
+            start = reach - index;
+        } else {
+            start = index - reach;
+        }
+
+        if index + reach > self.size {
+            end = self.size - 1;
+        } else {
+            end = index + reach;
+        }
+
+        return (start, end);
     }
 }
 
