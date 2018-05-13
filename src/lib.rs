@@ -25,19 +25,14 @@ impl Default for Cell {
 #[wasm_bindgen]
 impl Cell {
     pub fn get_type(&self) -> u8 {
-        if self.mass < 100 {
-            return 0;
-        } else if self.mass < 10000 {
-            return 1;
-        } else {
+        if self.mass >= 10000 {
             return 2;
+        } else {
+            return 0;
         }
     }
     pub fn is_gas(&self) -> bool {
         return self.check_if_type(0);
-    }
-    pub fn is_rock(&self) -> bool {
-        return self.check_if_type(1);
     }
     pub fn is_star(&self) -> bool {
         return self.check_if_type(2);
@@ -47,8 +42,6 @@ impl Cell {
 impl Cell {
     fn check_if_type(&self, type_index: u8) -> bool {
         if (type_index == 0) & (self.mass < 100) {
-            return true;
-        } else if (type_index == 1) & (self.mass >= 100) & (self.mass < 10000) {
             return true;
         } else if (type_index == 2) & (self.mass >= 10000) {
             return true;
@@ -122,8 +115,7 @@ impl Galaxy {
 impl Galaxy {
     fn reach_of_type(&self, type_index: u8) -> u16 {
         match type_index {
-            0 => self.size / 100 + 1,
-            1 => self.size / 10 + 1,
+            0 => self.size / 10 + 1,
             2 => self.size,
             _ => unreachable!(),
         }
@@ -196,14 +188,6 @@ mod tests_cell_types {
             ..Default::default()
         };
         assert_eq!(cell.is_gas(), true);
-    }
-    #[test]
-    fn test_rock_cell() {
-        let cell = Cell {
-            mass: 9999,
-            ..Default::default()
-        };
-        assert_eq!(cell.is_rock(), true);
     }
     #[test]
     fn test_star_cell() {
@@ -344,45 +328,39 @@ mod tests_neighbors_and_reach {
         assert_eq!(galaxy.neighbours(4, 1).len(), 8);
     }
     #[test]
-    fn test_neighbor_size_differs_for_different_types() {
+    fn test_neighbor_size_differs_for_large_galaxy() {
         let mut galaxy = Galaxy::new(100);
+        let index = 0 as usize;
         // gas
-        galaxy.cells[0 as usize] = Cell {
+        galaxy.cells[index] = Cell {
             mass: 1,
             ..Default::default()
         };
         let gas_neighbours = galaxy.neighbours_of_my_type(0).len();
-        // rock
-        galaxy.cells[0 as usize] = Cell {
-            mass: 9999,
-            ..Default::default()
-        };
-        let rock_neighbours = galaxy.neighbours_of_my_type(0).len();
         // star
-        galaxy.cells[0 as usize] = Cell {
+        galaxy.cells[index] = Cell {
             mass: 59999,
             ..Default::default()
         };
         let star_neighbours = galaxy.neighbours_of_my_type(0).len();
-        assert_ne!(gas_neighbours, rock_neighbours);
         assert_ne!(gas_neighbours, star_neighbours);
-        assert_ne!(rock_neighbours, star_neighbours);
     }
     #[test]
     fn test_neighbor_size_same_for_small_galaxy() {
-        let mut galaxy = Galaxy::new(3);
+        let mut galaxy = Galaxy::new(1);
+        let index = 0 as usize;
         // gas
-        galaxy.cells[0 as usize] = Cell {
+        galaxy.cells[index] = Cell {
             mass: 1,
             ..Default::default()
         };
         let gas_neighbours = galaxy.neighbours_of_my_type(0).len();
-        // rock
-        galaxy.cells[0 as usize] = Cell {
-            mass: 9999,
+        // star
+        galaxy.cells[index] = Cell {
+            mass: 59999,
             ..Default::default()
         };
-        let rock_neighbours = galaxy.neighbours_of_my_type(0).len();
-        assert_eq!(gas_neighbours, rock_neighbours);
+        let star_neighbours = galaxy.neighbours_of_my_type(0).len();
+        assert_eq!(gas_neighbours, star_neighbours);
     }
 }
