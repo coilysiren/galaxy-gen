@@ -21,6 +21,9 @@ rust-build-dev:
 		-x "build --target wasm32-unknown-unknown" \
 		-s "wasm-bindgen target/wasm32-unknown-unknown/debug/galaxy_gen.wasm --typescript --debug --out-dir src/js/assets/built-wasm --browser"
 
+rust-build-prod: ## outdated, kept for reference
+	cargo +nightly build --release --target wasm32-unknown-unknown && wasm-bindgen target/wasm32-unknown-unknown/release/galaxy_gen.wasm --out-dir src/js/assets/built-wasm
+
 rust-test:
 	cargo +nightly watch \
 		-x "check" \
@@ -29,11 +32,5 @@ rust-test:
 js-build-dev:
 	npx webpack-serve src/js/webpack.config.js --port 3000
 
-js-build-prod:
-	npx webpack-cli --config src/js/webpack.config.js
-
 js-test:
 	npx karma start src/js/tests/karma.conf.js
-
-build: ## build (outdated, kept for reference)
-	cargo +nightly build --release --target wasm32-unknown-unknown && wasm-bindgen target/wasm32-unknown-unknown/release/galaxy_gen.wasm --out-dir src/js/assets/built-wasm
