@@ -1,14 +1,14 @@
 // Karma configuration
 // Generated on Fri May 11 2018 21:05:49 GMT-0700 (PDT)
 
-webpackConfig = require("./../../webpack.config");
+webpackConfig = require("./../webpack.config");
 
 module.exports = function(config) {
   config.set({
-    basePath: "./../../",
+    basePath: "./../",
     browsers: ["Chrome"],
     frameworks: ["mocha"],
-    files: ["client/tests/*spec.js"],
+    files: ["tests/*spec.js"],
     preprocessors: {
       "./**/*.js": ["webpack"],
       "./**/*.ts": ["webpack"]
@@ -21,7 +21,7 @@ module.exports = function(config) {
     singleRun: false,
     concurrency: Infinity,
     karmaTypescriptConfig: {
-      tsconfig: "client/tests/tsconfig.json"
+      tsconfig: "tests/tsconfig.json"
     },
     webpack: webpackConfig
   });

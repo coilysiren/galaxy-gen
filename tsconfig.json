@@ -1,5 +1,5 @@
 {
-  "files": ["client/bootstrap.js"],
+  "files": ["src/js/bootstrap.js"],
   "compileOnSave": true,
   "compilerOptions": {
     "listEmittedFiles": true,
