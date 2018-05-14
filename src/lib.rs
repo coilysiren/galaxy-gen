@@ -4,6 +4,14 @@ extern crate wasm_bindgen;
 
 use wasm_bindgen::prelude::*;
 
+// constants
+impl Cell {
+    const MIN_MASS_STAR: u16 = 10000;
+    const TYPE_INDEX_GAS: u8 = 0;
+    const TYPE_INDEX_STAR: u8 = 2;
+}
+
+// types
 #[wasm_bindgen]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Cell {
@@ -12,6 +20,7 @@ pub struct Cell {
     accel_degree: u16,
 }
 
+// defaults
 impl Default for Cell {
     fn default() -> Cell {
         Cell {
@@ -22,28 +31,30 @@ impl Default for Cell {
     }
 }
 
+// public methods
 #[wasm_bindgen]
 impl Cell {
     pub fn get_type(&self) -> u8 {
-        if self.mass >= 10000 {
-            return 2;
+        if self.mass < Cell::MIN_MASS_STAR {
+            return Cell::TYPE_INDEX_GAS;
         } else {
-            return 0;
+            return Cell::TYPE_INDEX_STAR;
         }
     }
     pub fn is_gas(&self) -> bool {
-        return self.check_if_type(0);
+        return self.check_if_type(Cell::TYPE_INDEX_GAS);
     }
     pub fn is_star(&self) -> bool {
-        return self.check_if_type(2);
+        return self.check_if_type(Cell::TYPE_INDEX_STAR);
     }
 }
 
+// private methods
 impl Cell {
     fn check_if_type(&self, type_index: u8) -> bool {
-        if (type_index == 0) & (self.mass < 100) {
+        if (type_index == Cell::TYPE_INDEX_GAS) & (self.mass < Cell::MIN_MASS_STAR) {
             return true;
-        } else if (type_index == 2) & (self.mass >= 10000) {
+        } else if (type_index == Cell::TYPE_INDEX_STAR) & (self.mass >= Cell::MIN_MASS_STAR) {
             return true;
         } else {
             return false;
@@ -51,12 +62,19 @@ impl Cell {
     }
 }
 
+// types
 #[wasm_bindgen]
 pub struct Galaxy {
     size: u16,
     cells: Vec<Cell>,
 }
 
+// constants
+impl Galaxy {
+    const GAS_REACH_MODIFIER: u16 = 10;
+}
+
+// public methods
 #[wasm_bindgen]
 impl Galaxy {
     pub fn new(size: u16) -> Galaxy {
@@ -70,24 +88,6 @@ impl Galaxy {
                 (size as u32).pow(2) as usize
             ],
         };
-    }
-    pub fn new_stable_case_one() -> Galaxy {
-        let size = (3 as u16).pow(2);
-        let mut galaxy = Galaxy {
-            size,
-            cells: vec![
-                Cell {
-                    mass: 1,
-                    ..Default::default()
-                };
-                size.pow(2) as usize
-            ],
-        };
-        galaxy.cells[4 as usize] = Cell {
-            mass: 10,
-            ..Default::default()
-        };
-        return galaxy;
     }
     pub fn cells_pointer(&self) -> *const Cell {
         return self.cells.as_ptr();
@@ -112,11 +112,12 @@ impl Galaxy {
     }
 }
 
+// private methods
 impl Galaxy {
     fn reach_of_type(&self, type_index: u8) -> u16 {
         match type_index {
-            0 => self.size / 10 + 1,
-            2 => self.size,
+            Cell::TYPE_INDEX_GAS => self.size / Galaxy::GAS_REACH_MODIFIER + 1,
+            Cell::TYPE_INDEX_STAR => self.size,
             _ => unreachable!(),
         }
     }
@@ -175,6 +176,29 @@ impl Galaxy {
             end = index + reach;
         }
         return end;
+    }
+}
+
+// test cases
+#[allow(dead_code)]
+impl Galaxy {
+    fn new_stable_case_one() -> Galaxy {
+        let size = (3 as u16).pow(2);
+        let mut galaxy = Galaxy {
+            size,
+            cells: vec![
+                Cell {
+                    mass: 1,
+                    ..Default::default()
+                };
+                size.pow(2) as usize
+            ],
+        };
+        galaxy.cells[4 as usize] = Cell {
+            mass: 10,
+            ..Default::default()
+        };
+        return galaxy;
     }
 }
 
