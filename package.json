@@ -6,6 +6,12 @@
     "npm": "6.0.0"
   },
   "devDependencies": {
+    "@angular/common": "^6.0.0",
+    "@angular/compiler": "^6.0.1",
+    "@angular/core": "^6.0.0",
+    "@angular/http": "^6.0.0",
+    "@angular/platform-browser": "^6.0.0",
+    "@angular/platform-browser-dynamic": "^6.0.0",
     "@types/mocha": "^5.2.0",
     "@types/node": "^10.0.8",
     "@types/webassembly-js-api": "0.0.1",
@@ -18,10 +24,12 @@
     "karma-typescript": "^3.0.12",
     "karma-webpack": "^3.0.0",
     "mocha": "^5.1.1",
+    "rxjs": "^6.1.0",
     "ts-loader": "^4.3.0",
     "tslint": "^5.10.0",
     "typescript": "^2.8.3",
     "webpack": "^4.8.3",
-    "webpack-serve": "^1"
+    "webpack-serve": "^1",
+    "zone.js": "^0.8.26"
   }
 }

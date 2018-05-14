@@ -27,7 +27,7 @@ rust-test:
 		-x "test -- --color always --nocapture"
 
 js-build:
-	npx webpack-serve src/js/webpack.config.js
+	npx webpack-serve src/js/webpack.config.js --port 3000
 
 js-test:
 	npx karma start src/js/tests/karma.conf.js
