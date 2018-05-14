@@ -11,14 +11,12 @@ module.exports = {
     extensions: [".ts", ".js", ".wasm", ".png"]
   },
   module: {
-    rules: [
-      { test: /\.ts$/, loader: "ts-loader" },
-      { test: /\.png$/, loader: "file-loader" }
-    ]
+    rules: [{ test: /\.ts$/, loader: "ts-loader" }]
   },
   plugins: [
     new HtmlWebpackPlugin({
-      template: path.resolve(__dirname, "index.html")
+      template: path.resolve(__dirname, "index.html"),
+      favicon: path.resolve(__dirname, "assets/favicon.png")
     })
   ],
   optimization: {
