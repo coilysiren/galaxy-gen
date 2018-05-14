@@ -10,6 +10,9 @@ impl Cell {
     const TYPE_INDEX_GAS: u8 = 0;
     const TYPE_INDEX_STAR: u8 = 2;
 }
+impl Galaxy {
+    const GAS_REACH_MODIFIER: u16 = 10;
+}
 
 // types
 #[wasm_bindgen]
@@ -67,11 +70,6 @@ impl Cell {
 pub struct Galaxy {
     size: u16,
     cells: Vec<Cell>,
-}
-
-// constants
-impl Galaxy {
-    const GAS_REACH_MODIFIER: u16 = 10;
 }
 
 // public methods
