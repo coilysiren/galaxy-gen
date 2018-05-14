@@ -28,11 +28,11 @@ all-build-prod:
 
 rust-build-dev:
 	cargo +nightly watch \
-		-x "build --target wasm32-unknown-unknown" \
+		-x "build" \
 		-s "make wasm-build-dev"
 
 rust-build-prod:
-	cargo +nightly build --release --target wasm32-unknown-unknown
+	cargo +nightly build --release
 	make wasm-build-prod
 
 rust-test:

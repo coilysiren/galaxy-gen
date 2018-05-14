@@ -1,3 +1,5 @@
+# https://doc.rust-lang.org/cargo/reference/manifest.html
+
 [package]
 name = "galaxy_gen"
 version = "0.1.0"
