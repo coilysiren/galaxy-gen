@@ -5,7 +5,7 @@
 ## commands
 
 * `$ make install`
-* `$ make watch`
+* `$ make start`
 * see [makefile](makefile) for others
 
 ## references
