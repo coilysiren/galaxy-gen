@@ -2,8 +2,8 @@
 
 extern crate wasm_bindgen;
 
-mod cell;
-mod galaxy;
+pub mod cell;
+pub mod galaxy;
 
 use cell::*;
 use galaxy::*;
