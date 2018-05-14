@@ -1,6 +1,4 @@
-/* eslint-disable */
-
-import { MainScript } from "./../main.ts";
+import { MainScript } from "./../main";
 import * as assert from "assert";
 
 describe("galaxGen wasm", () => {
