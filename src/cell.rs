@@ -1,7 +1,3 @@
-#![feature(proc_macro, wasm_custom_section, wasm_import_module)]
-
-extern crate wasm_bindgen;
-
 use wasm_bindgen::prelude::*;
 
 // internal constants
@@ -58,5 +54,26 @@ impl Cell {
     } else {
       return false;
     }
+  }
+}
+
+#[cfg(test)]
+mod tests_cell_types {
+  use super::*;
+  #[test]
+  fn test_gas_cell() {
+    let cell = Cell {
+      mass: 1,
+      ..Default::default()
+    };
+    assert_eq!(cell.is_gas(), true);
+  }
+  #[test]
+  fn test_star_cell() {
+    let cell = Cell {
+      mass: Cell::MIN_MASS_STAR * 2,
+      ..Default::default()
+    };
+    assert_eq!(cell.is_star(), true);
   }
 }
