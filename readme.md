@@ -1,6 +1,8 @@
 # galaxyGen
 
-`{ rust => wasm }` implementation of [python galaxySim](https://github.com/lynncyrin/galaxySim)
+`{ rust => wasm => js }` galaxy generation simulation
+
+[previous verison](https://github.com/lynncyrin/galaxySim), written in python
 
 ## commands
 
