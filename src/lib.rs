@@ -8,6 +8,8 @@ mod galaxy;
 use cell::*;
 use galaxy::*;
 
+// public constants
+
 impl Cell {
     pub const MIN_MASS_STAR: u16 = 10000;
 }
