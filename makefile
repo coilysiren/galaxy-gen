@@ -44,6 +44,7 @@ wasm-build-dev:
 	wasm-bindgen target/wasm32-unknown-unknown/debug/galaxy_gen.wasm --typescript --debug --out-dir src/js/assets/built-wasm --browser
 
 wasm-build-prod:
+	cargo install wasm-bindgen-cli # needed???
 	wasm-bindgen target/wasm32-unknown-unknown/debug/galaxy_gen.wasm --out-dir src/js/assets/built-wasm --browser
 
 js-build-dev:
