@@ -11,8 +11,8 @@ interface IWasmBinary {
 export class MainScript {
   private wasmJSApi: typeof IWasmJSApi;
   private wasmBinary: IWasmBinary;
-  private universe: IWasmJSApi.Universe;
-  private universeSize: number;
+  private galaxy: IWasmJSApi.Galaxy;
+  private galaxySize: number;
 
   constructor(wasmJSApi: typeof IWasmJSApi, wasmBinary: IWasmBinary) {
     this.wasmJSApi = wasmJSApi;
@@ -22,18 +22,18 @@ export class MainScript {
   public cells(): Uint8Array {
     return new Uint8Array(
       this.wasmBinary.memory.buffer,
-      this.universe.cells_pointer(),
+      this.galaxy.cells_pointer(),
       this.memoryRange
     );
   }
 
   public generateData(size: number): void {
-    this.universeSize = size;
-    this.universe = this.wasmJSApi.Universe.new(size);
-    this.universe.seed();
+    this.galaxySize = size;
+    this.galaxy = this.wasmJSApi.Galaxy.new(size);
+    this.galaxy.seed();
   }
 
   private get memoryRange(): number {
-    return this.universeSize ** 2;
+    return this.galaxySize ** 2;
   }
 }
