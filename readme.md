@@ -4,8 +4,7 @@
 
 ## commands
 
-* `$ make install`
-* `$ make start`
+* `$ make dev`
 * see [makefile](makefile) for others
 
 ## references

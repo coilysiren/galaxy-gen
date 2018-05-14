@@ -7,16 +7,17 @@ install:
 	cargo update
 	npm install
 
-start: ## start (primary entrypoint)
+dev: ## dev (primary entrypoint)
+	make install
 	npx concurrently \
-		-k -n rust,rust-test,js,js-test \
+		-k -n rust,rust::test,js,js::test \
 		-c red,red,green,green \
-		"make rust-build" \
+		"make rust-build-dev" \
 		"make rust-test" \
-		"make js-build" \
+		"make js-build-dev" \
 		"make js-test"
 
-rust-build:
+rust-build-dev:
 	cargo +nightly watch \
 		-x "build --target wasm32-unknown-unknown" \
 		-s "wasm-bindgen target/wasm32-unknown-unknown/debug/galaxy_gen.wasm --typescript --debug --out-dir src/js/assets/built-wasm --browser"
@@ -26,8 +27,11 @@ rust-test:
 		-x "check" \
 		-x "test -- --color always --nocapture"
 
-js-build:
+js-build-dev:
 	npx webpack-serve src/js/webpack.config.js --port 3000
+
+js-build-prod:
+	npx webpack-cli --config src/js/webpack.config.js
 
 js-test:
 	npx karma start src/js/tests/karma.conf.js
