@@ -13,10 +13,6 @@ module.exports = {
   module: {
     rules: [{ test: /\.ts$/, loader: "ts-loader" }]
   },
-  node: {
-    fs: "empty",
-    module: "empty"
-  },
   plugins: [new HtmlWebpackPlugin()],
   mode: "development"
 };
