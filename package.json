@@ -6,7 +6,7 @@
     "npm": "6.0.0"
   },
   "scripts": {
-    "build": "webpack-cli --config src/js/webpack.config.js --mode production",
+    "heroku-postbuild": "make all-build-prod",
     "start": "node src/js/express.js"
   },
   "devDependencies": {

@@ -22,21 +22,35 @@ dev: ## dev (primary entrypoint)
 		"make js-build-dev" \
 		"make js-test"
 
+all-build-prod:
+	make rust-build-prod
+	make js-build-prod
+
 rust-build-dev:
 	cargo +nightly watch \
 		-x "build --target wasm32-unknown-unknown" \
-		-s "wasm-bindgen target/wasm32-unknown-unknown/debug/galaxy_gen.wasm --typescript --debug --out-dir src/js/assets/built-wasm --browser"
+		-s "make wasm-build-dev"
 
-rust-build-prod: ## outdated, kept for reference
-	cargo +nightly build --release --target wasm32-unknown-unknown && wasm-bindgen target/wasm32-unknown-unknown/release/galaxy_gen.wasm --out-dir src/js/assets/built-wasm
+rust-build-prod:
+	cargo +nightly build --release --target wasm32-unknown-unknown
+	make wasm-build-prod
 
 rust-test:
 	cargo +nightly watch \
 		-x "check" \
 		-x "test -- --color always --nocapture"
 
+wasm-build-dev:
+	wasm-bindgen target/wasm32-unknown-unknown/debug/galaxy_gen.wasm --typescript --debug --out-dir src/js/assets/built-wasm --browser
+
+wasm-build-prod:
+	wasm-bindgen target/wasm32-unknown-unknown/debug/galaxy_gen.wasm --out-dir src/js/assets/built-wasm --browser
+
 js-build-dev:
 	npx webpack-serve src/js/webpack.config.js --port 3000
+
+js-build-prod:
+	npx webpack-cli --config src/js/webpack.config.js --mode production
 
 js-test:
 	npx karma start src/js/tests/karma.conf.js
