@@ -6,6 +6,7 @@ help:
 update:
 	brew upgrade
 	brew update
+	rustup self update
 	rustup update
 
 install:
