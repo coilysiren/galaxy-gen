@@ -27,16 +27,16 @@ all-build-prod:
 	make js-build-prod
 
 rust-build-dev:
-	cargo +nightly watch \
+	cargo watch \
 		-x "build" \
 		-s "make wasm-build-dev"
 
 rust-build-prod:
-	cargo +nightly build --release
+	cargo build --release
 	make wasm-build-prod
 
 rust-test:
-	cargo +nightly watch \
+	cargo watch \
 		-x "check" \
 		-x "test -- --color always --nocapture"
 
