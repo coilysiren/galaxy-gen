@@ -5,22 +5,22 @@ help:
 
 watch: ## watch (primary entrypoint)
 	npx concurrently \
-		-k -n rust,js-client,js-tests \
-		-c red,green,yellow \
+		-k -n rust,rust-tests,js,js-tests \
+		-c red,red,green,green \
 		"make watch-rust" \
+		"make watch-rust-tests" \
 		"make watch-js" \
 		"make watch-js-tests"
 
-watch-rust-tests:
-	cargo +nightly watch \
-		-x "test -- --color always --nocapture"
-
 watch-rust:
 	cargo +nightly watch \
-		-x "check" \
-		-x "test -- --color always" \
 		-x "build --target wasm32-unknown-unknown" \
 		-s "wasm-bindgen target/wasm32-unknown-unknown/debug/galaxy_gen.wasm --typescript --debug --out-dir src/js/assets/built-wasm --browser"
+
+watch-rust-tests:
+	cargo +nightly watch \
+		-x "check" \
+		-x "test -- --color always --nocapture"
 
 watch-js:
 	npx webpack-serve src/js/webpack.config.js
