@@ -1,4 +1,4 @@
-import { MainScript } from "./../main";
+import { setupMainScript } from "./../setup";
 import * as assert from "assert";
 
 describe("galaxGen wasm", () => {
@@ -24,11 +24,3 @@ describe("galaxGen wasm", () => {
     });
   });
 });
-
-async function setupMainScript() {
-  return new MainScript(
-    await import("./../assets/built-wasm/galaxy_gen"),
-    // @ts-ignore: ignore `module not found` for the wasm file
-    await import("./../assets/built-wasm/galaxy_gen_bg.wasm")
-  );
-}
