@@ -8,7 +8,6 @@ install:
 	npm install
 
 dev: ## dev (primary entrypoint)
-	make install
 	npx concurrently \
 		-k -n rust,rust::test,js,js::test \
 		-c red,red,green,green \

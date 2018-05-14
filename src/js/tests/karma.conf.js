@@ -4,6 +4,7 @@
 webpackConfig = require("./../webpack.config");
 
 module.exports = function(config) {
+  delete webpackConfig.optimization;
   config.set({
     basePath: "./../",
     browsers: ["Chrome"],

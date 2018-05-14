@@ -5,20 +5,26 @@ const CopyWebpackPlugin = require("copy-webpack-plugin");
 module.exports = {
   entry: path.resolve(__dirname, "bootstrap.js"),
   output: {
-    path: path.resolve(__dirname, "dist"),
-    filename: "main.js"
+    path: path.resolve(__dirname, "dist")
   },
   resolve: {
-    extensions: [".ts", ".js", ".wasm"]
+    extensions: [".ts", ".js", ".wasm", ".png"]
   },
   module: {
-    rules: [{ test: /\.ts$/, loader: "ts-loader" }]
+    rules: [
+      { test: /\.ts$/, loader: "ts-loader" },
+      { test: /\.png$/, loader: "file-loader" }
+    ]
   },
   plugins: [
     new HtmlWebpackPlugin({
       template: path.resolve(__dirname, "index.html")
-    }),
-    new CopyWebpackPlugin([path.resolve(__dirname, "assets/*")])
+    })
   ],
+  optimization: {
+    splitChunks: {
+      chunks: "all"
+    }
+  },
   mode: "development"
 };
