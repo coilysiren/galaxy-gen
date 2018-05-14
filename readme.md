@@ -4,6 +4,7 @@
 
 ## commands
 
+* `$ make install`
 * `$ make watch`
 * see [makefile](makefile) for others
 
