@@ -29,7 +29,7 @@ all-build-prod:
 rust-build-dev:
 	cargo watch \
 		-x "build" \
-		-s "make wasm-build-dev"
+		-s "./bin/post_compile"
 
 rust-build-prod:
 	cargo build --release
@@ -39,13 +39,6 @@ rust-test:
 	cargo watch \
 		-x "check" \
 		-x "test -- --color always --nocapture"
-
-wasm-build-dev:
-	wasm-bindgen target/wasm32-unknown-unknown/debug/galaxy_gen.wasm --typescript --debug --out-dir src/js/assets/built-wasm --browser
-
-wasm-build-prod:
-	cargo install wasm-bindgen-cli # needed???
-	wasm-bindgen target/wasm32-unknown-unknown/debug/galaxy_gen.wasm --out-dir src/js/assets/built-wasm --browser
 
 js-build-dev:
 	npx webpack-serve src/js/webpack.config.js --port 3000
