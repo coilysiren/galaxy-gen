@@ -2,3 +2,5 @@ language: rust
 rust:
   - nightly
 cache: cargo
+before_install: ./bin/pre_compile
+before_script: ./bin/post_compile
