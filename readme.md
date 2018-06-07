@@ -1,5 +1,7 @@
 # galaxyGen
 
+[![Greenkeeper badge](https://badges.greenkeeper.io/lynncyrin/galaxy-gen.svg)](https://greenkeeper.io/)
+
 `{ rust => wasm => js }` galaxy generation simulation
 
 [previous verison](https://github.com/lynncyrin/galaxySim), written in python
