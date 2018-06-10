@@ -15,7 +15,6 @@ install:
 script:
   - cargo check
   - cargo test
-  - make js-test
 
 deploy:
   skip-cleanup: true
