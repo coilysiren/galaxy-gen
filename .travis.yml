@@ -14,7 +14,7 @@ install:
 
 script:
   - cargo check
-  - cargo test
+  - cargo test -- --color always
 
 deploy:
   skip-cleanup: true
