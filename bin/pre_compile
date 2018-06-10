@@ -1,6 +1,0 @@
-#!/usr/bin/env bash
-
-# add the specific toolchain I need
-rustup target add wasm32-unknown-unknown --toolchain nightly
-# Show the active and installed toolchains
-rustup show

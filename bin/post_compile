@@ -1,4 +1,0 @@
-#!/usr/bin/env bash
-
-cargo install wasm-pack
-wasm-pack init

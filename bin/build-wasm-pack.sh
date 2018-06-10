@@ -10,12 +10,11 @@ git pull origin
 
 # setup deploy branch
 git checkout deploy
-git merge -X theirs main --allow-unrelated-histories
+git merge -X theirs main --allow-unrelated-histories --no-commit --no-ff
+git commit --no-edit
 
 # do main work
-rm -rf pkg
-cargo install wasm-pack
-wasm-pack init
+make rust-build
 
 # commit and push changes
 git add .
