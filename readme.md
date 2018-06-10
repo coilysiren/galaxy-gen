@@ -12,7 +12,7 @@
 
 ## build process
 
-currently wip, see [deploy :: /pkg](https://github.com/lynncyrin/galaxy-gen/tree/deploy/pkg) for the current `wasm-pack` output
+currently wip, see [{branch: deploy, path: pkg/}](https://github.com/lynncyrin/galaxy-gen/tree/deploy/pkg) for the current `wasm-pack` output
 
 ## references
 
