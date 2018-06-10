@@ -1,0 +1,16 @@
+{
+  "name": "galaxy_gen",
+  "collaborators": [
+    "Lynn Cyrin <firemagelynn@gmail.com>"
+  ],
+  "description": null,
+  "version": "0.1.0",
+  "license": null,
+  "repository": null,
+  "files": [
+    "galaxy_gen_bg.wasm",
+    "galaxy_gen.d.ts"
+  ],
+  "main": "galaxy_gen.js",
+  "types": "galaxy_gen.d.ts"
+}
