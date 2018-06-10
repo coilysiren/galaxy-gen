@@ -37,6 +37,7 @@ rust-build:
 	rm -rf pkg
 	cargo install wasm-pack
 	wasm-pack init
+	npm install ./pkg
 
 rust-test:
 	cargo watch \
