@@ -1,0 +1,19 @@
+{
+  "name": "galaxy_gen_backend",
+  "collaborators": [
+    "Lynn Cyrin <lynncyrin@gmail.com>"
+  ],
+  "description": "{ rust => wasm => js } galaxy generation simulation",
+  "version": "0.1.0",
+  "license": "AGPL",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/lynncyrin/galaxy-gen"
+  },
+  "files": [
+    "galaxy_gen_backend_bg.wasm",
+    "galaxy_gen_backend.d.ts"
+  ],
+  "main": "galaxy_gen_backend.js",
+  "types": "galaxy_gen_backend.d.ts"
+}
