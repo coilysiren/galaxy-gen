@@ -8,9 +8,11 @@ update:
 	brew update
 	rustup self update
 	rustup update
+	rm Cargo.lock
+	cargo update
 
 install:
-	cargo update
+	cargo build
 	npm install
 
 dev: ## dev (primary entrypoint)
@@ -31,9 +33,10 @@ rust-build-dev:
 		-x "build" \
 		-s "./bin/post_compile"
 
-rust-build-prod:
-	cargo build --release
-	make wasm-build-prod
+rust-build:
+	rm -rf pkg
+	cargo install wasm-pack
+	wasm-pack init
 
 rust-test:
 	cargo watch \

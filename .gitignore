@@ -1,6 +1,10 @@
 /target
 **/*.rs.bk
 node_modules
-*.wasm
 built-wasm/
 dist/
+
+# removed in deploy branch
+pkg/
+*.wasm
+*.log
