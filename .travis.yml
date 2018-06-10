@@ -1,3 +1,5 @@
+if: branch != deploy
+
 language: rust
 rust: nightly
 
@@ -7,22 +9,19 @@ cache:
 before_install:
   - rustup target add wasm32-unknown-unknown --toolchain nightly
 
-matrix:
-
+jobs:
   include:
-  - script:
-    - cargo check
-    - cargo test -- --color always
+    - stage: test
+      script:
+        - cargo check
+        - cargo test -- --color always
+    - stage: test
+      node_js: "node"
+      before_script:
+        - make rust-build
+    - stage: deploy
+      if: branch = main
+      script: bash bin/build-wasm-pack.sh
 
-  - node_js: "node"
-    before_script:
-      - make rust-build
-
-deploy:
-  skip-cleanup: true
-  provider: script
-  script: bash bin/build-wasm-pack.sh
-  on:
-    branch: main
 notifications:
   email: false
