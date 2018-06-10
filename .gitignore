@@ -2,5 +2,6 @@
 **/*.rs.bk
 node_modules
 *.wasm
+*.log
 built-wasm/
 dist/
