@@ -3,10 +3,13 @@
   "collaborators": [
     "Lynn Cyrin <firemagelynn@gmail.com>"
   ],
-  "description": null,
+  "description": "{ rust => wasm => js } galaxy generation simulation",
   "version": "0.1.0",
-  "license": null,
-  "repository": null,
+  "license": "AGPL",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/lynncyrin/galaxy-gen"
+  },
   "files": [
     "galaxy_gen_bg.wasm",
     "galaxy_gen.d.ts"
