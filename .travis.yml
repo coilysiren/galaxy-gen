@@ -19,6 +19,8 @@ matrix:
       skip-cleanup: true
       provider: script
       script: bash bin/build-wasm-pack.sh
+      on:
+        branch: main
 
   - if: branch =~ ^deploy
     language: node_js
