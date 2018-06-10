@@ -3,8 +3,3 @@
 node_modules
 built-wasm/
 dist/
-
-# removed in deploy branch
-pkg/
-*.wasm
-*.log
