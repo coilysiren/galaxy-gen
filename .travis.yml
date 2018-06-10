@@ -1,30 +1,28 @@
-notifications:
-  email: false
+language: rust
+rust: nightly
+
+cache:
+  - cargo
+  - node_modules
+before_install:
+  - rustup target add wasm32-unknown-unknown --toolchain nightly
 
 matrix:
+
   include:
+  - script:
+    - cargo check
+    - cargo test -- --color always
 
-  - if: branch =~ ^main
-    language: rust
-    rust: nightly
-    cache: cargo
-    before_install:
-      - rustup target add wasm32-unknown-unknown --toolchain nightly
-    install:
-      - cargo build
-    script:
-      - cargo check
-      - cargo test -- --color always
-    deploy:
-      skip-cleanup: true
-      provider: script
-      script: bash bin/build-wasm-pack.sh
-      on:
-        branch: main
+  - node_js: "node"
+    before_script:
+      - make rust-build
 
-  - if: branch =~ ^deploy
-    language: node_js
-    node_js: "node"
-    cache: node_modules
-    install:
-      - npm ci
+deploy:
+  skip-cleanup: true
+  provider: script
+  script: bash bin/build-wasm-pack.sh
+  on:
+    branch: main
+notifications:
+  email: false
