@@ -8,11 +8,10 @@ cache:
   - node_modules
 
 before_install:
+  - rustup target add wasm32-unknown-unknown --toolchain nightly
   - ./bin/pre_compile
 install:
-  - make install
-before_script:
-  - ./bin/post_compile
+  - cargo build
 
 script:
   - cargo check
