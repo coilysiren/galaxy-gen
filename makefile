@@ -35,7 +35,7 @@ rust-build-dev:
 
 rust-build:
 	rm -rf pkg
-	cargo install wasm-pack
+	cargo install wasm-pack --force
 	wasm-pack init
 	npm install ./pkg
 
