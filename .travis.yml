@@ -19,5 +19,12 @@ script:
   - cargo test
   - make js-test
 
+deploy:
+  skip-cleanup: true
+  provider: script
+  script: bin/build-wasm-pack.sh
+  on:
+    branch: main
+
 notifications:
   email: false
