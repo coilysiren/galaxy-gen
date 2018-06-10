@@ -3,6 +3,6 @@ rust:
   - nightly
 cache: cargo
 before_install: ./bin/pre_compile
-before_script: ./bin/post_compile
 install: cargo build
+before_script: ./bin/post_compile
 script: cargo test
