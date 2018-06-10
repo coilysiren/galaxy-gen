@@ -1,8 +1,23 @@
 language: rust
 rust:
   - nightly
-cache: cargo
-before_install: ./bin/pre_compile
-install: cargo build
-before_script: ./bin/post_compile
-script: cargo test
+node_js:
+  - "node"
+cache:
+  - cargo
+  - node_modules
+
+before_install:
+  - ./bin/pre_compile
+install:
+  - make install
+before_script:
+  - ./bin/post_compile
+
+script:
+  - cargo check
+  - cargo test
+  - make js-test
+
+notifications:
+  email: false

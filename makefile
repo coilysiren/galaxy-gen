@@ -8,9 +8,11 @@ update:
 	brew update
 	rustup self update
 	rustup update
+	rm Cargo.lock
+	cargo update
 
 install:
-	cargo update
+	cargo build
 	npm install
 
 dev: ## dev (primary entrypoint)

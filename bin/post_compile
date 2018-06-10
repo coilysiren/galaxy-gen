@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
 
 cargo install wasm-pack
+cargo install wasm-bindgen-cli
 wasm-bindgen target/wasm32-unknown-unknown/debug/galaxy_gen.wasm --typescript --debug --out-dir src/js/assets/built-wasm --browser
