@@ -9,7 +9,6 @@ cache:
 
 before_install:
   - rustup target add wasm32-unknown-unknown --toolchain nightly
-  - ./bin/pre_compile
 install:
   - cargo build
 
