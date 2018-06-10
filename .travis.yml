@@ -4,3 +4,5 @@ rust:
 cache: cargo
 before_install: ./bin/pre_compile
 before_script: ./bin/post_compile
+install: cargo build
+script: cargo test
