@@ -8,16 +8,20 @@ cache:
   - node_modules
 
 before_install:
-  - ./bin/pre_compile
+  - rustup target add wasm32-unknown-unknown --toolchain nightly
 install:
-  - make install
-before_script:
-  - ./bin/post_compile
+  - cargo build
 
 script:
   - cargo check
-  - cargo test
-  - make js-test
+  - cargo test -- --color always
+
+deploy:
+  skip-cleanup: true
+  provider: script
+  script: bash bin/build-wasm-pack.sh
+  on:
+    branch: main
 
 notifications:
   email: false
