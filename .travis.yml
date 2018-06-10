@@ -1,3 +1,5 @@
+if: branch != deploy
+
 language: rust
 rust: nightly
 
