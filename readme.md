@@ -16,7 +16,7 @@
 
 - `./src/rust/` is the rust backend, with [wasm-bindgen](https://github.com/rustwasm/wasm-bindgen) decorators. the first build stage runs rust tests via `cargo test`
 - `./pkg/` is created via [wasm-pack](https://github.com/ashleygwilliams/wasm-pack), which compiles the rust code to `wasm` + `js` + `typescript`
-- `./src/js/` takes the installed `./pkg/` and runs js tests via `npm test`
+- `./src/js/` imports `./pkg/` and runs js tests via `npm test`
 - `./dist/` is created via [webpack](https://webpack.js.org/), which compiles everything mentioned above + [angular](http://angular.io/)
 - https://galaxygen.herokuapp.com/ is updated via [heroku](https://www.heroku.com/) with the compiled code
 
