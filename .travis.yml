@@ -13,7 +13,6 @@ cache:
 jobs:
   include:
     - stage: Compile
-      if: branch = main
       script:
         - ls pkg || make build-wasm # build wasm if not cached
         - ls dist || make build-js-prod # build js if not cached
