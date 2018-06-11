@@ -1,5 +1,6 @@
 # galaxyGen
 
+[![Greenkeeper badge](https://badges.greenkeeper.io/lynncyrin/galaxy-gen.svg)](https://greenkeeper.io/)
 [![Build Status](https://travis-ci.com/lynncyrin/galaxy-gen.svg?branch=main)](https://travis-ci.com/lynncyrin/galaxy-gen)
 
 `{ rust => wasm => js }` galaxy generation simulation
