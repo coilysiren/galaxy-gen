@@ -21,6 +21,7 @@ jobs:
       script:
         - make deploy-wasm
     - stage: Test js
+      sudo: required
       addons:
         apt:
           sources:
