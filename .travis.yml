@@ -11,17 +11,17 @@ before_install:
 
 jobs:
   include:
-    - stage: test
+    - stage: test-rust
       script:
         - cargo check
         - cargo test -- --color always
-    - stage: test
+    - stage: deploy-rust
+      if: branch = main
+      script: bash bin/deploy-wasm-pack.sh
+    - stage: test-js
       node_js: "node"
       before_script:
         - make rust-build
-    - stage: deploy
-      if: branch = main
-      script: bash bin/build-wasm-pack.sh
 
 notifications:
   email: false
