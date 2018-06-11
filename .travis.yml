@@ -43,16 +43,6 @@ jobs:
       if: branch = main
       script:
         - make deploy-compiled-files
-    # the `deploy` branch deploys to heroku
-    - stage: Deploy
-      if: branch = deploy
-      script: true
-      deploy:
-        provider: heroku
-        on: deploy
-        app: galaxygen
-        api_key:
-          secure: 1VGtwHLikMn9lOi/Yvrfh8+BRJ8SmuLchPyn8NrhALqO0kWvAfgSyKPWtIDf8rkrj72zshDKFDlsAUqohMeM5TeJeqNRYMtnSqk2kHfFXNoRwINWrAEugAerKTM+IJoXo4roeNU8LKZzfZf/RNtDSdmlk4rRxM0+pFzmYOvP7dtkFST/za2TPeqJMLEk0Az3ng1nnMDerDhE+vNYzHQwBYIbrbFkWfcSHZ/Wfe/ad3dCj6QgpZ783GfJ8XEhmSpwNdbqYr3G33I16Z9QwdFxVlE6YPKW8owAwgJeCz9PTH/XOKPN/N1KwR4s72B86zHLvvf3Pk538IjPqfVmCYqjhRYMRC5G24Ab9tNeDYooeV78DK8zYufjA6QA7T/fG8TCRqMFLXXPcO8Bzm1nGNmoRhsTgkb+o9G0CvpU8SmwvsJaRPGq+cLj7DD7m2mk16EFpNh+iPzPE3eUm3b8WBu9sO9DxgCeK10KehqZiVytMTelWdYFB8nkgbk7YN5uFVCaY04O5YTj2i/Zr77ZNWI3984TW71gXH3O8nG6Lqj6YZQj9idOZhrzhXc+w5H/JmvgVjiS+oFfrEy90VVkGRAEAePoNT1SCrA7dlQSTfYGpDNeopbgMW0IVE5z0NW6zve/u+aMDq+tGdEjTeQSfguehCOv01qfA6zKdnRjjp3ztew=
 
 notifications:
   email: false
