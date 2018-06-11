@@ -1,12 +1,5 @@
 if: branch != deploy
 
-addons:
-  apt:
-    sources:
-    - google-chrome
-    packages:
-    - google-chrome-stable
-
 language: rust
 rust: nightly
 node_js:
@@ -28,6 +21,12 @@ jobs:
       script:
         - make deploy-wasm
     - stage: Test js
+      addons:
+        apt:
+          sources:
+          - google-chrome
+          packages:
+          - google-chrome-stable
       before_script:
         - npx webdriver-manager update
         - export DISPLAY=:99.0
