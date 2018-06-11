@@ -19,32 +19,39 @@ dev: ## dev (primary entrypoint)
 	npx concurrently \
 		-k -n rust,rust::test,js,js::test \
 		-c red,red,green,green \
-		"make rust-build-dev" \
-		"make rust-test" \
-		"make js-build-dev" \
-		"make js-test"
+		"make build-rust-dev" \
+		"make test-rust-dev" \
+		"make build-js-dev" \
+		"make test-js-dev"
 
 test-rust:
 	cargo check
 	cargo test -- --color always
 
-test-rust-watch:
+test-rust-dev:
 	cargo watch -s "make test-rust"
 
 test-js:
+	npx karma start src/js/tests/karma.conf.js --singleRun=true
+
+test-js-dev:
 	npx karma start src/js/tests/karma.conf.js
 
 build-all-prod:
-	make rust-build-prod
-	make js-build-prod
+	make build-rust
+	make build-js-prod
+
+build-rust:
+	cargo build
+	make build-wasm
 
 build-rust-dev:
-	cargo watch -x "build"
+	cargo watch	-s "make build-rust"
 
 build-wasm:
 	- cargo install wasm-pack
 	wasm-pack init
-	# npm install ./pkg
+	npm install ./pkg
 
 build-js-dev:
 	npx webpack-serve src/js/webpack.config.js --port 3000
