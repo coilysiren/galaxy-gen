@@ -26,4 +26,4 @@ make build-js-prod
 git add .
 git commit -m "[[ BOT ]] build :: ${TRAVIS_BUILD_NUMBER}"
 git pull origin deploy
-git push origin deploy:deploy
+git push origin HEAD
