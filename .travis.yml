@@ -16,10 +16,12 @@ jobs:
       script:
         - ls pkg || make build-wasm # build wasm if not cached
         - ls dist || make build-js-prod # build js if not cached
+    # rust tests
     - stage: Test
       if: branch != deploy
       script:
         - make test-rust
+    # js tests
     - stage: Test
       if: branch != deploy
       sudo: required
@@ -36,10 +38,12 @@ jobs:
       script:
         - ls pkg || make build-wasm # build wasm if not cached
         - make test-js
+    # the `main` branch deploys to branch `deploy`
     - stage: Deploy
       if: branch = main
       script:
         - make deploy-compiled-files
+    # the `deploy` branch deploys to heroku
     - stage: Deploy
       if: branch = deploy
       deploy:
