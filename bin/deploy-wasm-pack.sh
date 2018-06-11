@@ -7,12 +7,10 @@ git config --global user.name "[[ BOT ]] Lynn Cyrin"
 git config --global pull.rebase true
 git remote remove origin
 git remote add origin https://${GITHUB_API_TOKEN}@github.com/${TRAVIS_REPO_SLUG}.git
-git pull origin
 
 # setup deploy branch
+git pull origin
 git checkout deploy
-git merge -X theirs main --allow-unrelated-histories --no-commit --no-ff
-git commit --no-edit -m '[[ BOT ]] merge main => deploy'
 git pull origin deploy
 
 # do main work
