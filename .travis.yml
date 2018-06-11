@@ -34,6 +34,9 @@ jobs:
         - sh -e /etc/init.d/xvfb start
       script:
         - make test-js
+    - stage: Log js
+      script:
+        - make deploy-webpack
 
 notifications:
   email: false

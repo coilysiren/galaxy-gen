@@ -61,3 +61,6 @@ build-js-prod:
 
 deploy-wasm:
 	bash bin/deploy-wasm-pack.sh
+
+deploy-webpack:
+	bash bin/deploy-webpack.sh
