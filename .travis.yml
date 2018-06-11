@@ -15,8 +15,8 @@ jobs:
     - stage: Compile
       if: branch != deploy
       script:
-        - ls pkg || make build-wasm # build wasm if not cached
-        - ls dist || make build-js-prod # build js if not cached
+        - ls pkg/package.json || make build-wasm # build wasm if not cached
+        - ls dist/index.html || make build-js-prod # build js if not cached
     # rust tests
     - stage: Test
       if: branch != deploy
@@ -29,7 +29,7 @@ jobs:
       addons:
         chrome: stable
       install:
-        - ls pkg || make build-wasm # build wasm if not cached
+        - ls pkg/package.json || make build-wasm # build wasm if not cached
         - nvm install 10
         - nvm use 10
         - node --version
