@@ -17,7 +17,7 @@ git remote add origin https://${GITHUB_API_TOKEN}@github.com/${TRAVIS_REPO_SLUG}
 git pull origin
 git checkout deploy
 git pull origin deploy
-git pull origin main
+git merge -X theirs main
 
 # do main work ( part 1 )
 make build-wasm
