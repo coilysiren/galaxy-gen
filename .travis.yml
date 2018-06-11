@@ -27,11 +27,7 @@ jobs:
       if: branch != deploy
       sudo: required # <- for the chrome install
       addons:
-        apt:
-          sources:
-          - google-chrome
-          packages:
-          - google-chrome-stable
+        chrome: stable
       before_script:
         - nvm install 10
         - nvm use 10
