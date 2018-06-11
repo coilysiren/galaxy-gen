@@ -5,8 +5,6 @@ rust: nightly
 node_js:
   - "10.4"
 
-env:
-  - CACHE_NAME=GALAXYGENCACHE
 cache:
   cargo: true
   directories:
