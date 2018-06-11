@@ -5,6 +5,8 @@ git init
 git config --global user.email "lynncyrin@gmail.com"
 git config --global user.name "Lynn Cyrin"
 git config --global pull.rebase true
+
+# remove travis's readonly origin, add our origin with write permissions
 git remote remove origin
 git remote add origin https://${GITHUB_API_TOKEN}@github.com/${TRAVIS_REPO_SLUG}.git
 
