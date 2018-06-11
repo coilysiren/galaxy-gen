@@ -2,7 +2,8 @@ if: branch != deploy
 
 language: rust
 rust: nightly
-node_js: "node"
+node_js:
+  - "node"
 
 cache:
   cargo: true
