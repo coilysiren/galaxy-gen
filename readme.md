@@ -1,5 +1,7 @@
 # galaxyGen
 
+[![Build Status](https://travis-ci.com/lynncyrin/galaxy-gen.svg?branch=main)](https://travis-ci.com/lynncyrin/galaxy-gen)
+
 `{ rust => wasm => js }` galaxy generation simulation
 
 [previous verison](https://github.com/lynncyrin/galaxySim), written in python
