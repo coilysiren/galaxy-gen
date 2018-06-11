@@ -33,9 +33,6 @@ rust-build-dev:
 		-x "build" \
 		-s "./bin/post_compile"
 
-rust-target:
-	rustup target add wasm32-unknown-unknown --toolchain nightly
-
 rust-build:
 	rm -rf pkg
 	cargo install wasm-pack --force

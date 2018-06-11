@@ -1,26 +1,24 @@
 if: branch != deploy
 cache:
+  - pkg
   - cargo
   - node_modules
 
 jobs:
   include:
-    - stage: TestRust
+    - stage: Test_rust
       language: rust
       rust: nightly
-      before_install:
-        - make rust-target
       script:
         - cargo check
         - cargo test -- --color always
-    - stage: DeployRust
+    - stage: Deploy_rust
       if: branch = main
       language: rust
       rust: nightly
-      before_install:
-        - make rust-target
-      script: bash bin/deploy-wasm-pack.sh
-    - stage: TestJS
+      script:
+        - bash bin/deploy-wasm-pack.sh
+    - stage: Test_js
       language: node_js
       node_js: "node"
       before_script:
