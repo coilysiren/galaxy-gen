@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 
 # setup git
-bash ./travis-git-setup.sh
+bash bin/travis-git-setup.sh
 
 # setup deploy branch
 git pull origin
