@@ -37,10 +37,6 @@ test-js:
 test-js-dev:
 	npx karma start src/js/tests/karma.conf.js
 
-build-all-prod:
-	make build-rust
-	make build-js-prod
-
 build-rust:
 	cargo build
 	make build-wasm
@@ -59,8 +55,5 @@ build-js-dev:
 build-js-prod:
 	npx webpack-cli --config src/js/webpack.config.js --mode production
 
-deploy-wasm:
-	bash bin/deploy-wasm-pack.sh
-
-deploy-webpack:
-	bash bin/deploy-webpack.sh
+deploy-compiled-files:
+	bash bin/deploy-compiled-files.sh

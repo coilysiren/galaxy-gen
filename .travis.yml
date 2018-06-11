@@ -1,5 +1,3 @@
-if: branch != deploy
-
 language: rust
 rust: nightly
 node_js:
@@ -8,19 +6,22 @@ node_js:
 cache:
   cargo: true
   directories:
-    - pkg
     - node_modules
+    - pkg
+    - dist
 
 jobs:
   include:
-    - stage: Test rust
-      script:
-        - make test-rust
-    - stage: Deploy wasm
+    - stage: Compile
       if: branch = main
       script:
-        - make deploy-wasm
-    - stage: Test js
+        - make deploy-compiled-files
+    - stage: Test
+      if: branch != deploy
+      script:
+        - make test-rust
+    - stage: Test
+      if: branch != deploy
       sudo: required
       addons:
         apt:
@@ -33,10 +34,15 @@ jobs:
         - export DISPLAY=:99.0
         - sh -e /etc/init.d/xvfb start
       script:
+        - ls pkg || make build-wasm # build wasm if not cached
         - make test-js
-    - stage: Log js
-      script:
-        - make deploy-webpack
+    - stage: Deploy app
+      if: branch = deploy
+      deploy:
+        provider: heroku
+        app: galaxygen
+        api_key:
+          secure: 1VGtwHLikMn9lOi/Yvrfh8+BRJ8SmuLchPyn8NrhALqO0kWvAfgSyKPWtIDf8rkrj72zshDKFDlsAUqohMeM5TeJeqNRYMtnSqk2kHfFXNoRwINWrAEugAerKTM+IJoXo4roeNU8LKZzfZf/RNtDSdmlk4rRxM0+pFzmYOvP7dtkFST/za2TPeqJMLEk0Az3ng1nnMDerDhE+vNYzHQwBYIbrbFkWfcSHZ/Wfe/ad3dCj6QgpZ783GfJ8XEhmSpwNdbqYr3G33I16Z9QwdFxVlE6YPKW8owAwgJeCz9PTH/XOKPN/N1KwR4s72B86zHLvvf3Pk538IjPqfVmCYqjhRYMRC5G24Ab9tNeDYooeV78DK8zYufjA6QA7T/fG8TCRqMFLXXPcO8Bzm1nGNmoRhsTgkb+o9G0CvpU8SmwvsJaRPGq+cLj7DD7m2mk16EFpNh+iPzPE3eUm3b8WBu9sO9DxgCeK10KehqZiVytMTelWdYFB8nkgbk7YN5uFVCaY04O5YTj2i/Zr77ZNWI3984TW71gXH3O8nG6Lqj6YZQj9idOZhrzhXc+w5H/JmvgVjiS+oFfrEy90VVkGRAEAePoNT1SCrA7dlQSTfYGpDNeopbgMW0IVE5z0NW6zve/u+aMDq+tGdEjTeQSfguehCOv01qfA6zKdnRjjp3ztew=
 
 notifications:
   email: false
