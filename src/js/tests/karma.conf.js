@@ -7,7 +7,7 @@ module.exports = function(config) {
   delete webpackConfig.optimization;
   config.set({
     basePath: "./../",
-    browsers: ["Chrome"],
+    browsers: ["ChromeHeadless"],
     frameworks: ["mocha"],
     files: ["tests/*spec.js"],
     preprocessors: {

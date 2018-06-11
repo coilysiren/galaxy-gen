@@ -4,7 +4,7 @@ const HtmlWebpackPlugin = require("html-webpack-plugin");
 module.exports = {
   entry: path.resolve(__dirname, "bootstrap.js"),
   output: {
-    path: path.resolve(__dirname, "dist")
+    path: path.resolve(__dirname, "..", "..", "dist")
   },
   resolve: {
     extensions: [".ts", ".js", ".wasm", ".png"]
