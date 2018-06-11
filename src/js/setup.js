@@ -7,8 +7,8 @@ import { MainScript } from "./main";
 
 export async function setupMainScript() {
   return new MainScript(
-    await import("./assets/built-wasm/galaxy_gen"),
+    await import("../../pkg/galaxy_gen_backend"),
     // @ts-ignore: ignore `module not found` for the wasm file
-    await import("./assets/built-wasm/galaxy_gen_bg.wasm")
+    await import("../../pkg/galaxy_gen_backend.wasm")
   );
 }
