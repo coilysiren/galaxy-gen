@@ -11,10 +11,10 @@ git pull origin
 # setup deploy branch
 git checkout deploy
 git merge -X theirs main --allow-unrelated-histories --no-commit --no-ff
-git commit --no-edit
+git commit --no-edit -m '[[ BOT ]] merge main => deploy'
 
 # do main work
-make rust-build
+make build-wasm
 
 # commit and push changes
 git add .
