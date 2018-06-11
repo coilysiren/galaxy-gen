@@ -2,7 +2,7 @@
 
 `rust/*` contains the rust logic, wrapped in calls to [wasm-bindgen](https://github.com/rustwasm/wasm-bindgen) to provide a js api
 
-the files there are compiled to `js/assets/built-wasm/` as `wasm` + `js`
+the files there are compiled to `galaxy_gen_backend` as `wasm` + `js`
 
 # js
 
