@@ -12,7 +12,7 @@ git pull origin
 git checkout deploy
 git merge -X theirs main --allow-unrelated-histories --no-commit --no-ff
 git commit --no-edit -m '[[ BOT ]] merge main => deploy'
-git pull
+git pull origin deploy
 
 # do main work
 make build-wasm
@@ -20,4 +20,5 @@ make build-wasm
 # commit and push changes
 git add .
 git commit -m "[[ BOT ]] wasm build :: ${TRAVIS_BUILD_NUMBER}"
-git push origin HEAD:deploy
+git pull origin deploy
+git push origin deploy:deploy
