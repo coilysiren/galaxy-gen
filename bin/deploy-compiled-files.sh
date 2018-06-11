@@ -13,10 +13,11 @@ git config --global pull.rebase true
 git remote remove origin
 git remote add origin https://${GITHUB_API_TOKEN}@github.com/${TRAVIS_REPO_SLUG}.git
 
-# setup deploy branch
+# setup our branch
 git pull origin
 git checkout deploy
 git pull origin deploy
+git pull origin main
 
 # do main work
 make build-wasm
