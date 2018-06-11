@@ -1,7 +1,7 @@
 language: rust
 rust: nightly
 node_js:
-  - "10.4"
+  - "10"
 
 cache:
   cargo: true
