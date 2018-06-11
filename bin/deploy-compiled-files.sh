@@ -19,6 +19,6 @@ make build-js-prod
 
 # commit and push changes
 git add .
-git commit -m "[[ BOT ]] webpack build :: ${TRAVIS_BUILD_NUMBER}"
+git commit -m "[[ BOT ]] build :: ${TRAVIS_BUILD_NUMBER}"
 git pull origin deploy
 git push origin deploy:deploy
