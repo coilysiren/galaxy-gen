@@ -32,6 +32,8 @@ jobs:
           packages:
           - google-chrome-stable
       before_script:
+        - node --version
+        - npm --version
         - npx webdriver-manager update
         - export DISPLAY=:99.0
         - sh -e /etc/init.d/xvfb start
