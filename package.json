@@ -1,5 +1,5 @@
 {
-  "name": "galaxy_gen",
+  "name": "galaxy_gen_client",
   "version": "0.0.0",
   "engines": {
     "node": "10.1.0",
@@ -38,6 +38,7 @@
     "zone.js": "^0.8.26"
   },
   "dependencies": {
-    "express": "^4.16.3"
+    "express": "^4.16.3",
+    "galaxy_gen_backend": "file:pkg"
   }
 }
