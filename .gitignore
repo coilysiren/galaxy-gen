@@ -2,9 +2,9 @@
 **/*.rs.bk
 node_modules
 built-wasm/
-dist/
 
 # removed in deploy branch
+dist/
 pkg/
 *.wasm
 *.log
