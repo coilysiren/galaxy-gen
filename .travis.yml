@@ -38,8 +38,6 @@ jobs:
         - node --version
         - npm --version
         - npx webdriver-manager update
-        - export DISPLAY=:99.0
-        - sh -e /etc/init.d/xvfb start
       script:
         - ls pkg || make build-wasm # build wasm if not cached
         - make test-js
