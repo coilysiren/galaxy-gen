@@ -1,35 +1,6 @@
 /* tslint:disable */
 import * as wasm from './galaxy_gen_backend_bg';
 
-export class Galaxy {
-
-                static __construct(ptr) {
-                    return new Galaxy(ptr);
-                }
-
-                constructor(ptr) {
-                    this.ptr = ptr;
-                }
-
-            free() {
-                const ptr = this.ptr;
-                this.ptr = 0;
-                wasm.__wbg_galaxy_free(ptr);
-            }
-        static new(arg0) {
-    return Galaxy.__construct(wasm.galaxy_new(arg0));
-}
-cells_pointer() {
-    return wasm.galaxy_cells_pointer(this.ptr);
-}
-seed() {
-    return wasm.galaxy_seed(this.ptr);
-}
-tick() {
-    return wasm.galaxy_tick(this.ptr);
-}
-}
-
 export class Cell {
 
                 static __construct(ptr) {
@@ -68,6 +39,35 @@ is_gas() {
 }
 is_star() {
     return (wasm.cell_is_star(this.ptr)) !== 0;
+}
+}
+
+export class Galaxy {
+
+                static __construct(ptr) {
+                    return new Galaxy(ptr);
+                }
+
+                constructor(ptr) {
+                    this.ptr = ptr;
+                }
+
+            free() {
+                const ptr = this.ptr;
+                this.ptr = 0;
+                wasm.__wbg_galaxy_free(ptr);
+            }
+        static new(arg0) {
+    return Galaxy.__construct(wasm.galaxy_new(arg0));
+}
+cells_pointer() {
+    return wasm.galaxy_cells_pointer(this.ptr);
+}
+seed() {
+    return wasm.galaxy_seed(this.ptr);
+}
+tick() {
+    return wasm.galaxy_tick(this.ptr);
 }
 }
 
