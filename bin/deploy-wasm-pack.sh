@@ -12,6 +12,7 @@ git pull origin
 git checkout deploy
 git merge -X theirs main --allow-unrelated-histories --no-commit --no-ff
 git commit --no-edit -m '[[ BOT ]] merge main => deploy'
+git pull
 
 # do main work
 make build-wasm
