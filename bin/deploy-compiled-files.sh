@@ -19,12 +19,20 @@ git checkout deploy
 git pull origin deploy
 git pull origin main
 
-# do main work
+# do main work ( part 1 )
 make build-wasm
+
+# commit and push changes
+git add .
+git commit -m "[[ BOT ]] build wasm :: ${TRAVIS_BUILD_NUMBER}"
+git pull origin deploy # <- just in case a push has happened during our build
+git push origin HEAD
+
+# do main work ( part 2 )
 make build-js-prod
 
 # commit and push changes
 git add .
-git commit -m "[[ BOT ]] build :: ${TRAVIS_BUILD_NUMBER}"
-git pull origin deploy
+git commit -m "[[ BOT ]] build js :: ${TRAVIS_BUILD_NUMBER}"
+git pull origin deploy # <- just in case a push has happened during our build
 git push origin HEAD
