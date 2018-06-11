@@ -1,7 +1,7 @@
 language: rust
 rust: nightly
 node_js:
-  - "10"
+  - "10" # <- not working, duplicated as `nvm install 10` below
 
 cache:
   cargo: true
@@ -25,7 +25,7 @@ jobs:
     # js tests
     - stage: Test
       if: branch != deploy
-      sudo: required
+      sudo: required # <- for the chrome install
       addons:
         apt:
           sources:
@@ -34,6 +34,7 @@ jobs:
           - google-chrome-stable
       before_script:
         - nvm install 10
+        - nvm use 10
         - node --version
         - npm --version
         - npx webdriver-manager update
