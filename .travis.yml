@@ -3,8 +3,10 @@ if: branch != deploy
 language: rust
 rust: nightly
 node_js:
-  - "node"
+  - "10.4"
 
+env:
+  - CACHE_NAME=GALAXYGENCACHE
 cache:
   cargo: true
   directories:
@@ -19,7 +21,6 @@ jobs:
       if: branch = main
       script: make deploy-wasm
     - stage: Test js
-      install: npm ci
       script: make test-js
 
 notifications:
