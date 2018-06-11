@@ -1,6 +1,7 @@
 # galaxyGen
 
 [![Greenkeeper badge](https://badges.greenkeeper.io/lynncyrin/galaxy-gen.svg)](https://greenkeeper.io/)
+[![Build Status](https://travis-ci.com/lynncyrin/galaxy-gen.svg?branch=main)](https://travis-ci.com/lynncyrin/galaxy-gen)
 
 `{ rust => wasm => js }` galaxy generation simulation
 
@@ -12,13 +13,12 @@
 - `$ make dev`
 - see [makefile](makefile) for others
 
-## build process
+## infrastructure
 
-currently wip, see [{ branch: deploy, path: pkg/ }](https://github.com/lynncyrin/galaxy-gen/tree/deploy/pkg) for the current `wasm-pack` output
+- `./src/rust/` is the rust backend, with [wasm-bindgen](https://github.com/rustwasm/wasm-bindgen) decorators. the first build stage runs rust tests via `cargo test`
+- `./pkg/` is created via [wasm-pack](https://github.com/ashleygwilliams/wasm-pack), which compiles the rust code to `wasm` + `js` + `typescript`
+- `./src/js/` imports `./pkg/` and runs js tests via `npm test`
+- `./dist/` is created via [webpack](https://webpack.js.org/), which compiles everything mentioned above + [angular](http://angular.io/)
+- http://galaxygen.lynncyrin.me is updated via [heroku](https://www.heroku.com/) with the compiled code
 
-## references
-
-- [wasm-bindgen](https://github.com/rustwasm/wasm-bindgen)
-- [wasm-pack](https://github.com/ashleygwilliams/wasm-pack)
-- [doc.rust-lang.org](https://doc.rust-lang.org/book/second-edition/)
-- [mizdra/webpack-wasm-skeleton](https://github.com/mizdra/webpack-wasm-skeleton)
+Note: the compiled folders aren't present on the default branch. Go to [{ branch: deploy }](https://github.com/lynncyrin/galaxy-gen/tree/deploy) to view them.

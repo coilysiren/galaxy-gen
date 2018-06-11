@@ -1,28 +1,58 @@
+language: rust
+rust: nightly
+node_js:
+  - "10" # <- not working, duplicated as `nvm install 10` below
+
+cache:
+  cargo: true
+  directories:
+    - node_modules
+    - pkg
+    - dist
+
+jobs:
+  include:
+    - stage: Compile
+      if: branch != deploy
+      script:
+        - ls pkg/package.json || make build-wasm # build wasm if not cached
+        - ls dist/index.html || make build-js-prod # build js if not cached
+    # rust tests
+    - stage: Test
+      if: branch != deploy
+      script:
+        - make test-rust
+    # js tests
+    - stage: Test
+      if: branch != deploy
+      sudo: required # <- for the chrome install
+      addons:
+        chrome: stable
+      install:
+        - ls pkg/package.json || make build-wasm # build wasm if not cached
+        - nvm install 10
+        - nvm use 10
+        - node --version
+        - npm --version
+        - npm ci
+        - npx webdriver-manager update
+      script:
+        - make test-js
+    # the `main` branch deploys to branch `deploy`
+    - stage: Deploy
+      if: branch = main
+      script:
+        - make deploy-compiled-files
+    # the `deploy` branch deploys to heroku
+    - stage: Deploy
+      if: branch = deploy
+      script: true
+      deploy:
+        provider: heroku
+        on: deploy
+        app: galaxygen
+        api_key:
+          secure: 1VGtwHLikMn9lOi/Yvrfh8+BRJ8SmuLchPyn8NrhALqO0kWvAfgSyKPWtIDf8rkrj72zshDKFDlsAUqohMeM5TeJeqNRYMtnSqk2kHfFXNoRwINWrAEugAerKTM+IJoXo4roeNU8LKZzfZf/RNtDSdmlk4rRxM0+pFzmYOvP7dtkFST/za2TPeqJMLEk0Az3ng1nnMDerDhE+vNYzHQwBYIbrbFkWfcSHZ/Wfe/ad3dCj6QgpZ783GfJ8XEhmSpwNdbqYr3G33I16Z9QwdFxVlE6YPKW8owAwgJeCz9PTH/XOKPN/N1KwR4s72B86zHLvvf3Pk538IjPqfVmCYqjhRYMRC5G24Ab9tNeDYooeV78DK8zYufjA6QA7T/fG8TCRqMFLXXPcO8Bzm1nGNmoRhsTgkb+o9G0CvpU8SmwvsJaRPGq+cLj7DD7m2mk16EFpNh+iPzPE3eUm3b8WBu9sO9DxgCeK10KehqZiVytMTelWdYFB8nkgbk7YN5uFVCaY04O5YTj2i/Zr77ZNWI3984TW71gXH3O8nG6Lqj6YZQj9idOZhrzhXc+w5H/JmvgVjiS+oFfrEy90VVkGRAEAePoNT1SCrA7dlQSTfYGpDNeopbgMW0IVE5z0NW6zve/u+aMDq+tGdEjTeQSfguehCOv01qfA6zKdnRjjp3ztew=
+
 notifications:
   email: false
-
-matrix:
-  include:
-
-  - if: branch =~ ^main
-    language: rust
-    rust: nightly
-    cache: cargo
-    before_install:
-      - rustup target add wasm32-unknown-unknown --toolchain nightly
-    install:
-      - cargo build
-    script:
-      - cargo check
-      - cargo test -- --color always
-    deploy:
-      skip-cleanup: true
-      provider: script
-      script: bash bin/build-wasm-pack.sh
-
-  - if: branch =~ ^deploy
-    language: node_js
-    node_js: "node"
-    cache: node_modules
-    install:
-      - npm ci

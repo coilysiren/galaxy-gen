@@ -19,35 +19,41 @@ dev: ## dev (primary entrypoint)
 	npx concurrently \
 		-k -n rust,rust::test,js,js::test \
 		-c red,red,green,green \
-		"make rust-build-dev" \
-		"make rust-test" \
-		"make js-build-dev" \
-		"make js-test"
+		"make build-rust-dev" \
+		"make test-rust-dev" \
+		"make build-js-dev" \
+		"make test-js-dev"
 
-all-build-prod:
-	make rust-build-prod
-	make js-build-prod
+test-rust:
+	cargo check
+	cargo test -- --color always
 
-rust-build-dev:
-	cargo watch \
-		-x "build" \
-		-s "./bin/post_compile"
+test-rust-dev:
+	cargo watch -s "make test-rust"
 
-rust-build:
-	rm -rf pkg
-	cargo install wasm-pack
+test-js:
+	npx karma start src/js/tests/karma.conf.js --singleRun=true
+
+test-js-dev:
+	npx karma start src/js/tests/karma.conf.js
+
+build-rust:
+	cargo build
+	make build-wasm
+
+build-rust-dev:
+	cargo watch	-s "make build-rust"
+
+build-wasm:
+	- cargo install wasm-pack
 	wasm-pack init
+	npm install ./pkg
 
-rust-test:
-	cargo watch \
-		-x "check" \
-		-x "test -- --color always --nocapture"
-
-js-build-dev:
+build-js-dev:
 	npx webpack-serve src/js/webpack.config.js --port 3000
 
-js-build-prod:
+build-js-prod:
 	npx webpack-cli --config src/js/webpack.config.js --mode production
 
-js-test:
-	npx karma start src/js/tests/karma.conf.js
+deploy-compiled-files:
+	bash bin/deploy-compiled-files.sh
