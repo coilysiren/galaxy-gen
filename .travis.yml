@@ -33,6 +33,7 @@ jobs:
           packages:
           - google-chrome-stable
       before_script:
+        - nvm install 10
         - node --version
         - npm --version
         - npx webdriver-manager update
