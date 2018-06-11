@@ -8,7 +8,7 @@
   "scripts": {
     "heroku-postbuild": "make all-build-prod",
     "start": "node src/js/express.js",
-    "test": "karma start src/js/tests/karma.conf.js --singleRun=true"
+    "test": "make test-js"
   },
   "devDependencies": {
     "@angular/common": "^6.0.0",
