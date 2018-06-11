@@ -1,4 +1,9 @@
 if: branch != deploy
+
+language: rust
+rust: nightly
+node_js: "node"
+
 cache:
   cargo: true
   directories:
@@ -7,23 +12,16 @@ cache:
 
 jobs:
   include:
-    - stage: Test Rust
-      language: rust
-      rust: nightly
+    - stage: Test rust
       script:
-        - cargo check
-        - cargo test -- --color always
-    - stage: Deploy Rust
+        - make test-rust
+    - stage: Deploy rust
       if: branch = main
-      language: rust
-      rust: nightly
       script:
-        - bash bin/deploy-wasm-pack.sh
-    - stage: Test JS
-      language: node_js
-      node_js: "node"
-      before_script:
-        - make rust-build
+        - make deploy-wasm
+    - stage: Test js
+      script:
+        - make test-js
 
 notifications:
   email: false

@@ -24,31 +24,33 @@ dev: ## dev (primary entrypoint)
 		"make js-build-dev" \
 		"make js-test"
 
-all-build-prod:
+test-rust:
+	cargo check
+	cargo test -- --color always
+
+test-rust-watch:
+	cargo watch -s "make test-rust"
+
+test-js:
+	npx karma start src/js/tests/karma.conf.js
+
+build-all-prod:
 	make rust-build-prod
 	make js-build-prod
 
-rust-build-dev:
-	cargo watch \
-		-x "build" \
-		-s "./bin/post_compile"
+build-rust-dev:
+	cargo watch -x "build"
 
-rust-build:
-	rm -rf pkg
-	cargo install wasm-pack --force
+build-wasm:
+	- cargo install wasm-pack
 	wasm-pack init
 	# npm install ./pkg
 
-rust-test:
-	cargo watch \
-		-x "check" \
-		-x "test -- --color always --nocapture"
-
-js-build-dev:
+build-js-dev:
 	npx webpack-serve src/js/webpack.config.js --port 3000
 
-js-build-prod:
+build-js-prod:
 	npx webpack-cli --config src/js/webpack.config.js --mode production
 
-js-test:
-	npx karma start src/js/tests/karma.conf.js
+deploy-wasm:
+	bash bin/deploy-wasm-pack.sh
