@@ -2,26 +2,37 @@ if: branch != deploy
 
 language: rust
 rust: nightly
+node_js:
+  - "10.4"
 
 cache:
-  - cargo
-  - node_modules
-before_install:
-  - rustup target add wasm32-unknown-unknown --toolchain nightly
+  cargo: true
+  directories:
+    - pkg
+    - node_modules
 
 jobs:
   include:
-    - stage: test
+    - stage: Test rust
       script:
-        - cargo check
-        - cargo test -- --color always
-    - stage: test
-      node_js: "node"
-      before_script:
-        - make rust-build
-    - stage: deploy
+        - make test-rust
+    - stage: Deploy wasm
       if: branch = main
-      script: bash bin/build-wasm-pack.sh
+      script:
+        - make deploy-wasm
+    - stage: Test js
+      addons:
+        apt:
+          sources:
+          - google-chrome
+          packages:
+          - google-chrome-stable
+      before_script:
+        - npx webdriver-manager update
+        - export DISPLAY=:99.0
+        - sh -e /etc/init.d/xvfb start
+      script:
+        - make test-js
 
 notifications:
   email: false
