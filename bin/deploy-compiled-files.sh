@@ -7,6 +7,9 @@ git config --global user.name "Lynn Cyrin"
 git config --global pull.rebase true
 
 # remove travis's readonly origin, add our origin with write permissions
+# NOTE: GITHUB_API_TOKEN needs to be added to travis
+# https://blog.github.com/2013-05-16-personal-api-tokens/
+# https://docs.travis-ci.com/user/environment-variables/#Defining-Variables-in-Repository-Settings
 git remote remove origin
 git remote add origin https://${GITHUB_API_TOKEN}@github.com/${TRAVIS_REPO_SLUG}.git
 
