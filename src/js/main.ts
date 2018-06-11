@@ -1,4 +1,4 @@
-import * as IWasmJSApi from "./../../pkg/galaxy_gen_backend";
+import * as IWasmJSApi from "galaxy_gen_backend/galaxy_gen_backend";
 
 interface IWasmBinary {
   memory: WebAssembly.Memory;
