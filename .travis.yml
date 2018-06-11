@@ -2,7 +2,8 @@ if: branch != deploy
 
 language: rust
 rust: nightly
-node_js: "node"
+node_js:
+  - "node"
 
 cache:
   cargo: true
@@ -13,15 +14,12 @@ cache:
 jobs:
   include:
     - stage: Test rust
-      script:
-        - make test-rust
-    - stage: Deploy rust
+      script: make test-rust
+    - stage: Deploy wasm
+      script: make deploy-wasm
       if: branch = main
-      script:
-        - make deploy-wasm
     - stage: Test js
-      script:
-        - make test-js
+      script: make test-js
 
 notifications:
   email: false
