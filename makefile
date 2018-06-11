@@ -41,12 +41,12 @@ build-all-prod:
 	make build-rust
 	make build-js-prod
 
-build-rust-dev:
-	cargo watch	-s "make build-rust"
-
 build-rust:
 	cargo build
 	make build-wasm
+
+build-rust-dev:
+	cargo watch	-s "make build-rust"
 
 build-wasm:
 	- cargo install wasm-pack
