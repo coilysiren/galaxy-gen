@@ -1,7 +1,6 @@
 /target
 **/*.rs.bk
 node_modules
-built-wasm/
 
 # the following entries are removed from this file on the deploy branch
 dist/
