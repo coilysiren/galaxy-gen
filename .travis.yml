@@ -15,7 +15,8 @@ jobs:
     - stage: Compile
       if: branch = main
       script:
-        - make deploy-compiled-files
+        - ls pkg || make build-wasm # build wasm if not cached
+        - ls dist || make build-js-prod # build js if not cached
     - stage: Test
       if: branch != deploy
       script:
@@ -36,7 +37,11 @@ jobs:
       script:
         - ls pkg || make build-wasm # build wasm if not cached
         - make test-js
-    - stage: Deploy app
+    - stage: Deploy
+      if: branch = main
+      script:
+        - make deploy-compiled-files
+    - stage: Deploy
       if: branch = deploy
       deploy:
         provider: heroku
