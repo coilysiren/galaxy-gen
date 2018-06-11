@@ -44,7 +44,7 @@ build-rust-dev:
 build-wasm:
 	- cargo install wasm-pack
 	wasm-pack init
-	# npm install ./pkg
+	npm install ./pkg
 
 build-js-dev:
 	npx webpack-serve src/js/webpack.config.js --port 3000
