@@ -1,6 +1,6 @@
 if: branch != deploy
 cache:
-  - cargo
+  cargo: true
   directories:
     - pkg
     - node_modules
