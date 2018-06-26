@@ -21,6 +21,7 @@
     "@types/webassembly-js-api": "0.0.1",
     "ajv": "^6.5.1",
     "concurrently": "^3.6.0",
+    "galaxy_gen_backend": "file:pkg",
     "html-webpack-plugin": "^3.2.0",
     "karma": "^2.0.4",
     "karma-chrome-launcher": "^2.2.0",
@@ -36,8 +37,7 @@
     "webpack": "^4.12.1",
     "webpack-cli": "^3",
     "webpack-serve": "^1.0.4",
-    "zone.js": "^0.8.26",
-    "galaxy_gen_backend": "file:pkg"
+    "zone.js": "^0.8.26"
   },
   "dependencies": {
     "express": "^4.16.3"
