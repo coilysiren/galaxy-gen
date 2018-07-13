@@ -14,7 +14,25 @@ export class Cell {
 mass: number
 accel_mangitude: number
 accel_degree: number
+mass: number
+accel_mangitude: number
+accel_degree: number
+mass: number
+accel_mangitude: number
+accel_degree: number
 free(): void;
+ get_type(): number;
+
+ is_gas(): boolean;
+
+ is_star(): boolean;
+
+ get_type(): number;
+
+ is_gas(): boolean;
+
+ is_star(): boolean;
+
  get_type(): number;
 
  is_gas(): boolean;
