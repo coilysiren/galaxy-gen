@@ -16,7 +16,7 @@ jobs:
       branches:
         except:
         - deploy
-       script:
+      script:
         - ls pkg/package.json || make build-wasm # build wasm if not cached
         - ls dist/index.html || make build-js-prod # build js if not cached
     # rust tests
