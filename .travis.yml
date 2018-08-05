@@ -40,7 +40,7 @@ jobs:
         - make test-js
     # the `main` branch deploys to branch `deploy`
     - stage: Deploy
-      if: branch = main
+      if: branch = main AND type != pull_request
       script:
         - make deploy-compiled-files
 
