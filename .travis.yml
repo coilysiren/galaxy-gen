@@ -28,7 +28,9 @@ jobs:
         - make test-rust
     # js tests
     - stage: Test
-      if: branch != deploy
+      branches:
+        except:
+        - deploy
       sudo: required # <- for the chrome install
       addons:
         chrome: stable
