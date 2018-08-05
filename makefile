@@ -10,6 +10,7 @@ update:
 	rustup update
 	rm Cargo.lock
 	cargo update
+	npm i -g npm
 
 install:
 	cargo build
