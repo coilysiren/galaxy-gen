@@ -1,4 +1,16 @@
 /* tslint:disable */
+export class Cell {
+mass: number
+accel_mangitude: number
+accel_degree: number
+free(): void;
+ get_type(): number;
+
+ is_gas(): boolean;
+
+ is_star(): boolean;
+
+}
 export class Galaxy {
 free(): void;
 static  new(arg0: number): Galaxy;
@@ -8,35 +20,5 @@ static  new(arg0: number): Galaxy;
  seed(): void;
 
  tick(): void;
-
-}
-export class Cell {
-mass: number
-accel_mangitude: number
-accel_degree: number
-mass: number
-accel_mangitude: number
-accel_degree: number
-mass: number
-accel_mangitude: number
-accel_degree: number
-free(): void;
- get_type(): number;
-
- is_gas(): boolean;
-
- is_star(): boolean;
-
- get_type(): number;
-
- is_gas(): boolean;
-
- is_star(): boolean;
-
- get_type(): number;
-
- is_gas(): boolean;
-
- is_star(): boolean;
 
 }
