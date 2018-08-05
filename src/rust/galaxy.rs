@@ -39,8 +39,8 @@ impl Galaxy {
   pub fn tick(&mut self) {
     let mut next = self.cells.clone();
     for index in 0..(self.size - 1) {
-      let cell = self.cells[index as usize];
-      let neighbours = self.neighbours(index, 1);
+      let _cell = self.cells[index as usize];
+      let _neighbours = self.neighbours(index, 1);
     }
     self.cells = next;
   }
