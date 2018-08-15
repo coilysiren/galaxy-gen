@@ -253,3 +253,29 @@ if this warning fails to go away though and you're not sure what to do feel free
 to open an issue at https://github.com/rustwasm/wasm-bindgen/issues!
 
 
+Aug 15 12:15:05.435 ERRO wasm-bindgen failed to execute properly. stderr:
+
+error: failed to extract wasm-bindgen custom sections
+	caused by: 
+
+it looks like the Rust project used to create this wasm file was linked against
+a different version of wasm-bindgen than this binary:
+
+  rust wasm file: 0.2.15
+     this binary: 0.2.16
+
+Currently the bindgen format is unstable enough that these two version must
+exactly match, so it's required that these two version are kept in sync by
+either updating the wasm-bindgen dependency or this binary. You should be able
+to update the wasm-bindgen dependency with:
+
+    cargo update -p wasm-bindgen
+
+or you can update the binary with
+
+    cargo install -f wasm-bindgen-cli
+
+if this warning fails to go away though and you're not sure what to do feel free
+to open an issue at https://github.com/rustwasm/wasm-bindgen/issues!
+
+
