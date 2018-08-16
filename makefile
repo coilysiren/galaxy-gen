@@ -47,7 +47,7 @@ build-rust-dev:
 
 build-wasm:
 	- cargo install wasm-pack
-	wasm-pack init
+	wasm-pack init --mode no-install
 	npm install ./pkg
 
 build-js-dev:
