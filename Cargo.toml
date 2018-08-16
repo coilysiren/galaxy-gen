@@ -8,12 +8,18 @@ version = "0.1.0"
 authors = ["Lynn Cyrin <lynncyrin@gmail.com>"]
 license = "AGPL"
 
+[features]
+default-features = ["console_error_panic_hook", "wee_alloc"]
+
 [lib]
 crate-type = ["cdylib"]
 path = "src/rust/lib.rs"
 
 [dependencies]
 wasm-bindgen = "^0.2"
+cfg-if = "0.1.2"
+console_error_panic_hook = { version = "0.1.1", optional = true }
+wee_alloc = { version = "0.4.1", optional = true }
 
 [dev-dependencies]
 cargo-watch = "^6"
