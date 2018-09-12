@@ -1,7 +1,9 @@
-#![feature(use_extern_macros)]
+#![feature(extern_prelude)]
 
 #[macro_use]
 extern crate cfg_if;
+extern crate rand;
+extern crate specs;
 extern crate wasm_bindgen;
 
 pub mod cell;

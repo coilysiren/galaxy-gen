@@ -29,7 +29,7 @@ export class MainScript {
 
   public generateData(size: number): void {
     this.galaxySize = size;
-    this.galaxy = this.wasmJSApi.Galaxy.new(size);
+    this.galaxy = new this.wasmJSApi.Galaxy(size);
     this.galaxy.seed();
   }
 

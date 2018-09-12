@@ -1,4 +1,5 @@
 use cell::*;
+use rand::Rng;
 use wasm_bindgen::prelude::*;
 
 // types
@@ -11,6 +12,7 @@ pub struct Galaxy {
 // public methods
 #[wasm_bindgen]
 impl Galaxy {
+  #[wasm_bindgen(constructor)]
   pub fn new(size: u16) -> Galaxy {
     return Galaxy {
       size,
@@ -23,17 +25,12 @@ impl Galaxy {
       ],
     };
   }
-  pub fn cells_pointer(&self) -> *const Cell {
-    return self.cells.as_ptr();
-  }
   pub fn seed(&mut self) {
     for cell_index in 0..self.size.pow(2) {
-      if cell_index % 3 == 0 {
-        self.cells[cell_index as usize] = Cell {
-          mass: 1,
-          ..Default::default()
-        };
-      }
+      self.cells[cell_index as usize] = Cell {
+        mass: rand::thread_rng().gen_range(0, self.size),
+        ..Default::default()
+      };
     }
   }
   pub fn tick(&mut self) {
