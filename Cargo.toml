@@ -17,6 +17,7 @@ path = "src/rust/lib.rs"
 
 [dependencies]
 specs = "^0.12"
+specs-derive = "^0.2"
 rand = "^0.5"
 wasm-bindgen = "^0.2"
 cfg-if = "^0.1"
