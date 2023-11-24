@@ -3,6 +3,9 @@ const path = require("path");
 
 module.exports = {
   entry: "./src/js/index.js",
+  experiments: {
+    asyncWebAssembly: true,
+  },
   output: {
     path: path.resolve(__dirname, "dist"),
     filename: "index.js",

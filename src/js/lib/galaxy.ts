@@ -1,4 +1,4 @@
-import * as IWasmJSApi from "galaxy_gen_backend/galaxy_gen_backend";
+import * as IWasmJSApi from "galaxy_gen_backend";
 
 interface Cell {
   mass: number;
@@ -10,13 +10,13 @@ interface Cell {
  * Main is constructed with already compiled wasm
  * and does business logic with that wasm
  */
-export class Main {
+export class Frontend {
   private galaxy: IWasmJSApi.Galaxy;
   private galaxySize: number;
 
-  constructor(galaxySize: number) {
+  constructor(galaxy: IWasmJSApi.Galaxy, galaxySize: number) {
+    this.galaxy = galaxy;
     this.galaxySize = galaxySize;
-    this.galaxy = new IWasmJSApi.Galaxy(galaxySize, 0);
   }
 
   public seed(): void {

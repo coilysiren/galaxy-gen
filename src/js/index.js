@@ -1,10 +1,12 @@
 import React from "react";
 import * as ReactDOM from "react-dom/client";
-import App from "./lib/interface";
+import * as application from "./lib/application";
 
 // A dependency graph that contains any wasm must all be imported asynchronously.
-import("./lib/galaxy").catch((e) =>
+const galaxy = import("./lib/galaxy").catch((e) =>
   console.error("Error importing `main`:", e)
 );
 
-ReactDOM.createRoot(document.getElementById("root")).render(<App />);
+ReactDOM.createRoot(document.getElementById("root")).render(
+  <application.Interface />
+);
