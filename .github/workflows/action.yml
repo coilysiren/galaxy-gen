@@ -15,3 +15,5 @@ jobs:
       - uses: actions/checkout@v3
       - run: curl -sSf https://sh.rustup.rs | sh -s -- -y
       - run: cargo build
+      - run: cargo check
+      - run: cargo test
