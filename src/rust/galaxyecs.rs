@@ -1,18 +1,18 @@
 use specs::VecStorage;
 
-struct StarMass(u32);
+pub struct StarMass(u32);
 
 #[derive(Component, Debug)]
 #[storage(VecStorage)]
-struct Position {
-    x: u16,
-    y: u16,
+pub struct Position {
+    pub x: u16,
+    pub y: u16,
 }
 
 #[derive(Component, Debug)]
 #[storage(VecStorage)]
-struct Mass {
-    value: u32,
+pub struct Mass {
+    pub value: u32,
 }
 
 use specs::{Join, ReadStorage, System, WriteStorage};
@@ -24,7 +24,7 @@ impl<'a> System<'a> for Emmission {
 
     fn run(&mut self, position: Self::SystemData) {
         for position in position.join() {
-            println!("emitting");
+            println!("at position ({}, {})", position.x, position.y);
         }
     }
 }
@@ -34,18 +34,19 @@ struct Movement;
 impl<'a> System<'a> for Movement {
     type SystemData = (ReadStorage<'a, Mass>, WriteStorage<'a, Position>);
 
-    fn run(&mut self, (vel, mut pos): Self::SystemData) {
-        for (vel, pos) in (&vel, &mut pos).join() {
-            println!("making moves");
+    fn run(&mut self, (velocity, mut position): Self::SystemData) {
+        for (velocity, position) in (&velocity, &mut position).join() {
+            println!("at position ({}, {})", position.x, position.y);
+            println!("with velocity {}", velocity.value);
         }
     }
 }
 
-use specs::{Builder, DispatcherBuilder, RunNow, World};
-
 #[cfg(test)]
 mod tests {
     use super::*;
+    use specs::{Builder, DispatcherBuilder, RunNow, World};
+
     #[test]
     fn test_world() {
         let mut world = World::new();

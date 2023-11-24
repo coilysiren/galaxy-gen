@@ -3,30 +3,29 @@
 [package]
 name = "galaxy_gen_backend"
 description = "{ rust => wasm => js } galaxy generation simulation"
-repository = "https://github.com/lynncyrin/galaxy-gen"
-version = "0.1.0"
-authors = ["Lynn Cyrin <lynncyrin@gmail.com>"]
+repository = "https://github.com/coilysiren/galaxy-gen"
+version = "0.0.1"
+authors = ["Kai Siren <coilysiren@gmail.com>"]
 license = "AGPL"
 
-[features]
-default-features = ["console_error_panic_hook", "wee_alloc"]
-
 [lib]
-crate-type = ["cdylib"]
+crate-type = ["cdylib", "rlib"]
 path = "src/rust/lib.rs"
 
+[features]
+default = ["console_error_panic_hook", "wee_alloc"]
+
 [dependencies]
+console_error_panic_hook = { version = "^0.1", optional = true }
+wee_alloc = { version = "^0.4", optional = true }
 specs = "^0.12"
 specs-derive = "^0.2"
 rand = "^0.5"
 wasm-bindgen = "^0.2"
-cfg-if = "^0.1"
-console_error_panic_hook = { version = "^0.1", optional = true }
-wee_alloc = { version = "^0.4", optional = true }
+getrandom = { version = "^0.2", features = ["js"] }
 
 [dev-dependencies]
 cargo-watch = "^7"
-wasm-pack = "^0.4"
 
 [profile.release]
 debug = true

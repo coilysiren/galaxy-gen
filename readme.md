@@ -2,7 +2,7 @@
 
 `{ rust => wasm => js }` galaxy generation simulation
 
-[previous verison](https://github.com/lynncyrin/galaxySim), written in python
+[previous verison](https://github.com/coilysiren/galaxySim), written in python
 
 ## commands
 
@@ -16,6 +16,35 @@
 - `./pkg/` is created via [wasm-pack](https://github.com/ashleygwilliams/wasm-pack), which compiles the rust code to `wasm` + `js` + `typescript`
 - `./src/js/` imports `./pkg/` and runs js tests via `npm test`
 - `./dist/` is created via [webpack](https://webpack.js.org/), which compiles everything mentioned above + [angular](http://angular.io/)
-- http://galaxygen.lynncyrin.me is updated via [heroku](https://www.heroku.com/) with the compiled code
+- http://galaxygen.coilysiren.me is updated via [heroku](https://www.heroku.com/) with the compiled code
 
-Note: the compiled folders aren't present on the default branch. Go to [{ branch: deploy }](https://github.com/lynncyrin/galaxy-gen/tree/deploy) to view them.
+Note: the compiled folders aren't present on the default branch. Go to [{ branch: deploy }](https://github.com/coilysiren/galaxy-gen/tree/deploy) to view them.
+
+## code
+
+## rust
+
+`rust/*` contains the rust logic, wrapped in calls to [wasm-bindgen](https://github.com/rustwasm/wasm-bindgen) to provide a js api
+
+the files there are compiled to `galaxy_gen_backend` as `wasm` + `js`
+
+## rust files
+
+`galaxy.rs` represents the proxy of a real life `Galaxy`, like a [spiral](https://en.wikipedia.org/wiki/Spiral_galaxy) or [ring](https://en.wikipedia.org/wiki/Ring_galaxy).
+
+`cell.rs` represents a unit of space within a galaxy, and holds all of the identifying information about that unit of space. The galactic terrain is composed of (a variable language quantity of) cells, and come in two types: [generic gas clouds](https://en.wikipedia.org/wiki/Nebula) and [star systems](https://en.wikipedia.org/wiki/Star_system).
+
+
+## js
+
+`js/*` handles rendering the data created by the rust backend
+
+The `wasm` + `js` apis are loaded into the main application [typescript](https://www.typescriptlang.org/) via async imports `await import(.*[wasm|js])'`
+
+## js files
+
+`setup.js` handles loading the js binds + wasm binary into `main.ts`. `setup.js` has to be a `js` file rather than `ts` because of a quirk of how `typescript@^2.8` compiles `async import(...`
+
+`main.ts` is [typescript](https://www.typescriptlang.org/) because typescript is good and pure :sparkles:
+
+`tests/*` are [mocha](https://mochajs.org/) tests in a [karma](https://karma-runner.github.io/) runner, they run a chrome browser and execute the `wasm` + `js` there.

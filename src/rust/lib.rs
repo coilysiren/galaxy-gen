@@ -1,9 +1,8 @@
 #[macro_use]
-extern crate cfg_if;
+extern crate specs_derive;
+
 extern crate rand;
 extern crate specs;
-#[macro_use]
-extern crate specs_derive;
 extern crate wasm_bindgen;
 
 pub mod cell;
