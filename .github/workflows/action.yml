@@ -14,9 +14,16 @@ jobs:
     steps:
       - uses: actions/checkout@v3
       - run: curl -sSf https://sh.rustup.rs | sh -s -- -y
+
+      # rust
       - run: cargo build
       - run: cargo check
       - run: cargo test
-      - run: pip install tomlq
+
+      # wasm
       - run: cargo install wasm-pack
       - run: wasm-pack build --target web
+
+      # js
+      - run: npm ci
+      - run: wget -qO- https://raw.githubusercontent.com/nvm-sh/nvm/v0.39.5/install.sh | bash
