@@ -3,7 +3,7 @@ import "./styles.css"
 import * as dataviz from "./dataviz";
 import * as galaxy from "./galaxy";
 
-const wasm = import("galaxy_gen_backend/galaxy_gen_backend_bg.wasm");
+const wasm = import("galaxy_gen_backend/galaxy_gen_backend");
 
 export  function Interface() {
   const [galaxySize, setGalaxySize] = React.useState(100);
@@ -11,6 +11,7 @@ export  function Interface() {
   let galaxyFrontend: galaxy.Frontend = null;
 
   wasm.then((module) => {
+    console.log("module", module)
     setWasmModule(module);
   });
 
@@ -32,10 +33,8 @@ export  function Interface() {
     if (wasmModule === null) {
       console.error("wasm not yet loaded");
     } else {
-      galaxyFrontend = new galaxy.Frontend(wasmModule, galaxySize);
+      galaxyFrontend = new galaxy.Frontend(galaxySize);
       galaxyFrontend.seed();
-      // galaxyFrontend = new galaxy.Frontend(galaxySize);
-      // dataviz.DataViz(galaxyFrontend);
     }
   };
 
@@ -46,7 +45,7 @@ export  function Interface() {
   )
 
   const handleTickClick = () => {
-    // galaxyFrontend.tick();
+    galaxyFrontend.tick();
   };
 
   const tickButton = (
