@@ -17,3 +17,6 @@ jobs:
       - run: cargo build
       - run: cargo check
       - run: cargo test
+      - run: pip install tomlq
+      - run: cargo install wasm-pack --version $(tomlq -r '.package[] | select(.name == "wasm-pack") .version' Cargo.lock)
+      - run: wasm-pack build --target web
