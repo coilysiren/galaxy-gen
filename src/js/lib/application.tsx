@@ -3,24 +3,16 @@ import "./styles.css"
 import * as dataviz from "./dataviz";
 import * as galaxy from "./galaxy";
 
+const wasm = import("galaxy_gen_backend/galaxy_gen_backend_bg.wasm");
+
 export  function Interface() {
   const [galaxySize, setGalaxySize] = React.useState(100);
   const [wasmModule, setWasmModule] = React.useState(null);
   let galaxyFrontend: galaxy.Frontend = null;
 
-  // Fetch and instantiate the Wasm module
-  React.useEffect(() => {
-    const initWasm = async () => {
-      try {
-        const wasmModule = await import("galaxy_gen_backend");
-        const wasmGalaxy = new wasmModule.Galaxy(galaxySize, 0);
-        setWasmModule(module);
-      } catch (err) {
-        console.error('Error loading Wasm module:', err);
-      }
-    };
-    initWasm();
-  }, []);
+  wasm.then((module) => {
+    setWasmModule(module);
+  });
 
   const handleChange = (event: React.ChangeEvent<HTMLInputElement>) => {
     setGalaxySize(parseInt(event.target.value));
@@ -37,15 +29,14 @@ export  function Interface() {
   )
 
   const handleSeedClick = () => {
-    if (wasmModule !== null) {
-    } else {
+    if (wasmModule === null) {
       console.error("wasm not yet loaded");
+    } else {
+      galaxyFrontend = new galaxy.Frontend(wasmModule, galaxySize);
+      galaxyFrontend.seed();
+      // galaxyFrontend = new galaxy.Frontend(galaxySize);
+      // dataviz.DataViz(galaxyFrontend);
     }
-    // galaxyFrontend = new galaxy.Frontend(galaxySize);
-    // galaxyFrontend.seed();
-    galaxyFrontend = new galaxy.Frontend(wasmModule, galaxySize);
-    galaxyFrontend.seed();
-    // dataviz.DataViz(galaxyFrontend);
   };
 
   const seedButton = (
