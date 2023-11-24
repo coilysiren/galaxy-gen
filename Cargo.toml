@@ -3,9 +3,9 @@
 [package]
 name = "galaxy_gen_backend"
 description = "{ rust => wasm => js } galaxy generation simulation"
-repository = "https://github.com/lynncyrin/galaxy-gen"
-version = "0.1.0"
-authors = ["Lynn Cyrin <lynncyrin@gmail.com>"]
+repository = "https://github.com/coilysiren/galaxy-gen"
+version = "0.0.1"
+authors = ["Kai Siren <coilysiren@gmail.com>"]
 license = "AGPL"
 
 [features]

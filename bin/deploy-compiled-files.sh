@@ -2,8 +2,8 @@
 
 # setup git
 git init
-git config --global user.email "lynncyrin@gmail.com"
-git config --global user.name "Lynn Cyrin"
+git config --global user.email "coilysiren@gmail.com"
+git config --global user.name "Kai Siren"
 git config --global pull.rebase true
 
 # remove travis's readonly origin, add our origin with write permissions
