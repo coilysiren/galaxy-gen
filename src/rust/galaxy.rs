@@ -14,6 +14,9 @@ pub struct Galaxy {
 impl Galaxy {
     #[wasm_bindgen(constructor)]
     pub fn new(size: u16, mass: u16) -> Galaxy {
+        // create a new galaxy
+        // https://github.com/rustwasm/console_error_panic_hook#readme
+        console_error_panic_hook::set_once();
         return Galaxy {
             size,
             cells: vec![
@@ -25,23 +28,36 @@ impl Galaxy {
             ],
         };
     }
-    pub fn seed(&mut self) {
+    pub fn seed(&self, additional: u16) -> Galaxy {
+        // add mass to the galaxy
+        let mut next = Vec::with_capacity((self.size as usize).pow(2));
+        let mut rng = rand::thread_rng();
         for cell_index in 0..self.size.pow(2) {
-            self.cells[cell_index as usize] = Cell {
-                mass: rand::thread_rng().gen_range(0, self.size),
+            let mass = self.cells[cell_index as usize].mass;
+            next.push(Cell {
+                mass: mass + rng.gen_range(0..additional + 1),
                 ..Default::default()
-            };
+            });
         }
+        return Galaxy {
+            size: self.size,
+            cells: next,
+        };
     }
-    pub fn tick(&mut self) {
-        let next = self.cells.clone();
+    pub fn tick(&self, reach: u16) -> Galaxy {
+        // advance the galaxy one tick
+        // TODO: not yet implemented
+        let next = Vec::with_capacity((self.size as usize).pow(2));
         for index in 0..(self.size - 1) {
             let _cell = self.cells[index as usize];
-            let _neighbours = self.neighbours(index, 1);
+            let _neighbours = self.neighbours(index, reach);
         }
-        self.cells = next;
+        return Galaxy {
+            size: self.size,
+            cells: next,
+        };
     }
-    pub fn cell_mass(&self) -> Vec<u16> {
+    pub fn mass(&self) -> Vec<u16> {
         // for every cell, get the mass
         let mut mass = Vec::new();
         for cell in self.cells.iter() {
@@ -127,21 +143,42 @@ mod tests_intial_generation {
     }
     #[test]
     fn test_seed_no_panic() {
-        Galaxy::new(10, 0).seed();
+        Galaxy::new(10, 0).seed(1);
     }
     #[test]
     fn test_seed_tick_no_panic() {
-        let mut galaxy = Galaxy::new(10, 1);
-        galaxy.seed();
-        galaxy.tick();
+        Galaxy::new(10, 1).seed(1).tick(1);
     }
     #[test]
     fn test_seed_alters_data() {
         let mut galaxy = Galaxy::new(10, 0);
         let cells_before = galaxy.cells.clone();
-        galaxy.seed();
+        galaxy = galaxy.seed(1);
         let cells_after = galaxy.cells.clone();
         assert_ne!(cells_before, cells_after);
+    }
+    #[test]
+    fn test_seed_doesnt_alter_when_zero() {
+        let mut galaxy = Galaxy::new(10, 0);
+        let cells_before = galaxy.cells.clone();
+        galaxy = galaxy.seed(0);
+        let cells_after = galaxy.cells.clone();
+        assert_eq!(cells_before, cells_after);
+    }
+    #[test]
+    fn test_seed_alters_data_twice() {
+        let mut galaxy = Galaxy::new(10, 0);
+        let cells_first = galaxy.cells.clone();
+
+        galaxy = galaxy.seed(1);
+        let cells_second = galaxy.cells.clone();
+        assert_ne!(cells_first, cells_second);
+
+        galaxy = galaxy.seed(1);
+        let cells_third = galaxy.cells.clone();
+        assert_ne!(cells_first, cells_second);
+        assert_ne!(cells_first, cells_third);
+        assert_ne!(cells_second, cells_third);
     }
 }
 

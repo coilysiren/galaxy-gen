@@ -1,3 +1,5 @@
 wasm-pack.log
 target/
+dist/
+pkg/
 node_modules/

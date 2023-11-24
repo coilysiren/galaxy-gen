@@ -1,4 +1,4 @@
-import * as IWasmJSApi from "galaxy_gen_backend/galaxy_gen_backend";
+import * as wasm from "galaxy_gen_backend/galaxy_gen_backend";
 
 interface Cell {
   mass: number;
@@ -10,27 +10,27 @@ interface Cell {
  * Main is constructed with already compiled wasm
  * and does business logic with that wasm
  */
-export class Main {
-  private galaxy: IWasmJSApi.Galaxy;
+export class Frontend {
+  private galaxy: wasm.Galaxy; // pointer to galaxy
   private galaxySize: number;
 
   constructor(galaxySize: number) {
+    this.galaxy = new wasm.Galaxy(galaxySize, 0);
     this.galaxySize = galaxySize;
-    this.galaxy = new IWasmJSApi.Galaxy(galaxySize, 0);
   }
 
-  public seed(): void {
-    this.galaxy.seed();
+  public seed(additionalMass: number): void {
+    this.galaxy.seed(additionalMass);
   }
 
-  public tick(): void {
-    this.galaxy.tick();
+  public tick(gravityReach: number): void {
+    this.galaxy.tick(gravityReach);
   }
 
   public cells(): Cell[] {
     // Uint16Array to list of numbers
     let cells: Cell[] = [];
-    const mass = Array.from(this.galaxy.cell_mass());
+    const mass = Array.from(this.galaxy.mass());
     mass.forEach((element, index) => {
       cells.push({
         mass: element,
