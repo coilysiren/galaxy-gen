@@ -13,5 +13,5 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       # https://www.rust-lang.org/tools/install
-      - run: curl -sSf https://sh.rustup.rs | sh
+      - run: curl -sSf https://sh.rustup.rs | sh -s -- -y
       - run: cargo build
