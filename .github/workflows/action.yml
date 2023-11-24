@@ -11,6 +11,7 @@ on:
 jobs:
   test:
     runs-on: ubuntu-latest
-    container: rust:1.74
     steps:
+      # https://www.rust-lang.org/tools/install
+      - run: curl -sSf https://sh.rustup.rs | sh
       - run: cargo build
