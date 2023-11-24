@@ -7,27 +7,9 @@ install:
 	cargo build
 	npm install
 
-dev: ## dev (primary entrypoint)
-	npx concurrently \
-		-k -n rust,rust::test,js,js::test \
-		-c red,red,green,green \
-		"make build-rust-dev" \
-		"make test-rust-dev" \
-		"make build-js-dev" \
-		"make test-js-dev"
-
 test-rust:
 	cargo check
 	cargo test -- --color always
-
-test-rust-dev:
-	cargo watch -s "make test-rust"
-
-test-js:
-	npx karma start src/js/tests/karma.conf.js --singleRun=true
-
-test-js-dev:
-	npx karma start src/js/tests/karma.conf.js
 
 build-rust:
 	cargo build
