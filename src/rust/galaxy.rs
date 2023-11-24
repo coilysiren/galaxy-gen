@@ -31,10 +31,11 @@ impl Galaxy {
     pub fn seed(&self, additional: u16) -> Galaxy {
         // add mass to the galaxy
         let mut next = Vec::with_capacity((self.size as usize).pow(2));
+        let mut rng = rand::thread_rng();
         for cell_index in 0..self.size.pow(2) {
             let mass = self.cells[cell_index as usize].mass;
             next.push(Cell {
-                mass: mass + rand::thread_rng().gen_range(0, additional + 1),
+                mass: mass + rng.gen_range(0..additional + 1),
                 ..Default::default()
             });
         }
