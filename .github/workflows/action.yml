@@ -9,7 +9,7 @@ on:
       - main
 
 jobs:
-  test:
+  rust:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v3
@@ -23,7 +23,16 @@ jobs:
       # wasm
       - run: cargo install wasm-pack
       - run: wasm-pack build --target web
+  js:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+      - run: curl -sSf https://sh.rustup.rs | sh -s -- -y
+      - run: wget -qO- https://raw.githubusercontent.com/nvm-sh/nvm/v0.39.5/install.sh | bash
+
+      # wasm
+      - run: cargo install wasm-pack
+      - run: wasm-pack build --target web
 
       # js
       - run: npm ci
-      - run: wget -qO- https://raw.githubusercontent.com/nvm-sh/nvm/v0.39.5/install.sh | bash
