@@ -2,6 +2,8 @@ use cell::*;
 use rand::Rng;
 use wasm_bindgen::prelude::*;
 
+use crate::utils;
+
 // types
 #[wasm_bindgen]
 pub struct Galaxy {
@@ -14,6 +16,7 @@ pub struct Galaxy {
 impl Galaxy {
     #[wasm_bindgen(constructor)]
     pub fn new(size: u16, mass: u16) -> Galaxy {
+        utils::set_panic_hook();
         return Galaxy {
             size,
             cells: vec![

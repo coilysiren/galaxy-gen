@@ -29,18 +29,31 @@ export  function Interface() {
     </div>
   )
 
-  const handleSeedClick = () => {
+  const handleInitClick = () => {
     if (wasmModule === null) {
       console.error("wasm not yet loaded");
     } else {
       galaxyFrontend = new galaxy.Frontend(galaxySize);
+    }
+  };
+
+  const initButton = (
+    <button type="button" className="btn btn-primary" onClick={handleInitClick}>
+      init new galaxy
+    </button>
+  )
+
+  const handleSeedClick = () => {
+    if (wasmModule === null) {
+      console.error("wasm not yet loaded");
+    } else {
       galaxyFrontend.seed();
     }
   };
 
   const seedButton = (
     <button type="button" className="btn btn-primary" onClick={handleSeedClick}>
-      seed new galaxy
+      seed the galaxy
     </button>
   )
 
@@ -60,6 +73,7 @@ export  function Interface() {
       <h2><small className="text-muted">( rust =&gt; wasm =&gt; js ) galaxy generation simulation</small></h2>
       {galaxySizeInput}
       <div className="d-flex justify-content-between">
+        {initButton}
         {seedButton}
         {tickButton}
       </div>
