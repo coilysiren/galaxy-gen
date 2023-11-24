@@ -1,4 +1,4 @@
-use wasm_bindgen::prelude::*;
+use crate::galaxy::Galaxy;
 
 // internal constants
 impl Cell {
@@ -28,7 +28,7 @@ impl Default for Cell {
 // public methods
 impl Cell {
     pub fn get_type(&self) -> u8 {
-        if self.mass < Cell::MIN_MASS_STAR {
+        if self.mass < Galaxy::MIN_MASS_STAR {
             return Cell::TYPE_INDEX_GAS;
         } else {
             return Cell::TYPE_INDEX_STAR;
@@ -45,9 +45,9 @@ impl Cell {
 // internal methods
 impl Cell {
     pub fn check_if_type(&self, type_index: u8) -> bool {
-        if (type_index == Cell::TYPE_INDEX_GAS) & (self.mass < Cell::MIN_MASS_STAR) {
+        if (type_index == Cell::TYPE_INDEX_GAS) & (self.mass < Galaxy::MIN_MASS_STAR) {
             return true;
-        } else if (type_index == Cell::TYPE_INDEX_STAR) & (self.mass >= Cell::MIN_MASS_STAR) {
+        } else if (type_index == Cell::TYPE_INDEX_STAR) & (self.mass >= Galaxy::MIN_MASS_STAR) {
             return true;
         } else {
             return false;
@@ -69,7 +69,7 @@ mod tests_cell_types {
     #[test]
     fn test_star_cell() {
         let cell = Cell {
-            mass: Cell::MIN_MASS_STAR * 2,
+            mass: Galaxy::MIN_MASS_STAR * 2,
             ..Default::default()
         };
         assert_eq!(cell.is_star(), true);

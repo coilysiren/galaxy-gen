@@ -19,18 +19,18 @@ export class Frontend {
     this.galaxySize = galaxySize;
   }
 
-  public seed(): void {
-    this.galaxy.seed();
+  public seed(additionalMass: number): void {
+    this.galaxy.seed(additionalMass);
   }
 
-  public tick(): void {
-    this.galaxy.tick();
+  public tick(gravityReach: number): void {
+    this.galaxy.tick(gravityReach);
   }
 
   public cells(): Cell[] {
     // Uint16Array to list of numbers
     let cells: Cell[] = [];
-    const mass = Array.from(this.galaxy.cell_mass());
+    const mass = Array.from(this.galaxy.mass());
     mass.forEach((element, index) => {
       cells.push({
         mass: element,
