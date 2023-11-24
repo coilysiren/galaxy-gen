@@ -1,6 +1,4 @@
-# galaxyGen
-
-[![Build Status](https://travis-ci.com/coilysiren/galaxy-gen.svg?branch=main)](https://travis-ci.com/coilysiren/galaxy-gen)
+# galaxy-gen
 
 `{ rust => wasm => js }` galaxy generation simulation
 
