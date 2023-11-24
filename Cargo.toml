@@ -9,15 +9,19 @@ authors = ["Kai Siren <coilysiren@gmail.com>"]
 license = "AGPL"
 
 [lib]
-crate-type = ["cdylib"]
+crate-type = ["cdylib", "rlib"]
 path = "src/rust/lib.rs"
 
+[features]
+default = ["console_error_panic_hook", "wee_alloc"]
+
 [dependencies]
+console_error_panic_hook = { version = "^0.1", optional = true }
+wee_alloc = { version = "^0.4", optional = true }
 specs = "^0.12"
 specs-derive = "^0.2"
 rand = "^0.5"
 wasm-bindgen = "^0.2"
-wasm-pack = "^0.12"
 getrandom = { version = "^0.2", features = ["js"] }
 
 [dev-dependencies]
