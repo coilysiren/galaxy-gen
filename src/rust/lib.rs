@@ -1,5 +1,3 @@
-#![feature(extern_prelude, custom_attribute)]
-
 #[macro_use]
 extern crate cfg_if;
 extern crate rand;
