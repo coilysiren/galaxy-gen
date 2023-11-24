@@ -1,9 +1,3 @@
-/target
-**/*.rs.bk
-node_modules
-
-# the following entries are removed from this file on the deploy branch
-dist/
-pkg/
-*.wasm
-*.log
+wasm-pack.log
+target/
+node_modules/
