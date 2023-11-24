@@ -1,39 +1,43 @@
 import * as IWasmJSApi from "galaxy_gen_backend/galaxy_gen_backend";
 
-interface IWasmBinary {
-  memory: WebAssembly.Memory;
+interface Cell {
+  mass: number;
+  x: number;
+  y: number;
 }
 
 /**
- * MainScript is constructed with already compiled wasm
+ * Main is constructed with already compiled wasm
  * and does business logic with that wasm
  */
-export class MainScript {
-  private wasmJSApi: typeof IWasmJSApi;
-  private wasmBinary: IWasmBinary;
+export class Main {
   private galaxy: IWasmJSApi.Galaxy;
   private galaxySize: number;
 
-  constructor(wasmJSApi: typeof IWasmJSApi, wasmBinary: IWasmBinary) {
-    this.wasmJSApi = wasmJSApi;
-    this.wasmBinary = wasmBinary;
+  constructor(galaxySize: number) {
+    this.galaxySize = galaxySize;
+    this.galaxy = new IWasmJSApi.Galaxy(galaxySize, 0);
   }
 
-  public cells(): Uint8Array {
-    return new Uint8Array(
-      this.wasmBinary.memory.buffer,
-      this.galaxy.cells_pointer(),
-      this.memoryRange
-    );
-  }
-
-  public generateData(size: number): void {
-    this.galaxySize = size;
-    this.galaxy = new this.wasmJSApi.Galaxy(size);
+  public seed(): void {
     this.galaxy.seed();
   }
 
-  private get memoryRange(): number {
-    return this.galaxySize ** 2;
+  public tick(): void {
+    this.galaxy.tick();
+  }
+
+  public cells(): Cell[] {
+    // Uint16Array to list of numbers
+    let cells: Cell[] = [];
+    const mass = Array.from(this.galaxy.cell_mass());
+    mass.forEach((element, index) => {
+      cells.push({
+        mass: element,
+        x: index % this.galaxySize,
+        y: Math.floor(index / this.galaxySize),
+      });
+    });
+    return cells;
   }
 }

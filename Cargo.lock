@@ -458,7 +458,6 @@ dependencies = [
  "specs",
  "specs-derive",
  "wasm-bindgen",
- "wee_alloc",
 ]
 
 [[package]]
@@ -668,12 +667,6 @@ checksum = "5a634b1c61a95585bd15607c6ab0c4e5b226e695ff2800ba0cdccddf208c406c"
 dependencies = [
  "autocfg",
 ]
-
-[[package]]
-name = "memory_units"
-version = "0.4.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8452105ba047068f40ff7093dd1d9da90898e63dd61736462e9cdda6a90ad3c3"
 
 [[package]]
 name = "mio"
@@ -1390,18 +1383,6 @@ dependencies = [
  "nix 0.22.3",
  "notify",
  "walkdir",
- "winapi 0.3.9",
-]
-
-[[package]]
-name = "wee_alloc"
-version = "0.4.5"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "dbb3b5a6b2bb17cb6ad44a2e68a43e8d2722c997da10e928665c72ec6c0a0b8e"
-dependencies = [
- "cfg-if 0.1.10",
- "libc",
- "memory_units",
  "winapi 0.3.9",
 ]
 
