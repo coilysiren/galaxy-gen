@@ -65,6 +65,11 @@ impl Galaxy {
     pub const STAR_MAX_MASS: u16 = u16::MAX / 2;
 }
 
+impl Galaxy {
+    // https://en.wikipedia.org/wiki/Newton%27s_law_of_universal_gravitation
+    pub const GRAVATIONAL_CONSTANT: f32 = 0.0000000000667408;
+}
+
 // public methods
 #[wasm_bindgen]
 impl Galaxy {
@@ -110,6 +115,7 @@ impl Galaxy {
             .map(|index| {
                 let _cell = self.cells[index as usize];
                 let _neighbours = self.neighbours(index, reach);
+                let _next = self.gravitate(index, _neighbours);
                 Cell {
                     ..Default::default()
                 }
@@ -221,61 +227,77 @@ impl Galaxy {
     }
 }
 
+// private methods - the math focused ones
 impl Galaxy {
     fn gravitate(&self, index: u16, neighbours: Vec<(u16, u16)>) -> Cell {
         let mut next = self.cells[index as usize];
-        for neighbour_cell in neighbours {
-            let (accel_mangitude, accel_degree) = self.acceleration(index, neighbour_cell);
-            let (accel_mangitude, accel_degree) = self.average_acceleration(
+        for neighbour_coords in neighbours {
+            let (new_accel_mangitude, new_accel_degree) =
+                self.acceleration(index, neighbour_coords);
+            let (next_accel_mangitude, next_accel_degree) = self.combine_vectors(
                 next.accel_mangitude,
                 next.accel_degree,
-                accel_mangitude,
-                accel_degree,
+                new_accel_mangitude,
+                new_accel_degree,
             );
-            next.accel_mangitude += accel_mangitude;
-            next.accel_degree += accel_degree;
+            next.accel_mangitude = next_accel_mangitude;
+            next.accel_degree = next_accel_degree;
         }
         return next;
     }
-    fn average_acceleration(
+    fn combine_vectors(
         &self,
         init_magnitude: f32,
         init_degree: f32,
         new_magnitude: f32,
         new_degree: f32,
     ) -> (f32, f32) {
-        // next_magnitude += new_magnitude;
-        // next_degree += new_degree;
-        return (0.0, 0.0);
+        let init_x = init_magnitude * init_degree.to_radians().cos();
+        let init_y = init_magnitude * init_degree.to_radians().sin();
+        let new_x = new_magnitude * new_degree.to_radians().cos();
+        let new_y = new_magnitude * new_degree.to_radians().sin();
+        let x = init_x + new_x;
+        let y = init_y + new_y;
+        let magnitude = (x.powi(2) + y.powi(2)).sqrt();
+        let degree = (x.atan2(y)).to_degrees();
+        return (magnitude, degree);
     }
-    fn acceleration(&self, index: u16, neighbour_index: (u16, u16)) -> (f32, f32) {
+    fn acceleration(&self, index: u16, neighbour_coords: (u16, u16)) -> (f32, f32) {
         let cell = self.cells[index as usize];
-        let neighbour_index = self.col_row_to_index(neighbour_index.0, neighbour_index.1);
+        let neighbour_index = self.col_row_to_index(neighbour_coords.0, neighbour_coords.1);
         let neighbour_cell = self.cells[neighbour_index as usize];
-
-        // let (accel_mangitude, accel_degree) = self.acceleration_magnitude_and_degree(
-        //     cell.mass,
-        //     neighbour_cell.mass,
-        //     self.distance(cell, neighbour_cell),
-        // );
-        return (0.0, 0.0);
+        let distance = self.distance(index, neighbour_coords);
+        let degrees = self.degrees(index, neighbour_coords);
+        let gravitation = self.gravitation(cell.mass, neighbour_cell.mass, distance);
+        let acceleration = gravitation / cell.mass as f32;
+        return (acceleration, degrees);
     }
-    fn degrees(&self, index: u16, neighbour_index: (u16, u16)) -> f32 {
+    fn gravitation(&self, mass_one: u16, mass_two: u16, distance: f32) -> f32 {
+        // https://en.wikipedia.org/wiki/Newton%27s_law_of_universal_gravitation
+        // F = G * ((m1 * m2) / r^2)
+        let force =
+            Galaxy::GRAVATIONAL_CONSTANT * ((mass_one * mass_two) as f32 / distance.powi(2));
+        return force;
+    }
+    fn degrees(&self, index: u16, neighbour_coords: (u16, u16)) -> f32 {
         let (cell_x, cell_y) = self.index_to_row_col(index);
-        let x = neighbour_index.0 as i16 - cell_x as i16;
-        let y = neighbour_index.1 as i16 - cell_y as i16;
+        let x = neighbour_coords.0 as i16 - cell_x as i16;
+        let y = neighbour_coords.1 as i16 - cell_y as i16;
         let radians = (x as f32).atan2(y as f32);
         let degrees = radians.to_degrees();
         return degrees;
     }
-    fn distance(&self, index: u16, neighbour_index: (u16, u16)) -> f32 {
+    fn distance(&self, index: u16, neighbour_coords: (u16, u16)) -> f32 {
         let (cell_x, cell_y) = self.index_to_row_col(index);
-        let x = (cell_x as i16 - neighbour_index.0 as i16).pow(2);
-        let y = (cell_y as i16 - neighbour_index.1 as i16).pow(2);
+        let x = (cell_x as i16 - neighbour_coords.0 as i16).pow(2);
+        let y = (cell_y as i16 - neighbour_coords.1 as i16).pow(2);
         let distance = (x as f32 + y as f32).sqrt();
         return distance;
     }
 }
+
+#[cfg(test)]
+mod tests_combine_vectors {}
 
 #[cfg(test)]
 mod tests_distance {
@@ -283,9 +305,9 @@ mod tests_distance {
     #[test]
     fn test_distance_one() {
         let galaxy = Galaxy::new(3, 0, 1000);
-        let index = 0;
-        let neighbour_index = (1, 1);
-        let mut distance = galaxy.distance(index, neighbour_index);
+        let index: u16 = 0;
+        let neighbour_coords = (1, 1);
+        let mut distance = galaxy.distance(index, neighbour_coords);
         distance = (distance * 100.0).round() / 100.0;
         assert_eq!(distance, 1.41);
     }
@@ -293,8 +315,8 @@ mod tests_distance {
     fn test_distance_two() {
         let galaxy = Galaxy::new(3, 0, 1000);
         let index = 0;
-        let neighbour_index = (2, 2);
-        let mut distance = galaxy.distance(index, neighbour_index);
+        let neighbour_coords = (2, 2);
+        let mut distance = galaxy.distance(index, neighbour_coords);
         distance = (distance * 100.0).round() / 100.0;
         assert_eq!(distance, 2.83);
     }
@@ -302,8 +324,8 @@ mod tests_distance {
     fn test_distance_two_linear() {
         let galaxy = Galaxy::new(3, 0, 1000);
         let index = 0;
-        let neighbour_index = (0, 2);
-        let mut distance = galaxy.distance(index, neighbour_index);
+        let neighbour_coords = (0, 2);
+        let mut distance = galaxy.distance(index, neighbour_coords);
         distance = (distance * 100.0).round() / 100.0;
         assert_eq!(distance, 2.00);
     }
@@ -315,46 +337,41 @@ mod tests_degrees {
     fn test_degrees_x() {
         let galaxy = Galaxy::new(3, 0, 1000);
         let index = 0;
-        let neighbour_index = (2, 0);
-        let mut degrees = galaxy.degrees(index, neighbour_index);
-        degrees = degrees.round();
-        assert_eq!(degrees, 90.0, "neighbour_index: {:?}, x", neighbour_index);
+        let neighbour_coords = (2, 0);
+        let degrees = galaxy.degrees(index, neighbour_coords).round() as u16;
+        assert_eq!(degrees, 90, "neighbour_coords: {:?}, x", neighbour_coords);
     }
     #[test]
     fn test_degrees_y() {
         let galaxy = Galaxy::new(3, 0, 1000);
         let index = 0;
-        let neighbour_index = (0, 2);
-        let mut degrees = galaxy.degrees(index, neighbour_index);
-        degrees = degrees.round();
-        assert_eq!(degrees, 0.0, "neighbour_index: {:?}, y", neighbour_index);
+        let neighbour_coords = (0, 2);
+        let degrees = galaxy.degrees(index, neighbour_coords).round() as u16;
+        assert_eq!(degrees, 0, "neighbour_coords: {:?}, y", neighbour_coords);
     }
     #[test]
     fn test_degrees_z_one() {
         let galaxy = Galaxy::new(3, 0, 1000);
         let index = 0;
-        let neighbour_index = (2, 2);
-        let mut degrees = galaxy.degrees(index, neighbour_index);
-        degrees = degrees.round();
-        assert_eq!(degrees, 45.0, "neighbour_index: {:?}, xy", neighbour_index);
+        let neighbour_coords = (2, 2);
+        let degrees = galaxy.degrees(index, neighbour_coords).round() as u16;
+        assert_eq!(degrees, 45, "neighbour_coords: {:?}, xy", neighbour_coords);
     }
     #[test]
     fn test_degrees_z_two() {
         let galaxy = Galaxy::new(3, 0, 1000);
         let index = 0;
-        let neighbour_index = (1, 2);
-        let mut degrees = galaxy.degrees(index, neighbour_index);
-        degrees = degrees.round();
-        assert_eq!(degrees, 27.0, "neighbour_index: {:?}, xy", neighbour_index);
+        let neighbour_coords = (1, 2);
+        let degrees = galaxy.degrees(index, neighbour_coords).round() as u16;
+        assert_eq!(degrees, 27, "neighbour_coords: {:?}, xy", neighbour_coords);
     }
     #[test]
     fn test_degrees_z_three() {
         let galaxy = Galaxy::new(3, 0, 1000);
         let index = 0;
-        let neighbour_index = (2, 1);
-        let mut degrees = galaxy.degrees(index, neighbour_index);
-        degrees = degrees.round();
-        assert_eq!(degrees, 63.0, "neighbour_index: {:?}, xy", neighbour_index);
+        let neighbour_coords = (2, 1);
+        let degrees = galaxy.degrees(index, neighbour_coords).round() as u16;
+        assert_eq!(degrees, 63, "neighbour_coords: {:?}, xy", neighbour_coords);
     }
 }
 
