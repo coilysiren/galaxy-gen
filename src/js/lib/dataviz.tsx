@@ -66,7 +66,7 @@ export function initData(galaxyFrontend: galaxy.Frontend) {
       return c.y * sizeModifier + margin.top;
     })
     .attr("r", function (c: galaxy.Cell) {
-      return c.mass;
+      return Math.log(c.mass);
     })
     .style("fill", "#69b3a2");
 }
