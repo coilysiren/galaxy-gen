@@ -260,6 +260,14 @@ impl Galaxy {
         // );
         return (0.0, 0.0);
     }
+    fn degrees(&self, index: u16, neighbour_index: (u16, u16)) -> f32 {
+        let (cell_x, cell_y) = self.index_to_row_col(index);
+        let x = neighbour_index.0 as i16 - cell_x as i16;
+        let y = neighbour_index.1 as i16 - cell_y as i16;
+        let radians = (x as f32).atan2(y as f32);
+        let degrees = radians.to_degrees();
+        return degrees;
+    }
     fn distance(&self, index: u16, neighbour_index: (u16, u16)) -> f32 {
         let (cell_x, cell_y) = self.index_to_row_col(index);
         let x = (cell_x as i16 - neighbour_index.0 as i16).pow(2);
@@ -270,7 +278,7 @@ impl Galaxy {
 }
 
 #[cfg(test)]
-mod tests_gravity_calc {
+mod tests_distance {
     use super::*;
     #[test]
     fn test_distance_one() {
@@ -298,6 +306,55 @@ mod tests_gravity_calc {
         let mut distance = galaxy.distance(index, neighbour_index);
         distance = (distance * 100.0).round() / 100.0;
         assert_eq!(distance, 2.00);
+    }
+}
+
+mod tests_degrees {
+    use super::*;
+    #[test]
+    fn test_degrees_x() {
+        let galaxy = Galaxy::new(3, 0, 1000);
+        let index = 0;
+        let neighbour_index = (2, 0);
+        let mut degrees = galaxy.degrees(index, neighbour_index);
+        degrees = degrees.round();
+        assert_eq!(degrees, 90.0, "neighbour_index: {:?}, x", neighbour_index);
+    }
+    #[test]
+    fn test_degrees_y() {
+        let galaxy = Galaxy::new(3, 0, 1000);
+        let index = 0;
+        let neighbour_index = (0, 2);
+        let mut degrees = galaxy.degrees(index, neighbour_index);
+        degrees = degrees.round();
+        assert_eq!(degrees, 0.0, "neighbour_index: {:?}, y", neighbour_index);
+    }
+    #[test]
+    fn test_degrees_z_one() {
+        let galaxy = Galaxy::new(3, 0, 1000);
+        let index = 0;
+        let neighbour_index = (2, 2);
+        let mut degrees = galaxy.degrees(index, neighbour_index);
+        degrees = degrees.round();
+        assert_eq!(degrees, 45.0, "neighbour_index: {:?}, xy", neighbour_index);
+    }
+    #[test]
+    fn test_degrees_z_two() {
+        let galaxy = Galaxy::new(3, 0, 1000);
+        let index = 0;
+        let neighbour_index = (1, 2);
+        let mut degrees = galaxy.degrees(index, neighbour_index);
+        degrees = degrees.round();
+        assert_eq!(degrees, 27.0, "neighbour_index: {:?}, xy", neighbour_index);
+    }
+    #[test]
+    fn test_degrees_z_three() {
+        let galaxy = Galaxy::new(3, 0, 1000);
+        let index = 0;
+        let neighbour_index = (2, 1);
+        let mut degrees = galaxy.degrees(index, neighbour_index);
+        degrees = degrees.round();
+        assert_eq!(degrees, 63.0, "neighbour_index: {:?}, xy", neighbour_index);
     }
 }
 
