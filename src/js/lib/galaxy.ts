@@ -1,6 +1,6 @@
 import * as wasm from "galaxy_gen_backend/galaxy_gen_backend";
 
-interface Cell {
+export interface Cell {
   mass: number;
   x: number;
   y: number;
@@ -12,32 +12,33 @@ interface Cell {
  */
 export class Frontend {
   private galaxy: wasm.Galaxy; // pointer to galaxy
-  private galaxySize: number;
+  public galaxySize: number;
 
-  constructor(galaxySize: number) {
-    this.galaxy = new wasm.Galaxy(galaxySize, 0);
+  constructor(galaxySize: number, minStarMass: number) {
+    this.galaxy = new wasm.Galaxy(galaxySize, 0, minStarMass);
     this.galaxySize = galaxySize;
   }
 
   public seed(additionalMass: number): void {
-    this.galaxy.seed(additionalMass);
+    this.galaxy = this.galaxy.seed(additionalMass);
   }
 
   public tick(gravityReach: number): void {
-    this.galaxy.tick(gravityReach);
+    this.galaxy = this.galaxy.tick(gravityReach);
   }
 
   public cells(): Cell[] {
-    // Uint16Array to list of numbers
-    let cells: Cell[] = [];
-    const mass = Array.from(this.galaxy.mass());
-    mass.forEach((element, index) => {
+    const mass = this.galaxy.mass();
+    const x = this.galaxy.x();
+    const y = this.galaxy.y();
+    const cells: Cell[] = [];
+    for (let i = 0; i < this.galaxySize ** 2; i++) {
       cells.push({
-        mass: element,
-        x: index % this.galaxySize,
-        y: Math.floor(index / this.galaxySize),
+        mass: mass[i],
+        x: x[i],
+        y: y[i],
       });
-    });
+    }
     return cells;
   }
 }
