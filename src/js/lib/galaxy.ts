@@ -23,15 +23,17 @@ export class Frontend {
     this.galaxy = this.galaxy.seed(additionalMass);
   }
 
-  public tick(gravityReach: number): void {
-    this.galaxy = this.galaxy.tick(gravityReach);
+  public tick(timeModifier: number): void {
+    this.galaxy = this.galaxy.tick(timeModifier);
   }
 
   public cells(): Cell[] {
+    const cells: Cell[] = [];
+
     const mass = this.galaxy.mass();
     const x = this.galaxy.x();
     const y = this.galaxy.y();
-    const cells: Cell[] = [];
+
     for (let i = 0; i < this.galaxySize ** 2; i++) {
       cells.push({
         mass: mass[i],

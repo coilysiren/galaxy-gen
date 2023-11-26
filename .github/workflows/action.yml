@@ -22,7 +22,7 @@ jobs:
 
       # wasm
       - run: cargo install wasm-pack
-      - run: wasm-pack build --target web
+      - run: wasm-pack build
   js:
     runs-on: ubuntu-latest
     steps:
@@ -32,7 +32,7 @@ jobs:
 
       # wasm
       - run: cargo install wasm-pack
-      - run: wasm-pack build --target web
+      - run: wasm-pack build
 
       # js
       - run: npm ci

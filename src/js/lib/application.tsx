@@ -6,9 +6,9 @@ import * as galaxy from "./galaxy";
 const wasm = import("galaxy_gen_backend/galaxy_gen_backend");
 
 export function Interface() {
-  const [galaxySize, setGalaxySize] = React.useState(100);
-  const [galaxySeedMass, setGalaxySeedMass] = React.useState(5);
-  const [minStarMass, setMinStarMass] = React.useState(1000);
+  const [galaxySize, setGalaxySize] = React.useState(50);
+  const [galaxySeedMass, setGalaxySeedMass] = React.useState(25);
+  const [timeModifier, setTimeModifier] = React.useState(0.01);
   let wasmModule: any = null;
   let galaxyFrontend: galaxy.Frontend = null;
 
@@ -61,24 +61,24 @@ export function Interface() {
     </div>
   );
 
-  const handleMinStarMassChange = (
+  const handletimeModifierChange = (
     event: React.ChangeEvent<HTMLInputElement>
   ) => {
     const value = parseInt(event.target.value);
-    setMinStarMass(Number.isNaN(value) ? 0 : value);
+    setTimeModifier(Number.isNaN(value) ? 0 : value);
   };
 
-  const minStarMassInput = (
+  const timeModifierInput = (
     <div className="input-group mb-3">
       <span className="input-group-text" id="basic-addon1">
-        Min Star Mass:
+        Time Modifier:
       </span>
       <input
         type="text"
         className="form-control"
-        name="minStarMass"
-        value={minStarMass.toString()}
-        onChange={handleMinStarMassChange}
+        name="timeModifier"
+        value={timeModifier.toString()}
+        onChange={handletimeModifierChange}
       />
     </div>
   );
@@ -88,7 +88,7 @@ export function Interface() {
       console.error("wasm not yet loaded");
     } else {
       console.log("initializing galaxy");
-      galaxyFrontend = new galaxy.Frontend(galaxySize, minStarMass);
+      galaxyFrontend = new galaxy.Frontend(galaxySize, timeModifier);
       dataviz.initViz(galaxyFrontend);
     }
   };
@@ -103,7 +103,7 @@ export function Interface() {
     if (galaxyFrontend === null) {
       console.error("galaxy not yet initialized");
     } else {
-      console.log("seeding galaxy");
+      console.log("adding mass to the galaxy");
       galaxyFrontend.seed(galaxySeedMass);
       dataviz.initData(galaxyFrontend);
     }
@@ -116,7 +116,9 @@ export function Interface() {
   );
 
   const handleTickClick = () => {
-    galaxyFrontend.tick(minStarMass);
+    console.log("advancing time");
+    galaxyFrontend.tick(timeModifier);
+    dataviz.initData(galaxyFrontend);
   };
 
   const tickButton = (
@@ -135,15 +137,13 @@ export function Interface() {
       </h2>
       {galaxySizeInput}
       {galaxySeedMassInput}
-      {minStarMassInput}
+      {timeModifierInput}
       <div className="d-flex justify-content-between">
         {initButton}
         {seedButton}
         {tickButton}
       </div>
-      <div>
-        <div id="dataviz"></div>
-      </div>
+      <div id="dataviz"></div>
     </div>
   );
 }
