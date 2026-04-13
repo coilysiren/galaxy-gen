@@ -84,12 +84,12 @@ impl Galaxy {
     }
     pub fn seed(&self, additional: u16) -> Galaxy {
         // add mass to the galaxy
-        let mut rng = rand::thread_rng();
+        let mut rng = rand::rng();
         let next: Vec<Cell> = (0..self.size.pow(2))
             .map(|index| {
                 let mass = self.cells[index as usize].mass;
                 Cell {
-                    mass: mass + rng.gen_range(0..additional + 1),
+                    mass: mass + rng.random_range(0..additional + 1),
                     accel_magnitude: 0.0,
                     accel_degrees: 0.0,
                 }
