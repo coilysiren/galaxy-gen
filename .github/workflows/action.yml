@@ -12,8 +12,7 @@ jobs:
   rust:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v3
-      - run: curl -sSf https://sh.rustup.rs | sh -s -- -y
+      - uses: actions/checkout@v4
 
       # rust
       - run: cargo build
@@ -22,16 +21,19 @@ jobs:
 
       # wasm
       - run: cargo install wasm-pack
+      - run: sudo apt-get update && sudo apt-get install -y binaryen
       - run: wasm-pack build
   js:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v3
-      - run: curl -sSf https://sh.rustup.rs | sh -s -- -y
-      - run: wget -qO- https://raw.githubusercontent.com/nvm-sh/nvm/v0.39.5/install.sh | bash
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 'lts/*'
 
       # wasm
       - run: cargo install wasm-pack
+      - run: sudo apt-get update && sudo apt-get install -y binaryen
       - run: wasm-pack build
 
       # js

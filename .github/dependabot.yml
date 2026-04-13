@@ -1,0 +1,12 @@
+version: 2
+updates:
+  - package-ecosystem: "cargo"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+  # npm is excluded because the galaxy_gen_backend package is a file:pkg
+  # path dependency (wasm build artifact) that Dependabot cannot resolve
