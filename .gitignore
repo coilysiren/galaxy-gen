@@ -3,3 +3,4 @@ target/
 dist/
 pkg/
 node_modules/
+.claude/
