@@ -12,6 +12,10 @@ async function waitForWasm(page: Page) {
  * Browser-side perf probe. Not a pass/fail gate — just logs numbers so we
  * can see how the Rust→WASM pipeline performs in a real chromium at
  * several galaxy sizes. Run with `npx playwright test e2e/perf.spec.ts`.
+ *
+ * Covers both the tick cost (Rust/WASM) and the tick+render cost
+ * (including the canvas path). Diverging numbers point at render being
+ * the bottleneck, not physics.
  */
 test.describe("perf bench", () => {
   test.beforeEach(async ({ page }) => {
@@ -42,13 +46,37 @@ test.describe("perf bench", () => {
       }, size <= 50 ? 20 : 5);
 
       console.log(
-        `size=${size.toString().padStart(3)}  ` +
+        `TICK  size=${size.toString().padStart(3)}  ` +
           `mean=${result.mean.toFixed(2).padStart(8)}ms  ` +
-          `median=${result.median.toFixed(2).padStart(8)}ms  ` +
-          `min=${result.min.toFixed(2).padStart(8)}ms  ` +
-          `max=${result.max.toFixed(2).padStart(8)}ms`
+          `median=${result.median.toFixed(2).padStart(8)}ms`
       );
-      // Don't fail on timing; just record.
+
+      // Now measure tick + canvas render combined — this is what the
+      // `run` loop actually does per frame.
+      const render = await page.evaluate((iters) => {
+        const fe: any = (window as any).__galaxyGen.frontend;
+        // Pull the exported updater off the module. We read it via the
+        // live `dataviz` module that `application.tsx` imports — expose
+        // it via a well-known symbol for measurement.
+        const dataviz: any = (window as any).__galaxyGen.dataviz;
+        const samples: number[] = [];
+        for (let i = 0; i < iters; i++) {
+          const t0 = performance.now();
+          fe.tick(0.5);
+          if (dataviz && dataviz.updateData) dataviz.updateData(fe);
+          samples.push(performance.now() - t0);
+        }
+        samples.sort((a, b) => a - b);
+        const mean = samples.reduce((a, b) => a + b, 0) / samples.length;
+        const median = samples[Math.floor(samples.length / 2)];
+        return { mean, median };
+      }, size <= 50 ? 20 : 5);
+
+      console.log(
+        `FRAME size=${size.toString().padStart(3)}  ` +
+          `mean=${render.mean.toFixed(2).padStart(8)}ms  ` +
+          `median=${render.median.toFixed(2).padStart(8)}ms`
+      );
       expect(result.mean).toBeGreaterThan(0);
     });
   }

@@ -28,15 +28,15 @@ test.describe("Galaxy Generator", () => {
     await expect(page.getByRole("heading", { name: "Galaxy Generator" })).toBeVisible();
     await expect(page.getByTestId("input-galaxy-size")).toHaveValue("50");
     await expect(page.getByTestId("input-seed-mass")).toHaveValue("25");
-    await expect(page.getByTestId("input-time-modifier")).toHaveValue("0.01");
+    await expect(page.getByTestId("input-time-modifier")).toHaveValue("0.5");
     await expect(page.getByTestId("btn-init")).toBeVisible();
     await expect(page.getByTestId("btn-seed")).toBeVisible();
     await expect(page.getByTestId("btn-tick")).toBeVisible();
   });
 
-  test("init creates an svg inside the dataviz container", async ({ page }) => {
+  test("init creates a canvas inside the dataviz container", async ({ page }) => {
     await page.getByTestId("btn-init").click();
-    await expect(page.locator("#dataviz svg")).toBeVisible();
+    await expect(page.locator("#dataviz canvas")).toBeVisible();
   });
 
   test("seed populates cells and draws circles", async ({ page }) => {

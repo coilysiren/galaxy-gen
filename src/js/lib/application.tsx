@@ -8,7 +8,7 @@ const wasm = import("galaxy_gen_backend/galaxy_gen_backend");
 export function Interface() {
   const [galaxySize, setGalaxySize] = React.useState(50);
   const [galaxySeedMass, setGalaxySeedMass] = React.useState(25);
-  const [timeModifier, setTimeModifier] = React.useState(0.01);
+  const [timeModifier, setTimeModifier] = React.useState(0.5);
   const [wasmReady, setWasmReady] = React.useState(false);
   const [initialized, setInitialized] = React.useState(false);
   const [tickCount, setTickCount] = React.useState(0);
@@ -30,6 +30,7 @@ export function Interface() {
       if (typeof window !== "undefined") {
         (window as any).__galaxyGen = (window as any).__galaxyGen || {};
         (window as any).__galaxyGen.wasmReady = true;
+        (window as any).__galaxyGen.dataviz = dataviz;
       }
     });
     return () => {
