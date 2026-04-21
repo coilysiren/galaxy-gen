@@ -97,6 +97,21 @@
   }
 }
 
+kbd {
+  display: inline-block;
+  padding: 0 0.35em;
+  margin: 0 0.1em;
+  border-radius: 0.25em;
+  border: 1px solid var(--color-plum-700);
+  background: rgba(0, 0, 0, 0.35);
+  font-family: var(--font-mono);
+  font-size: 0.8em;
+  color: var(--color-plum-50);
+  letter-spacing: 0;
+  text-transform: none;
+  line-height: 1.4;
+}
+
 #dataviz svg {
   display: block;
   margin: 0 auto;

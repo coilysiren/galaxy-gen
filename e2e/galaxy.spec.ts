@@ -97,6 +97,55 @@ test.describe("Galaxy Generator", () => {
     expect(pctChanged).toBeGreaterThan(0.05);
   });
 
+  test("keyboard shortcuts: space toggles run, arrows adjust dt, R resets", async ({ page }) => {
+    await page.getByTestId("btn-init").click();
+
+    const runBtn = page.getByTestId("btn-run");
+    const dtStat = page.getByTestId("stat-dt");
+
+    await expect(runBtn).toHaveText("run");
+    await expect(dtStat).toHaveText("dt: 0.500");
+
+    // Space starts the sim.
+    await page.locator("body").press("Space");
+    await expect(runBtn).toHaveText("pause");
+
+    // Space again pauses it.
+    await page.locator("body").press("Space");
+    await expect(runBtn).toHaveText("run");
+
+    // ArrowUp scales dt by ×1.25 per press.
+    await page.locator("body").press("ArrowUp");
+    await page.locator("body").press("ArrowUp");
+    await page.locator("body").press("ArrowUp");
+
+    const afterUp = await dtStat.textContent();
+    const afterUpVal = parseFloat((afterUp ?? "").replace(/[^\d.]/g, ""));
+    expect(afterUpVal).toBeGreaterThan(0.5);
+    // 0.5 * 1.25^3 = 0.9765625 → rounded to 0.977
+    expect(afterUpVal).toBeCloseTo(0.977, 2);
+
+    // ArrowDown brings it back down.
+    await page.locator("body").press("ArrowDown");
+    await page.locator("body").press("ArrowDown");
+    const afterDown = await dtStat.textContent();
+    const afterDownVal = parseFloat((afterDown ?? "").replace(/[^\d.]/g, ""));
+    expect(afterDownVal).toBeLessThan(afterUpVal);
+
+    // R resets dt to the default.
+    await page.locator("body").press("r");
+    await expect(dtStat).toHaveText("dt: 0.500");
+  });
+
+  test("keyboard shortcuts are ignored while typing in an input", async ({ page }) => {
+    const sizeInput = page.getByTestId("input-galaxy-size");
+    await sizeInput.click();
+    await sizeInput.press("ArrowUp");
+
+    // dt should not have changed because focus was inside an input.
+    await expect(page.getByTestId("stat-dt")).toHaveText("dt: 0.500");
+  });
+
   test("changing galaxy size changes cell count after re-init", async ({ page }) => {
     const sizeInput = page.getByTestId("input-galaxy-size");
     await sizeInput.fill("20");

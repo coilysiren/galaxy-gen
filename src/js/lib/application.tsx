@@ -5,10 +5,15 @@ import * as galaxy from "./galaxy";
 
 const wasm = import("galaxy_gen_backend/galaxy_gen_backend");
 
+const DEFAULT_DT = 0.5;
+const DT_STEP = 1.25;
+const DT_MIN = 0.01;
+const DT_MAX = 10;
+
 export function Interface() {
   const [galaxySize, setGalaxySize] = React.useState(50);
   const [galaxySeedMass, setGalaxySeedMass] = React.useState(25);
-  const [timeModifier, setTimeModifier] = React.useState(0.5);
+  const [timeModifier, setTimeModifier] = React.useState(DEFAULT_DT);
   const [wasmReady, setWasmReady] = React.useState(false);
   const [initialized, setInitialized] = React.useState(false);
   const [tickCount, setTickCount] = React.useState(0);
@@ -148,24 +153,80 @@ export function Interface() {
     rafRef.current = requestAnimationFrame(tick);
   };
 
+  const clampDt = (value: number) => Math.min(DT_MAX, Math.max(DT_MIN, value));
+
+  const adjustDt = React.useCallback((factor: number) => {
+    setTimeModifier((prev) => {
+      const next = clampDt(prev * factor);
+      // Round to 3 decimals so the display stays tidy.
+      return Math.round(next * 1000) / 1000;
+    });
+  }, []);
+
+  const resetDt = React.useCallback(() => {
+    setTimeModifier(DEFAULT_DT);
+  }, []);
+
+  const handleRunToggleRef = React.useRef(handleRunToggle);
+  React.useEffect(() => {
+    handleRunToggleRef.current = handleRunToggle;
+  });
+
+  React.useEffect(() => {
+    const isEditable = (el: EventTarget | null): boolean => {
+      if (!(el instanceof HTMLElement)) return false;
+      const tag = el.tagName;
+      if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT") {
+        return true;
+      }
+      if (el.isContentEditable) return true;
+      return false;
+    };
+
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.metaKey || e.ctrlKey || e.altKey) return;
+      if (isEditable(e.target)) return;
+
+      switch (e.key) {
+        case " ":
+        case "Spacebar":
+          if (galaxyFrontendRef.current) {
+            e.preventDefault();
+            handleRunToggleRef.current();
+          }
+          break;
+        case "ArrowUp":
+          e.preventDefault();
+          adjustDt(DT_STEP);
+          break;
+        case "ArrowDown":
+          e.preventDefault();
+          adjustDt(1 / DT_STEP);
+          break;
+        case "r":
+        case "R":
+          e.preventDefault();
+          resetDt();
+          break;
+        default:
+          break;
+      }
+    };
+
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [adjustDt, resetDt]);
+
   return (
-    <div
-      data-testid="app"
-      data-wasm-ready={wasmReady ? "true" : "false"}
-      className="min-h-screen"
-    >
+    <div data-testid="app" data-wasm-ready={wasmReady ? "true" : "false"} className="min-h-screen">
       <nav className="nav-strip flex items-center justify-between px-6 py-3 text-xs font-bold uppercase text-[#eeeeee]">
         <span>./galaxy-gen</span>
-        <span className="text-[color:var(--color-plum-400)]">
-          rust → wasm → js
-        </span>
+        <span className="text-[color:var(--color-plum-400)]">rust → wasm → js</span>
       </nav>
 
       <main className="mx-auto max-w-6xl px-4 py-10 sm:px-6">
         <header className="mb-8">
-          <h1 className="text-4xl tracking-[0.1em] md:text-5xl">
-            Galaxy Generator
-          </h1>
+          <h1 className="text-4xl tracking-[0.1em] md:text-5xl">Galaxy Generator</h1>
           <p className="mt-3 tracking-[0.08em] text-[color:var(--color-plum-400)]">
             Gravitational sim computed in Rust, rendered with D3 in the browser.
           </p>
@@ -254,11 +315,20 @@ export function Interface() {
               {running ? "pause" : "run"}
             </button>
             <div className="input-label ml-auto flex items-center gap-4 self-center">
+              <span data-testid="stat-dt">dt: {timeModifier.toFixed(3)}</span>
               <span>ticks: {tickCount}</span>
               <span>tick: {tickMs.toFixed(1)} ms</span>
               <span>fps: {fps}</span>
             </div>
           </div>
+
+          <p
+            className="mt-4 text-[0.7rem] tracking-widest uppercase text-[color:var(--color-plum-400)]"
+            data-testid="keyboard-hints"
+          >
+            keys: <kbd>space</kbd> play/pause · <kbd>↑</kbd>/<kbd>↓</kbd> dt ×{DT_STEP}/÷{DT_STEP} ·{" "}
+            <kbd>r</kbd> reset dt
+          </p>
 
           {!wasmReady && (
             <p className="mt-4 text-xs tracking-widest uppercase text-[color:var(--color-plum-400)]">
