@@ -6,6 +6,15 @@ export interface Cell {
   y: number;
 }
 
+/** Mirror of the Rust `InitialCondition` enum — kept in sync manually
+ *  (wasm-bindgen exposes numeric discriminants). */
+export enum InitialCondition {
+  Uniform = 0,
+  Rotation = 1,
+  Bang = 2,
+  Collision = 3,
+}
+
 /**
  * Thin JS wrapper over the Rust/WASM Galaxy. `massArray()` returns a
  * `Uint16Array` (a single memcpy from WASM linear memory, courtesy of
@@ -21,8 +30,14 @@ export class Frontend {
     this.galaxySize = galaxySize;
   }
 
-  public seed(additionalMass: number): void {
-    const next = this.galaxy.seed(additionalMass);
+  public seed(additionalMass: number, mode: InitialCondition = InitialCondition.Uniform): void {
+    // The Rust side exposes both `seed(u16)` (uniform, legacy) and
+    // `seed_with_mode(u16, InitialCondition)`. Always go through
+    // seed_with_mode so the enum round-trips cleanly.
+    const next = this.galaxy.seed_with_mode(
+      additionalMass,
+      mode as unknown as wasm.InitialCondition
+    );
     this.galaxy.free();
     this.galaxy = next;
   }

@@ -20,6 +20,24 @@ use rand::rngs::StdRng;
 use rand::{Rng, SeedableRng};
 use wasm_bindgen::prelude::*;
 
+/// Initial-condition presets selectable from the UI. Each produces a
+/// visibly different long-term evolution; see `seed_with_mode` for the
+/// per-mode mass and velocity distributions.
+#[wasm_bindgen]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum InitialCondition {
+    /// Current behavior: uniform random mass across the grid, zero initial velocity.
+    Uniform = 0,
+    /// Disk with angular velocity — cells get tangential velocity around the
+    /// grid center scaled by distance, producing a rotating galaxy.
+    Rotation = 1,
+    /// Big-bang-style central explosion — mass concentrated in the center,
+    /// outward radial velocity.
+    Bang = 2,
+    /// Two distinct mass clusters on intercept trajectory.
+    Collision = 3,
+}
+
 #[wasm_bindgen]
 pub struct Galaxy {
     size: u16,
@@ -111,9 +129,146 @@ impl Galaxy {
         }
     }
 
+    /// Uniform random mass, zero initial velocity. Preserved for
+    /// backwards-compatibility with the JS `Frontend.seed(mass)` call.
     pub fn seed(&self, additional: u16) -> Galaxy {
+        self.seed_with_mode(additional, InitialCondition::Uniform)
+    }
+
+    /// Seed the galaxy with a named initial condition. Each mode produces
+    /// a distinct long-term evolution. Tuning constants are chosen so that
+    /// the default UI params (size=50, seed_mass=25) produce visible motion
+    /// within a few hundred ticks.
+    pub fn seed_with_mode(&self, additional: u16, mode: InitialCondition) -> Galaxy {
         let mut rng = rand::rng();
-        self.seed_with_rng(additional, &mut rng)
+        let mut mass = self.mass.clone();
+        let mut vel_x = vec![0.0f32; self.n];
+        let mut vel_y = vec![0.0f32; self.n];
+
+        let size = self.size as f32;
+        let cx = size * 0.5;
+        let cy = size * 0.5;
+
+        match mode {
+            InitialCondition::Uniform => {
+                if additional > 0 {
+                    for m in mass.iter_mut() {
+                        *m = m.saturating_add(rng.random_range(0..=additional));
+                    }
+                }
+            }
+            InitialCondition::Rotation => {
+                // Fill the grid with a random mass bias (like uniform) so
+                // there's something to rotate, then give each cell a
+                // tangential velocity around the center. Magnitude grows
+                // with distance so the disk rotates roughly rigid-body-like
+                // until gravity pulls it into arms.
+                let base = additional.max(1);
+                // Peak velocity tuned so a 50-grid takes a few hundred ticks
+                // to complete one revolution at dt=0.5.
+                const V_SCALE: f32 = 0.6;
+                let max_r = (size * 0.5).max(1.0);
+                for i in 0..self.n {
+                    mass[i] = mass[i].saturating_add(rng.random_range(0..=base));
+                    let x = self.xs_i[i] as f32 - cx;
+                    let y = self.ys_i[i] as f32 - cy;
+                    let r = (x * x + y * y).sqrt();
+                    if r < 1e-3 {
+                        continue;
+                    }
+                    // Tangential unit vector: (-y, x) / r; scale by r/max_r.
+                    let s = V_SCALE * (r / max_r);
+                    vel_x[i] = -y / r * s;
+                    vel_y[i] = x / r * s;
+                }
+            }
+            InitialCondition::Bang => {
+                // Concentrate mass in a small disc at the center and give
+                // every massed cell an outward radial velocity. Produces
+                // an expanding ring that gravity can later re-collapse.
+                // Clear baseline mass; we want a visible central cluster
+                // against empty space.
+                for m in mass.iter_mut() {
+                    *m = 0;
+                }
+                let core_radius = (size * 0.15).max(2.0);
+                let core_r2 = core_radius * core_radius;
+                // Average mass per cell in the core, scaled by how many
+                // cells we're squeezing into. Use `additional` (which
+                // acts as an "intensity" knob via the seed-mass slider).
+                let core_fill = additional.max(1000);
+                const V_SCALE: f32 = 1.5;
+                for i in 0..self.n {
+                    let x = self.xs_i[i] as f32 - cx;
+                    let y = self.ys_i[i] as f32 - cy;
+                    let r2 = x * x + y * y;
+                    if r2 > core_r2 {
+                        continue;
+                    }
+                    mass[i] = core_fill.saturating_add(rng.random_range(0..=core_fill / 2));
+                    let r = r2.sqrt().max(1e-3);
+                    // Radial outward unit vector; slight jitter so the
+                    // shell doesn't stay perfectly symmetric.
+                    let jitter = rng.random_range(-0.1f32..=0.1f32);
+                    vel_x[i] = (x / r) * (V_SCALE + jitter);
+                    vel_y[i] = (y / r) * (V_SCALE + jitter);
+                }
+            }
+            InitialCondition::Collision => {
+                // Two disc-shaped clusters offset horizontally, each given
+                // a velocity toward the other plus a small vertical offset
+                // so they graze rather than perfectly head-on.
+                for m in mass.iter_mut() {
+                    *m = 0;
+                }
+                let cluster_radius = (size * 0.12).max(2.0);
+                let cr2 = cluster_radius * cluster_radius;
+                let offset = size * 0.25;
+                let left_x = cx - offset;
+                let left_y = cy - size * 0.05;
+                let right_x = cx + offset;
+                let right_y = cy + size * 0.05;
+                let cluster_fill = additional.max(800);
+                const V_APPROACH: f32 = 0.8;
+                for i in 0..self.n {
+                    let fx = self.xs_i[i] as f32;
+                    let fy = self.ys_i[i] as f32;
+                    let dxl = fx - left_x;
+                    let dyl = fy - left_y;
+                    let dxr = fx - right_x;
+                    let dyr = fy - right_y;
+                    if dxl * dxl + dyl * dyl <= cr2 {
+                        mass[i] =
+                            cluster_fill.saturating_add(rng.random_range(0..=cluster_fill / 2));
+                        // Move right, slight downward drift.
+                        vel_x[i] = V_APPROACH;
+                        vel_y[i] = 0.1;
+                    } else if dxr * dxr + dyr * dyr <= cr2 {
+                        mass[i] =
+                            cluster_fill.saturating_add(rng.random_range(0..=cluster_fill / 2));
+                        // Move left, slight upward drift.
+                        vel_x[i] = -V_APPROACH;
+                        vel_y[i] = -0.1;
+                    }
+                }
+            }
+        }
+
+        Galaxy {
+            size: self.size,
+            n: self.n,
+            mass,
+            acc_x: vec![0.0; self.n],
+            acc_y: vec![0.0; self.n],
+            vel_x,
+            vel_y,
+            frac_x: vec![0.0; self.n],
+            frac_y: vec![0.0; self.n],
+            xs_i: self.xs_i.clone(),
+            ys_i: self.ys_i.clone(),
+            inv_r3: self.inv_r3.clone(),
+            scratch_mass: vec![0; self.n],
+        }
     }
 
     /// Reproducible variant of [`seed`] that draws randomness from a
@@ -730,6 +885,139 @@ mod tests_intial_generation {
         let base = Galaxy::new(10, 0);
         let seeded = base.seed_with(0, 42);
         assert_eq!(base.mass, seeded.mass);
+    }
+
+    #[test]
+    fn test_seed_with_mode_uniform_matches_default_seed() {
+        // Uniform mode should match the plain `seed()` behaviour (random mass
+        // fill, zero velocity).
+        let g = Galaxy::new(10, 0).seed_with_mode(0, InitialCondition::Uniform);
+        assert!(g.vel_x.iter().all(|&v| v == 0.0));
+        assert!(g.vel_y.iter().all(|&v| v == 0.0));
+    }
+
+    #[test]
+    fn test_seed_rotation_produces_tangential_velocity() {
+        let g = Galaxy::new(20, 0).seed_with_mode(5, InitialCondition::Rotation);
+        // At least some cells should have nonzero velocity.
+        let nonzero_v = g
+            .vel_x
+            .iter()
+            .zip(g.vel_y.iter())
+            .filter(|(vx, vy)| vx.abs() > 1e-6 || vy.abs() > 1e-6)
+            .count();
+        assert!(
+            nonzero_v > 0,
+            "rotation mode must set nonzero velocities on some cells"
+        );
+        // Tangential means r · v ≈ 0 (velocity perpendicular to radius).
+        // Pick a cell off-center and verify.
+        let size = g.size as f32;
+        let cx = size * 0.5;
+        let cy = size * 0.5;
+        let mut tangential_checked = false;
+        for i in 0..g.n {
+            let x = g.xs_i[i] as f32 - cx;
+            let y = g.ys_i[i] as f32 - cy;
+            let r = (x * x + y * y).sqrt();
+            if r < 2.0 {
+                continue;
+            }
+            let vx = g.vel_x[i];
+            let vy = g.vel_y[i];
+            let vmag = (vx * vx + vy * vy).sqrt();
+            if vmag < 1e-4 {
+                continue;
+            }
+            // Normalized dot between radius and velocity should be ~0.
+            let dot = (x * vx + y * vy) / (r * vmag);
+            assert!(
+                dot.abs() < 1e-3,
+                "rotation velocity should be tangential (cell {} dot={})",
+                i,
+                dot
+            );
+            tangential_checked = true;
+            break;
+        }
+        assert!(tangential_checked, "did not find a cell to check tangency");
+    }
+
+    #[test]
+    fn test_seed_bang_produces_outward_radial_velocity() {
+        let g = Galaxy::new(30, 0).seed_with_mode(1000, InitialCondition::Bang);
+        let size = g.size as f32;
+        let cx = size * 0.5;
+        let cy = size * 0.5;
+
+        // Total mass should be concentrated in the central disc.
+        let total_mass: u64 = g.mass.iter().map(|&m| m as u64).sum();
+        assert!(total_mass > 0, "bang must seed some mass");
+
+        // Every cell with mass should have positive dot(radius, velocity).
+        let mut checked = 0;
+        for i in 0..g.n {
+            if g.mass[i] == 0 {
+                continue;
+            }
+            let x = g.xs_i[i] as f32 - cx;
+            let y = g.ys_i[i] as f32 - cy;
+            let r = (x * x + y * y).sqrt();
+            if r < 1.0 {
+                continue;
+            }
+            let dot = x * g.vel_x[i] + y * g.vel_y[i];
+            assert!(
+                dot > 0.0,
+                "bang cell {} should move outward (dot={})",
+                i,
+                dot
+            );
+            checked += 1;
+        }
+        assert!(checked > 0, "expected at least one off-center bang cell");
+    }
+
+    #[test]
+    fn test_seed_collision_produces_two_distinct_mass_clusters() {
+        let g = Galaxy::new(40, 0).seed_with_mode(800, InitialCondition::Collision);
+        let size = g.size as f32;
+        let cx = size * 0.5;
+        // Sum mass in the left and right halves; both should be populated.
+        let mut left_mass: u64 = 0;
+        let mut right_mass: u64 = 0;
+        for i in 0..g.n {
+            if g.mass[i] == 0 {
+                continue;
+            }
+            let x = g.xs_i[i] as f32;
+            if x < cx {
+                left_mass += g.mass[i] as u64;
+            } else {
+                right_mass += g.mass[i] as u64;
+            }
+        }
+        assert!(left_mass > 0, "collision: left cluster has no mass");
+        assert!(right_mass > 0, "collision: right cluster has no mass");
+
+        // Velocities in the left cluster should point right (vx > 0) and
+        // vice versa — i.e. the clusters are on intercept.
+        let mut left_right_moving = 0;
+        let mut right_left_moving = 0;
+        for i in 0..g.n {
+            if g.mass[i] == 0 {
+                continue;
+            }
+            let x = g.xs_i[i] as f32;
+            if x < cx && g.vel_x[i] > 0.0 {
+                left_right_moving += 1;
+            }
+            if x >= cx && g.vel_x[i] < 0.0 {
+                right_left_moving += 1;
+            }
+        }
+        assert!(left_right_moving > 0);
+        assert!(right_left_moving > 0);
     }
 
     #[test]

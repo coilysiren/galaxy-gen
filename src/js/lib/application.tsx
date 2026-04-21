@@ -107,6 +107,9 @@ export function Interface() {
   // parse happens at Init / Seed time. Empty string = "use a fresh
   // random seed next time we seed".
   const [seed, setSeed] = React.useState<string>(initial.seed);
+  const [initialCondition, setInitialCondition] = React.useState<galaxy.InitialCondition>(
+    galaxy.InitialCondition.Uniform
+  );
   const [wasmReady, setWasmReady] = React.useState(false);
   const [initialized, setInitialized] = React.useState(false);
   const [tickCount, setTickCount] = React.useState(0);
@@ -207,7 +210,7 @@ export function Interface() {
     if (parsed != null) {
       galaxyFrontendRef.current.seedWith(galaxySeedMass, parsed);
     } else {
-      galaxyFrontendRef.current.seed(galaxySeedMass);
+      galaxyFrontendRef.current.seed(galaxySeedMass, initialCondition);
     }
     dataviz.initData(galaxyFrontendRef.current);
     writeUrlParams({
@@ -391,6 +394,29 @@ export function Interface() {
                 value={timeModifier.toString()}
                 onChange={handleFloatChange(setTimeModifier)}
               />
+            </label>
+            <label className="block md:col-span-3">
+              <span className="input-label mb-1 block">Initial Condition</span>
+              <select
+                className="input-field"
+                name="initialCondition"
+                data-testid="select-initial-condition"
+                value={initialCondition}
+                onChange={(event) =>
+                  setInitialCondition(parseInt(event.target.value, 10) as galaxy.InitialCondition)
+                }
+              >
+                <option value={galaxy.InitialCondition.Uniform}>
+                  uniform (random mass, no velocity)
+                </option>
+                <option value={galaxy.InitialCondition.Rotation}>
+                  rotation (disk with angular velocity)
+                </option>
+                <option value={galaxy.InitialCondition.Bang}>bang (central explosion)</option>
+                <option value={galaxy.InitialCondition.Collision}>
+                  collision (two clusters on intercept)
+                </option>
+              </select>
             </label>
           </div>
 
