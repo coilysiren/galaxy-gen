@@ -20,10 +20,21 @@ export enum InitialCondition {
  * `Uint16Array` (a single memcpy from WASM linear memory, courtesy of
  * wasm-bindgen). Positions are derived from cell index, so only masses
  * cross the boundary each tick.
+ *
+ * The main-thread Galaxy remains the source of truth for one-off
+ * operations (init / seed / step). A Web Worker with its own
+ * independent Galaxy runs the continuous tick loop — see `tick-worker.ts`
+ * and the `TickWorker` class below. State is transferred in and out of
+ * the worker via `snapshotState()` / `restoreState()` so the run loop can
+ * resume from exactly where the main thread left off (and vice versa).
  */
 export class Frontend {
   private galaxy: wasm.Galaxy;
   public galaxySize: number;
+  // When a worker is driving the sim, we cache its latest mass snapshot
+  // here so the renderer (which reads `massArray()` each frame) sees
+  // fresh data without having to re-enter WASM on the main thread.
+  private overrideMass: Uint16Array | null = null;
 
   constructor(galaxySize: number) {
     this.galaxy = new wasm.Galaxy(galaxySize, 0);
@@ -31,9 +42,7 @@ export class Frontend {
   }
 
   public seed(additionalMass: number, mode: InitialCondition = InitialCondition.Uniform): void {
-    // The Rust side exposes both `seed(u16)` (uniform, legacy) and
-    // `seed_with_mode(u16, InitialCondition)`. Always go through
-    // seed_with_mode so the enum round-trips cleanly.
+    this.overrideMass = null;
     const next = this.galaxy.seed_with_mode(
       additionalMass,
       mode as unknown as wasm.InitialCondition
@@ -51,12 +60,14 @@ export class Frontend {
    * cleanly.
    */
   public seedWith(additionalMass: number, seed: bigint): void {
+    this.overrideMass = null;
     const next = this.galaxy.seed_with(additionalMass, seed);
     this.galaxy.free();
     this.galaxy = next;
   }
 
   public tick(timeModifier: number): void {
+    this.overrideMass = null;
     const next = this.galaxy.tick(timeModifier);
     this.galaxy.free();
     this.galaxy = next;
@@ -64,7 +75,7 @@ export class Frontend {
 
   /** Fast path for the renderer — one memcpy, no per-cell object churn. */
   public massArray(): Uint16Array {
-    return this.galaxy.mass();
+    return this.overrideMass ?? this.galaxy.mass();
   }
 
   /** Legacy API. Allocates a Cell[]; avoid on the hot path. */
@@ -77,4 +88,176 @@ export class Frontend {
     }
     return out;
   }
+
+  // --- Worker integration -------------------------------------------------
+
+  /**
+   * Full sim-state snapshot (mass + velocity + sub-grid position). Used
+   * to hydrate a worker-side Galaxy before the run loop starts.
+   */
+  public snapshotState(): {
+    size: number;
+    mass: Uint16Array;
+    velX: Float32Array;
+    velY: Float32Array;
+    fracX: Float32Array;
+    fracY: Float32Array;
+  } {
+    return {
+      size: this.galaxySize,
+      mass: this.galaxy.mass(),
+      velX: this.galaxy.vel_x(),
+      velY: this.galaxy.vel_y(),
+      fracX: this.galaxy.frac_x(),
+      fracY: this.galaxy.frac_y(),
+    };
+  }
+
+  /**
+   * Rehydrate the main-thread Galaxy from worker state. Called when the
+   * run loop pauses, so subsequent manual ticks pick up exactly where
+   * the worker left off (velocity and fractional position preserved).
+   */
+  public restoreState(
+    mass: Uint16Array,
+    velX: Float32Array,
+    velY: Float32Array,
+    fracX: Float32Array,
+    fracY: Float32Array,
+  ): void {
+    const next = wasm.Galaxy.from_state(
+      this.galaxySize,
+      mass,
+      velX,
+      velY,
+      fracX,
+      fracY,
+    );
+    this.galaxy.free();
+    this.galaxy = next;
+    this.overrideMass = null;
+  }
+
+  /**
+   * Point the renderer at a mass buffer produced by the worker. This
+   * lets us keep rendering at animation-frame cadence without pulling
+   * mass out of WASM on the main thread each frame.
+   */
+  public setOverrideMass(mass: Uint16Array): void {
+    this.overrideMass = mass;
+  }
+}
+
+/**
+ * Thin main-thread proxy over the physics Web Worker. The worker holds
+ * its own Galaxy WASM instance; the main thread only receives mass
+ * snapshots (via transferable ArrayBuffers, zero-copy).
+ */
+export class TickWorker {
+  private worker: Worker;
+  private onSnapshot: (mass: Uint16Array, tickMs: number, tickId: number) => void;
+  private stopResolver: ((state: StoppedState) => void) | null = null;
+
+  constructor(
+    onSnapshot: (mass: Uint16Array, tickMs: number, tickId: number) => void,
+  ) {
+    this.worker = new Worker(new URL("./tick-worker.ts", import.meta.url), {
+      type: "module",
+    });
+    this.onSnapshot = onSnapshot;
+    this.worker.onmessage = (ev: MessageEvent) => this.handleMessage(ev);
+  }
+
+  private handleMessage(ev: MessageEvent) {
+    const msg = ev.data;
+    if (!msg || typeof msg.type !== "string") return;
+    if (msg.type === "snapshot") {
+      this.onSnapshot(msg.mass, msg.tickMs, msg.tickId);
+    } else if (msg.type === "stopped") {
+      if (this.stopResolver) {
+        const resolver = this.stopResolver;
+        this.stopResolver = null;
+        resolver({
+          mass: msg.mass,
+          velX: msg.velX,
+          velY: msg.velY,
+          fracX: msg.fracX,
+          fracY: msg.fracY,
+        });
+      }
+    }
+  }
+
+  /**
+   * Hydrate the worker-side Galaxy from a Frontend snapshot. Transfers
+   * the typed-array buffers so no data is copied.
+   */
+  public init(snapshot: {
+    size: number;
+    mass: Uint16Array;
+    velX: Float32Array;
+    velY: Float32Array;
+    fracX: Float32Array;
+    fracY: Float32Array;
+  }): void {
+    this.worker.postMessage(
+      {
+        type: "init",
+        size: snapshot.size,
+        mass: snapshot.mass,
+        velX: snapshot.velX,
+        velY: snapshot.velY,
+        fracX: snapshot.fracX,
+        fracY: snapshot.fracY,
+      },
+      [
+        snapshot.mass.buffer,
+        snapshot.velX.buffer,
+        snapshot.velY.buffer,
+        snapshot.fracX.buffer,
+        snapshot.fracY.buffer,
+      ],
+    );
+  }
+
+  public start(timeModifier: number): void {
+    this.worker.postMessage({ type: "start", timeModifier });
+  }
+
+  public setTimeModifier(timeModifier: number): void {
+    this.worker.postMessage({ type: "setTimeModifier", timeModifier });
+  }
+
+  /**
+   * Stop the loop and resolve with the final state so the main thread
+   * can rehydrate its Frontend (preserving velocity / fractional pos).
+   */
+  public stop(): Promise<StoppedState> {
+    if (this.stopResolver) {
+      // A stop is already in-flight; chain onto it.
+      return new Promise((resolve) => {
+        const prev = this.stopResolver;
+        this.stopResolver = (state) => {
+          if (prev) prev(state);
+          resolve(state);
+        };
+      });
+    }
+    return new Promise<StoppedState>((resolve) => {
+      this.stopResolver = resolve;
+      this.worker.postMessage({ type: "stop" });
+    });
+  }
+
+  public terminate(): void {
+    this.worker.terminate();
+  }
+}
+
+export interface StoppedState {
+  mass: Uint16Array;
+  velX: Float32Array;
+  velY: Float32Array;
+  fracX: Float32Array;
+  fracY: Float32Array;
 }

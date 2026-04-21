@@ -478,6 +478,55 @@ test.describe("Galaxy Generator", () => {
     expect(collisionNZ).toBeGreaterThan(0);
   });
 
+  test("run button ticks via the worker and pause resumes state cleanly", async ({ page }) => {
+    await page.getByTestId("btn-init").click();
+    await page.getByTestId("btn-seed").click();
+
+    const before = await page.evaluate(() => {
+      const fe: any = (window as any).__galaxyGen.frontend;
+      return Array.from(fe.massArray() as Uint16Array);
+    });
+
+    // Kick off the worker-driven loop, let it run briefly, then pause.
+    await page.getByTestId("btn-run").click();
+    await expect(page.getByTestId("btn-run")).toHaveText("pause");
+    // Let the worker advance the sim for a bit.
+    await page.waitForTimeout(1500);
+    // Sanity: the displayed tick count should have advanced as the
+    // worker pushed snapshots to the main thread.
+    const tickText = await page.locator("text=/ticks: \\d+/").first().textContent();
+    const advanced = parseInt(tickText?.replace(/\D/g, "") ?? "0", 10);
+    expect(advanced, `tick count didn't advance (got ${tickText})`).toBeGreaterThan(0);
+    await page.getByTestId("btn-run").click();
+    await expect(page.getByTestId("btn-run")).toHaveText("run");
+
+    // After pause, the Frontend should have been rehydrated from the
+    // worker — mass should be meaningfully different from before.
+    const after = await page.evaluate(() => {
+      const fe: any = (window as any).__galaxyGen.frontend;
+      return Array.from(fe.massArray() as Uint16Array);
+    });
+
+    let changed = 0;
+    for (let i = 0; i < before.length; i++) {
+      if (before[i] !== after[i]) changed++;
+    }
+    expect(changed / before.length).toBeGreaterThan(0.05);
+
+    // And the step button should still work after pause (proving the
+    // main-thread Frontend is alive and its state was restored).
+    await page.getByTestId("btn-tick").click();
+    const afterStep = await page.evaluate(() => {
+      const fe: any = (window as any).__galaxyGen.frontend;
+      return Array.from(fe.massArray() as Uint16Array);
+    });
+    let changedAfterStep = 0;
+    for (let i = 0; i < after.length; i++) {
+      if (after[i] !== afterStep[i]) changedAfterStep++;
+    }
+    expect(changedAfterStep).toBeGreaterThan(0);
+  });
+
   test("changing galaxy size changes cell count after re-init", async ({ page }) => {
     const sizeInput = page.getByTestId("input-galaxy-size");
     await sizeInput.fill("20");

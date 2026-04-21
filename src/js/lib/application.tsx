@@ -128,6 +128,17 @@ export function Interface() {
     timeModRef.current = timeModifier;
   }, [timeModifier]);
 
+  // Worker-driven tick loop. The worker owns its own Galaxy WASM
+  // instance and posts back mass snapshots; the main thread uses them
+  // to drive the renderer and update the visible Frontend cache.
+  const workerRef = React.useRef<galaxy.TickWorker | null>(null);
+  const latestSnapshotRef = React.useRef<{
+    mass: Uint16Array;
+    tickMs: number;
+    tickId: number;
+  } | null>(null);
+  const renderedTickIdRef = React.useRef<number>(-1);
+
   React.useEffect(() => {
     wasm.then((module) => {
       wasmModuleRef.current = module;
@@ -140,6 +151,10 @@ export function Interface() {
     });
     return () => {
       if (rafRef.current != null) cancelAnimationFrame(rafRef.current);
+      if (workerRef.current) {
+        workerRef.current.terminate();
+        workerRef.current = null;
+      }
     };
   }, []);
 
@@ -164,12 +179,30 @@ export function Interface() {
     };
   };
 
-  const stopLoop = React.useCallback(() => {
+  // Stops the run loop. If a worker is driving it, waits for the worker
+  // to return final state and rehydrates the main-thread Frontend so
+  // subsequent step/seed operations pick up exactly where it left off.
+  const stopLoop = React.useCallback(async () => {
+    if (!runningRef.current) return;
     runningRef.current = false;
     setRunning(false);
     if (rafRef.current != null) {
       cancelAnimationFrame(rafRef.current);
       rafRef.current = null;
+    }
+    const worker = workerRef.current;
+    if (worker) {
+      const state = await worker.stop();
+      if (galaxyFrontendRef.current && state && state.mass) {
+        galaxyFrontendRef.current.restoreState(
+          state.mass,
+          state.velX,
+          state.velY,
+          state.fracX,
+          state.fracY,
+        );
+        dataviz.updateData(galaxyFrontendRef.current);
+      }
     }
   }, []);
 
@@ -179,7 +212,20 @@ export function Interface() {
       console.error("wasm not yet loaded");
       return;
     }
-    stopLoop();
+    // Tear down any in-flight worker synchronously — init should be
+    // immediate and we don't need the worker's final state.
+    runningRef.current = false;
+    setRunning(false);
+    if (rafRef.current != null) {
+      cancelAnimationFrame(rafRef.current);
+      rafRef.current = null;
+    }
+    if (workerRef.current) {
+      workerRef.current.terminate();
+      workerRef.current = null;
+    }
+    latestSnapshotRef.current = null;
+    renderedTickIdRef.current = -1;
     // If the seed field is empty or invalid, fill one in so the URL
     // always has a shareable value after Init.
     let effectiveSeed = seed;
@@ -244,23 +290,16 @@ export function Interface() {
     dataviz.resetView();
   };
 
-  const handleRunToggle = () => {
-    if (!galaxyFrontendRef.current) return;
-    if (runningRef.current) {
-      stopLoop();
-      return;
-    }
-    fpsSamplesRef.current.length = 0;
-    runningRef.current = true;
-    setRunning(true);
-
-    const tick = () => {
-      if (!runningRef.current || !galaxyFrontendRef.current) return;
-
-      const t0 = performance.now();
-      galaxyFrontendRef.current.tick(timeModRef.current);
-      const tickElapsed = performance.now() - t0;
-
+  // Render loop — driven by requestAnimationFrame on the main thread,
+  // but *physics is in the worker*. This loop just paints whatever the
+  // latest worker snapshot is. If no new snapshot arrived since last
+  // frame we skip redrawing — cheap and avoids flicker.
+  const renderLoop = React.useCallback(() => {
+    if (!runningRef.current || !galaxyFrontendRef.current) return;
+    const snap = latestSnapshotRef.current;
+    if (snap && snap.tickId !== renderedTickIdRef.current) {
+      renderedTickIdRef.current = snap.tickId;
+      galaxyFrontendRef.current.setOverrideMass(snap.mass);
       dataviz.updateData(galaxyFrontendRef.current);
 
       fpsSamplesRef.current.push(performance.now());
@@ -272,14 +311,47 @@ export function Interface() {
         fpsSamplesRef.current.shift();
       }
       setFps(fpsSamplesRef.current.length);
-      setTickMs(tickElapsed);
-      setTickCount((n) => n + 1);
+      setTickMs(snap.tickMs);
+      setTickCount(snap.tickId);
+    }
+    rafRef.current = requestAnimationFrame(renderLoop);
+  }, []);
 
-      rafRef.current = requestAnimationFrame(tick);
-    };
+  const handleRunToggle = async () => {
+    if (!galaxyFrontendRef.current) return;
+    if (runningRef.current) {
+      await stopLoop();
+      return;
+    }
+    fpsSamplesRef.current = [];
+    latestSnapshotRef.current = null;
+    renderedTickIdRef.current = -1;
 
-    rafRef.current = requestAnimationFrame(tick);
+    // Spin up (or reuse) the worker and hand it the current sim state.
+    if (!workerRef.current) {
+      workerRef.current = new galaxy.TickWorker(
+        (mass, tickMs, tickId) => {
+          latestSnapshotRef.current = { mass, tickMs, tickId };
+        },
+      );
+    }
+    // snapshotState() reads mass/vel/frac out of WASM as fresh typed
+    // arrays; those buffers are transferred to the worker (zero copy).
+    const snapshot = galaxyFrontendRef.current.snapshotState();
+    workerRef.current.init(snapshot);
+    workerRef.current.start(timeModRef.current);
+
+    runningRef.current = true;
+    setRunning(true);
+    rafRef.current = requestAnimationFrame(renderLoop);
   };
+
+  // Keep the worker's dt in sync with the UI while running.
+  React.useEffect(() => {
+    if (workerRef.current && runningRef.current) {
+      workerRef.current.setTimeModifier(timeModifier);
+    }
+  }, [timeModifier]);
 
   const clampDt = (value: number) => Math.min(DT_MAX, Math.max(DT_MIN, value));
 

@@ -324,6 +324,63 @@ impl Galaxy {
             .map(|i| self.index_to_col_row(i).1)
             .collect()
     }
+
+    // --- State transfer (for moving sim state to/from a Web Worker) ---
+    //
+    // These expose the mutable per-cell state (mass + velocity + frac)
+    // as flat typed arrays so the JS side can ship them between threads
+    // via postMessage with transferable ArrayBuffers (zero copy).
+    //
+    // Derived buffers (acc_x, acc_y) are recomputed each tick so they
+    // don't need to round-trip. `xs_i`, `ys_i`, `inv_r3` are size-only
+    // dependent so they're rebuilt on construction.
+    pub fn vel_x(&self) -> Vec<f32> {
+        self.vel_x.clone()
+    }
+    pub fn vel_y(&self) -> Vec<f32> {
+        self.vel_y.clone()
+    }
+    pub fn frac_x(&self) -> Vec<f32> {
+        self.frac_x.clone()
+    }
+    pub fn frac_y(&self) -> Vec<f32> {
+        self.frac_y.clone()
+    }
+
+    /// Construct a Galaxy from an explicit state snapshot — inverse of the
+    /// `mass()/vel_x()/vel_y()/frac_x()/frac_y()` getters. Used to hydrate
+    /// a worker-side Galaxy from main-thread state (and vice versa).
+    pub fn from_state(
+        size: u16,
+        mass: Vec<u16>,
+        vel_x: Vec<f32>,
+        vel_y: Vec<f32>,
+        frac_x: Vec<f32>,
+        frac_y: Vec<f32>,
+    ) -> Galaxy {
+        let base = Galaxy::new(size, 0);
+        let n = base.n;
+        assert_eq!(mass.len(), n, "mass length mismatch");
+        assert_eq!(vel_x.len(), n, "vel_x length mismatch");
+        assert_eq!(vel_y.len(), n, "vel_y length mismatch");
+        assert_eq!(frac_x.len(), n, "frac_x length mismatch");
+        assert_eq!(frac_y.len(), n, "frac_y length mismatch");
+        Galaxy {
+            size,
+            n,
+            mass,
+            acc_x: vec![0.0; n],
+            acc_y: vec![0.0; n],
+            vel_x,
+            vel_y,
+            frac_x,
+            frac_y,
+            xs_i: base.xs_i,
+            ys_i: base.ys_i,
+            inv_r3: base.inv_r3,
+            scratch_mass: vec![0; n],
+        }
+    }
 }
 
 impl Galaxy {
@@ -1083,6 +1140,46 @@ mod tests_intial_generation {
         let third = g.mass.clone();
         assert_ne!(first, third);
         assert_ne!(second, third);
+    }
+}
+
+#[cfg(test)]
+mod tests_state_transfer {
+    use super::*;
+
+    #[test]
+    fn roundtrips_mass_and_velocity() {
+        // Seed + tick a galaxy to get non-trivial vel/frac state.
+        let g = Galaxy::new(8, 1).seed(5).tick(1.0).tick(1.0);
+
+        let mass = g.mass();
+        let vx = g.vel_x();
+        let vy = g.vel_y();
+        let fx = g.frac_x();
+        let fy = g.frac_y();
+
+        let rehydrated = Galaxy::from_state(
+            8,
+            mass.clone(),
+            vx.clone(),
+            vy.clone(),
+            fx.clone(),
+            fy.clone(),
+        );
+
+        assert_eq!(rehydrated.mass, mass);
+        assert_eq!(rehydrated.vel_x, vx);
+        assert_eq!(rehydrated.vel_y, vy);
+        assert_eq!(rehydrated.frac_x, fx);
+        assert_eq!(rehydrated.frac_y, fy);
+
+        // Ticking the rehydrated galaxy should produce the same next state
+        // as ticking the original — i.e. state transfer is complete.
+        let next_orig = g.tick(1.0);
+        let next_rehyd = rehydrated.tick(1.0);
+        assert_eq!(next_orig.mass, next_rehyd.mass);
+        assert_eq!(next_orig.vel_x, next_rehyd.vel_x);
+        assert_eq!(next_orig.vel_y, next_rehyd.vel_y);
     }
 }
 
