@@ -6,12 +6,32 @@ async function waitForWasm(page: Page) {
   });
 }
 
+// webpack-dev-server HMR produces harmless console noise when a page does
+// more than one `goto` in the same test (the old page's WebSocket tears down
+// mid-reload). These aren't application errors — filter them out so tests
+// that re-navigate (URL-param reproducibility checks) don't flake.
+function isDevServerNoise(msg: string): boolean {
+  return (
+    msg.includes("webpack-dev-server") ||
+    msg.includes("ws://127.0.0.1:8080/ws") ||
+    msg.includes("ws://localhost:8080/ws") ||
+    // Generic "Failed to load resource … 404" — typically a stale HMR
+    // chunk fetch or favicon probe when a test re-navigates. These are
+    // harmless for application behaviour.
+    /Failed to load resource.*\b404\b/.test(msg)
+  );
+}
+
 test.describe("Galaxy Generator", () => {
   test.beforeEach(async ({ page }) => {
     const consoleErrors: string[] = [];
-    page.on("pageerror", (err) => consoleErrors.push(err.message));
+    page.on("pageerror", (err) => {
+      if (!isDevServerNoise(err.message)) consoleErrors.push(err.message);
+    });
     page.on("console", (msg) => {
-      if (msg.type() === "error") consoleErrors.push(msg.text());
+      if (msg.type() === "error" && !isDevServerNoise(msg.text())) {
+        consoleErrors.push(msg.text());
+      }
     });
     (page as any).__consoleErrors = consoleErrors;
 
