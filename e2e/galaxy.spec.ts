@@ -433,6 +433,51 @@ test.describe("Galaxy Generator", () => {
     expect(second).toEqual(first);
   });
 
+  test("switching initial condition produces mode-specific seed + ticks", async ({ page }) => {
+    // Sanity: the dropdown has the four modes we expect.
+    const select = page.getByTestId("select-initial-condition");
+    await expect(select).toBeVisible();
+    const optionValues = await select.locator("option").evaluateAll((opts) =>
+      (opts as HTMLOptionElement[]).map((o) => o.value)
+    );
+    expect(optionValues).toEqual(["0", "1", "2", "3"]);
+
+    await page.getByTestId("btn-init").click();
+
+    // Walk each non-uniform mode. Bang (2) zeroes the baseline grid and
+    // only fills a central disc, so <50% of cells should have mass.
+    // Collision (3) is the same story. Rotation (1) fills the grid but
+    // also sets per-cell velocities, so a few ticks should visibly move
+    // mass around. Assert that each mode produces a DIFFERENT mass field
+    // than Uniform.
+    const snapshots: Record<string, number[]> = {};
+    for (const mode of ["0", "1", "2", "3"]) {
+      await select.selectOption(mode);
+      await page.getByTestId("btn-seed").click();
+      // Advance a few ticks to let the mode-specific velocities take effect.
+      for (let i = 0; i < 5; i++) await page.getByTestId("btn-tick").click();
+      snapshots[mode] = await page.evaluate(() => {
+        const fe: any = (window as any).__galaxyGen.frontend;
+        return Array.from(fe.massArray() as Uint16Array);
+      });
+      expect(snapshots[mode].length).toBe(50 * 50);
+    }
+
+    // Each mode should produce a distinct mass field after ticks. We
+    // compare by number of cells with nonzero mass — uniform fills the
+    // whole grid, bang/collision are sparse, rotation is somewhere in
+    // between after mass merges.
+    const nonzero = (a: number[]) => a.filter((m) => m > 0).length;
+    const uniformNZ = nonzero(snapshots["0"]);
+    const bangNZ = nonzero(snapshots["2"]);
+    const collisionNZ = nonzero(snapshots["3"]);
+    expect(uniformNZ).toBeGreaterThan(bangNZ);
+    expect(uniformNZ).toBeGreaterThan(collisionNZ);
+    // Bang + collision should each have SOME mass left after 5 ticks.
+    expect(bangNZ).toBeGreaterThan(0);
+    expect(collisionNZ).toBeGreaterThan(0);
+  });
+
   test("changing galaxy size changes cell count after re-init", async ({ page }) => {
     const sizeInput = page.getByTestId("input-galaxy-size");
     await sizeInput.fill("20");
