@@ -121,6 +121,10 @@ jobs:
       - name: Apply manifests
         env:
           IMAGE_URL: ghcr.io/${{ github.repository }}/coilysiren-galaxy-gen:${{ github.sha }}
-        run: image-url="$IMAGE_URL" make .deploy
+        # Pass as a make-level override, not a shell env prefix — bash
+        # rejects `image-url=…` as an assignment because `-` isn't a
+        # valid bash variable-name character, and tries to exec it as a
+        # command instead.
+        run: make .deploy image-url="$IMAGE_URL"
       - name: Wait for rollout
         run: kubectl -n coilysiren-galaxy-gen rollout status deploy/coilysiren-galaxy-gen-app --timeout=5m
