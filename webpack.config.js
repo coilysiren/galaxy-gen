@@ -34,7 +34,10 @@ module.exports = {
   },
   plugins: [
     new CopyWebpackPlugin({
-      patterns: [{ from: "src/js/index.html" }],
+      patterns: [
+        { from: "src/js/index.html" },
+        { from: "src/js/favicon.svg" },
+      ],
     }),
   ],
   mode: "development",

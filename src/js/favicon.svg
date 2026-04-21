@@ -1,0 +1,38 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+  <defs>
+    <radialGradient id="core" cx="50%" cy="50%" r="50%">
+      <stop offset="0%" stop-color="#eeeeee" />
+      <stop offset="35%" stop-color="#9192bb" />
+      <stop offset="100%" stop-color="#201a35" />
+    </radialGradient>
+  </defs>
+  <rect width="64" height="64" rx="12" fill="#201a35" />
+  <g transform="translate(32 32)">
+    <!-- bright core -->
+    <circle r="10" fill="url(#core)" />
+    <!-- spiral arms: two logarithmic arms of dots -->
+    <g fill="#9192bb">
+      <circle cx="14" cy="2"  r="1.6" />
+      <circle cx="18" cy="6"  r="1.4" />
+      <circle cx="20" cy="12" r="1.2" />
+      <circle cx="19" cy="18" r="1.0" />
+      <circle cx="15" cy="22" r="0.9" />
+      <circle cx="9"  cy="23" r="0.8" />
+      <circle cx="24" cy="-2" r="1.0" />
+      <circle cx="-14" cy="-2"  r="1.6" />
+      <circle cx="-18" cy="-6"  r="1.4" />
+      <circle cx="-20" cy="-12" r="1.2" />
+      <circle cx="-19" cy="-18" r="1.0" />
+      <circle cx="-15" cy="-22" r="0.9" />
+      <circle cx="-9"  cy="-23" r="0.8" />
+      <circle cx="-24" cy="2"   r="1.0" />
+    </g>
+    <!-- scattered background stars -->
+    <g fill="#574f7d">
+      <circle cx="-22" cy="18"  r="0.6" />
+      <circle cx="22"  cy="-18" r="0.6" />
+      <circle cx="26"  cy="10"  r="0.5" />
+      <circle cx="-26" cy="-10" r="0.5" />
+    </g>
+  </g>
+</svg>
