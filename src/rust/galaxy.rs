@@ -979,26 +979,78 @@ mod tests_intial_generation {
     }
 
     #[test]
+    fn test_seed_rotation_has_positive_total_angular_momentum() {
+        // Net L_z = Σ m_i (x_i v_{y,i} - y_i v_{x,i}) around the grid center
+        // must be strongly positive — that's the whole point of the mode.
+        let g = Galaxy::new(30, 0, 1000).seed_with_mode(10, InitialCondition::Rotation);
+        let size = g.size as f32;
+        let cx = size * 0.5;
+        let cy = size * 0.5;
+        let mut lz: f64 = 0.0;
+        for i in 0..g.n {
+            let m = g.mass[i] as f64;
+            if m == 0.0 {
+                continue;
+            }
+            let x = (g.xs_i[i] as f32 - cx) as f64;
+            let y = (g.ys_i[i] as f32 - cy) as f64;
+            let vx = g.vel_x[i] as f64;
+            let vy = g.vel_y[i] as f64;
+            lz += m * (x * vy - y * vx);
+        }
+        assert!(
+            lz > 1.0,
+            "rotation mode must have strongly positive total angular momentum, got {}",
+            lz
+        );
+    }
+
+    #[test]
     fn test_seed_collision_produces_two_distinct_mass_clusters() {
         let g = Galaxy::new(40, 0).seed_with_mode(800, InitialCondition::Collision);
         let size = g.size as f32;
         let cx = size * 0.5;
-        // Sum mass in the left and right halves; both should be populated.
+        // Sum mass + mass-weighted centroid in each half; both should be
+        // populated and the centroids should be on opposite sides of the
+        // grid center, separated by roughly the seed offset (size * 0.5).
         let mut left_mass: u64 = 0;
         let mut right_mass: u64 = 0;
+        let mut left_cx: f64 = 0.0;
+        let mut right_cx: f64 = 0.0;
         for i in 0..g.n {
             if g.mass[i] == 0 {
                 continue;
             }
             let x = g.xs_i[i] as f32;
+            let m = g.mass[i] as u64;
             if x < cx {
-                left_mass += g.mass[i] as u64;
+                left_mass += m;
+                left_cx += (x as f64) * (m as f64);
             } else {
-                right_mass += g.mass[i] as u64;
+                right_mass += m;
+                right_cx += (x as f64) * (m as f64);
             }
         }
         assert!(left_mass > 0, "collision: left cluster has no mass");
         assert!(right_mass > 0, "collision: right cluster has no mass");
+        let lcx = left_cx / left_mass as f64;
+        let rcx = right_cx / right_mass as f64;
+        assert!(
+            lcx < cx as f64,
+            "left centroid should be left of grid center"
+        );
+        assert!(
+            rcx > cx as f64,
+            "right centroid should be right of grid center"
+        );
+        // Clusters seeded at cx ± size*0.25 — centroids should be separated
+        // by at least size * 0.3 (slack for the jittered-radius seed).
+        assert!(
+            (rcx - lcx) > (size as f64) * 0.3,
+            "collision centroids too close: left={} right={}",
+            lcx,
+            rcx
+        );
 
         // Velocities in the left cluster should point right (vx > 0) and
         // vice versa — i.e. the clusters are on intercept.
