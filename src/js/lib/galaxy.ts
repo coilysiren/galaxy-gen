@@ -16,8 +16,8 @@ export class Frontend {
   private galaxy: wasm.Galaxy;
   public galaxySize: number;
 
-  constructor(galaxySize: number, minStarMass: number) {
-    this.galaxy = new wasm.Galaxy(galaxySize, 0, minStarMass);
+  constructor(galaxySize: number) {
+    this.galaxy = new wasm.Galaxy(galaxySize, 0);
     this.galaxySize = galaxySize;
   }
 

@@ -1,6 +1,15 @@
 import { defineConfig, devices } from "@playwright/test";
+import { createHash } from "crypto";
 
-const PORT = Number(process.env.PLAYWRIGHT_PORT ?? 8080);
+// Derive a per-worktree port so parallel agents on different worktrees don't
+// collide on the dev server. Same cwd → same port, so `reuseExistingServer`
+// still works across reruns in one worktree.
+const portFromCwd = (): number => {
+  const hash = createHash("sha256").update(process.cwd()).digest();
+  return 20000 + (hash.readUInt16BE(0) % 30000);
+};
+
+const PORT = Number(process.env.PLAYWRIGHT_PORT ?? portFromCwd());
 const BASE_URL = `http://localhost:${PORT}`;
 
 export default defineConfig({

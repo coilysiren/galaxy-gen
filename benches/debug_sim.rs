@@ -2,7 +2,7 @@ use galaxy_gen_backend::galaxy::Galaxy;
 
 fn main() {
     let size = 20u16;
-    let mut g = Galaxy::new(size, 0, 1000);
+    let mut g = Galaxy::new(size, 0);
     g = g.seed(25);
     let before = g.mass();
     let before_sum: u32 = before.iter().map(|&m| m as u32).sum();

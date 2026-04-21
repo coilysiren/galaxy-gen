@@ -7,8 +7,6 @@
 - `lib.rs` — crate root, re-exports the `galaxy` module
 - `galaxy.rs` — core simulation logic: `Galaxy` struct with `Cell` grid, gravitational physics (Newton's law), acceleration, seeding, tick advancement. Exposed to JS via `wasm-bindgen`
 
-Cell types by mass: Gas (below `min_star_mass`), Star (above). Planned but not yet implemented: Planet, White Hole.
-
 The Galaxy is immutable-style — methods like `seed()`, `tick()` return new Galaxy instances.
 
 ### WASM Bridge

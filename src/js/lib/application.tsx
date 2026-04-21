@@ -21,7 +21,11 @@ export function Interface() {
   const runningRef = React.useRef(false);
   const rafRef = React.useRef<number | null>(null);
   const timeModRef = React.useRef(timeModifier);
-  timeModRef.current = timeModifier;
+  const fpsSamplesRef = React.useRef<number[]>([]);
+
+  React.useEffect(() => {
+    timeModRef.current = timeModifier;
+  }, [timeModifier]);
 
   React.useEffect(() => {
     wasm.then((module) => {
@@ -75,7 +79,7 @@ export function Interface() {
       return;
     }
     stopLoop();
-    galaxyFrontendRef.current = new galaxy.Frontend(galaxySize, timeModifier);
+    galaxyFrontendRef.current = new galaxy.Frontend(galaxySize);
     dataviz.initViz(galaxyFrontendRef.current);
     dataviz.initData(galaxyFrontendRef.current);
     setInitialized(true);
@@ -107,43 +111,41 @@ export function Interface() {
     exposeForTests();
   };
 
-  const tickLoop = React.useCallback(() => {
-    if (!runningRef.current || !galaxyFrontendRef.current) return;
-
-    const t0 = performance.now();
-    galaxyFrontendRef.current.tick(timeModRef.current);
-    const tickElapsed = performance.now() - t0;
-
-    dataviz.updateData(galaxyFrontendRef.current);
-
-    // Update counters every frame (cheap with a ref-guarded rAF).
-    fpsSamplesRef.current.push(performance.now());
-    const cutoff = performance.now() - 1000;
-    while (
-      fpsSamplesRef.current.length > 0 &&
-      fpsSamplesRef.current[0] < cutoff
-    ) {
-      fpsSamplesRef.current.shift();
-    }
-    setFps(fpsSamplesRef.current.length);
-    setTickMs(tickElapsed);
-    setTickCount((n) => n + 1);
-
-    rafRef.current = requestAnimationFrame(tickLoop);
-  }, []);
-
-  const fpsSamplesRef = React.useRef<number[]>([]);
-
   const handleRunToggle = () => {
     if (!galaxyFrontendRef.current) return;
     if (runningRef.current) {
       stopLoop();
-    } else {
-      fpsSamplesRef.current = [];
-      runningRef.current = true;
-      setRunning(true);
-      rafRef.current = requestAnimationFrame(tickLoop);
+      return;
     }
+    fpsSamplesRef.current.length = 0;
+    runningRef.current = true;
+    setRunning(true);
+
+    const tick = () => {
+      if (!runningRef.current || !galaxyFrontendRef.current) return;
+
+      const t0 = performance.now();
+      galaxyFrontendRef.current.tick(timeModRef.current);
+      const tickElapsed = performance.now() - t0;
+
+      dataviz.updateData(galaxyFrontendRef.current);
+
+      fpsSamplesRef.current.push(performance.now());
+      const cutoff = performance.now() - 1000;
+      while (
+        fpsSamplesRef.current.length > 0 &&
+        fpsSamplesRef.current[0] < cutoff
+      ) {
+        fpsSamplesRef.current.shift();
+      }
+      setFps(fpsSamplesRef.current.length);
+      setTickMs(tickElapsed);
+      setTickCount((n) => n + 1);
+
+      rafRef.current = requestAnimationFrame(tick);
+    };
+
+    rafRef.current = requestAnimationFrame(tick);
   };
 
   return (

@@ -6,7 +6,7 @@ use galaxy_gen_backend::galaxy::Galaxy;
 use std::time::Instant;
 
 fn bench(size: u16, ticks: u32, seed_mass: u16) {
-    let mut g = Galaxy::new(size, 0, 1000);
+    let mut g = Galaxy::new(size, 0);
     g = g.seed(seed_mass);
 
     // Warmup

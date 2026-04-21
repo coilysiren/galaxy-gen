@@ -23,7 +23,6 @@ use wasm_bindgen::prelude::*;
 pub struct Galaxy {
     size: u16,
     n: usize,
-    min_star_mass: u16,
 
     mass: Vec<u16>,
     acc_x: Vec<f32>,
@@ -54,12 +53,6 @@ pub struct Galaxy {
 }
 
 impl Galaxy {
-    pub const TYPE_INDEX_GAS: u8 = 0;
-    pub const TYPE_INDEX_PLANET: u8 = 1;
-    pub const TYPE_INDEX_STAR: u8 = 2;
-    pub const TYPE_INDEX_WHITE_HOLE: u8 = 3;
-    pub const STAR_MAX_MASS: u16 = u16::MAX / 2;
-
     // Newton's G is ~6.67e-11 in SI. At this grid scale (distances of 1-100,
     // masses of 1-65535) that's numerically invisible. Pick a value big
     // enough to produce motion in a reasonable number of ticks; the
@@ -78,7 +71,7 @@ impl Galaxy {
 #[wasm_bindgen]
 impl Galaxy {
     #[wasm_bindgen(constructor)]
-    pub fn new(size: u16, cell_initial_mass: u16, min_star_mass: u16) -> Galaxy {
+    pub fn new(size: u16, cell_initial_mass: u16) -> Galaxy {
         console_error_panic_hook::set_once();
         let n = (size as usize) * (size as usize);
         let size_i = size as i32;
@@ -103,7 +96,6 @@ impl Galaxy {
         Galaxy {
             size,
             n,
-            min_star_mass,
             mass: vec![cell_initial_mass; n],
             acc_x: vec![0.0; n],
             acc_y: vec![0.0; n],
@@ -129,7 +121,6 @@ impl Galaxy {
         Galaxy {
             size: self.size,
             n: self.n,
-            min_star_mass: self.min_star_mass,
             mass,
             acc_x: vec![0.0; self.n],
             acc_y: vec![0.0; self.n],
@@ -148,7 +139,6 @@ impl Galaxy {
         let mut next = Galaxy {
             size: self.size,
             n: self.n,
-            min_star_mass: self.min_star_mass,
             mass: self.mass.clone(),
             acc_x: self.acc_x.clone(),
             acc_y: self.acc_y.clone(),
@@ -421,61 +411,6 @@ impl Galaxy {
         }
     }
 
-    // Kept for tests / older callers.
-    fn reach_range_start(&self, index: u16, reach: u16) -> u16 {
-        index.saturating_sub(reach)
-    }
-    fn reach_range_end(&self, index: u16, reach: u16) -> u16 {
-        index.saturating_add(reach).min(self.size - 1)
-    }
-    fn reach_range(&self, index: u16, reach: u16) -> (u16, u16) {
-        (
-            self.reach_range_start(index, reach),
-            self.reach_range_end(index, reach),
-        )
-    }
-    fn neighbours(&self, index: u16, reach: u16) -> Vec<(u16, u16)> {
-        let mut out = Vec::new();
-        let (col, row) = self.index_to_col_row(index);
-        let (col_start, col_end) = self.reach_range(col, reach);
-        let (row_start, row_end) = self.reach_range(row, reach);
-        for r in row_start..=row_end {
-            for c in col_start..=col_end {
-                if (c, r) != (col, row) {
-                    out.push((c, r));
-                }
-            }
-        }
-        out
-    }
-    fn get_type_index(&self, mass: u16) -> u8 {
-        if mass < self.min_star_mass {
-            Galaxy::TYPE_INDEX_GAS
-        } else {
-            Galaxy::TYPE_INDEX_STAR
-        }
-    }
-    fn distance(&self, index: u16, neighbour_coords: (u16, u16)) -> f32 {
-        let (cx, cy) = self.index_to_col_row(index);
-        let dx = (cx as i32 - neighbour_coords.0 as i32) as f32;
-        let dy = (cy as i32 - neighbour_coords.1 as i32) as f32;
-        (dx * dx + dy * dy).sqrt()
-    }
-    fn degrees(&self, index: u16, neighbour_coords: (u16, u16)) -> f32 {
-        let (cx, cy) = self.index_to_col_row(index);
-        let x = neighbour_coords.0 as i32 - cx as i32;
-        let y = neighbour_coords.1 as i32 - cy as i32;
-        (x as f32).atan2(y as f32).to_degrees()
-    }
-    fn neighbours_of_my_type(&self, index: u16) -> Vec<(u16, u16)> {
-        let type_index = self.get_type_index(self.mass[index as usize]);
-        let reach = match type_index {
-            Galaxy::TYPE_INDEX_STAR => self.size,
-            Galaxy::TYPE_INDEX_GAS => (self.size as f32).sqrt() as u16,
-            _ => 0,
-        };
-        self.neighbours(index, reach)
-    }
 }
 
 /// Clamp with wrap-around so a cell that accelerates past the edge
@@ -564,15 +499,9 @@ fn build_quadtree(px: &[f32], py: &[f32], pm: &[f32], ox: f32, oy: f32, size: f3
 /// via `nodes.push(...)` — uses indices to avoid borrow-checker fights on
 /// recursive `&mut Vec<Node>`.
 fn insert(nodes: &mut Vec<Node>, node_idx: usize, b: u32, bx: f32, by: f32, bm: f32) {
-    let (cx, cy, h, existing_body, is_leaf) = {
+    let (h, existing_body, is_leaf) = {
         let node = &nodes[node_idx];
-        (
-            node.cx,
-            node.cy,
-            node.h,
-            node.body,
-            node.is_leaf(),
-        )
+        (node.h, node.body, node.is_leaf())
     };
 
     if is_leaf && existing_body == NO_CHILD {
@@ -737,33 +666,33 @@ mod tests_intial_generation {
     use super::*;
     #[test]
     fn test_inital_generation_no_panic() {
-        Galaxy::new(10, 0, 1000);
+        Galaxy::new(10, 0);
     }
     #[test]
     fn test_seed_no_panic() {
-        Galaxy::new(10, 0, 1000).seed(1);
+        Galaxy::new(10, 0).seed(1);
     }
     #[test]
     fn test_seed_tick_no_panic() {
-        Galaxy::new(10, 1, 1000).seed(1).tick(1.0);
+        Galaxy::new(10, 1).seed(1).tick(1.0);
     }
     #[test]
     fn test_seed_alters_data() {
-        let g = Galaxy::new(10, 0, 1000);
+        let g = Galaxy::new(10, 0);
         let before = g.mass.clone();
         let g = g.seed(1);
         assert_ne!(before, g.mass);
     }
     #[test]
     fn test_seed_doesnt_alter_when_zero() {
-        let g = Galaxy::new(10, 0, 1000);
+        let g = Galaxy::new(10, 0);
         let before = g.mass.clone();
         let g = g.seed(0);
         assert_eq!(before, g.mass);
     }
     #[test]
     fn test_seed_alters_data_twice() {
-        let g = Galaxy::new(10, 0, 1000);
+        let g = Galaxy::new(10, 0);
         let first = g.mass.clone();
         let g = g.seed(1);
         let second = g.mass.clone();
@@ -780,37 +709,37 @@ mod tests_indexing {
     use super::*;
     #[test]
     fn test_index_to_col_row_start() {
-        let g = Galaxy::new(3, 0, 1000);
+        let g = Galaxy::new(3, 0);
         assert_eq!(g.index_to_col_row(0), (0, 0));
     }
     #[test]
     fn test_col_row_to_index_start() {
-        let g = Galaxy::new(3, 0, 1000);
+        let g = Galaxy::new(3, 0);
         assert_eq!(g.col_row_to_index(0, 0), 0);
     }
     #[test]
     fn test_index_to_col_row_center() {
-        let g = Galaxy::new(3, 0, 1000);
+        let g = Galaxy::new(3, 0);
         assert_eq!(g.index_to_col_row(4), (1, 1));
     }
     #[test]
     fn test_col_row_to_index_center() {
-        let g = Galaxy::new(3, 0, 1000);
+        let g = Galaxy::new(3, 0);
         assert_eq!(g.col_row_to_index(1, 1), 4);
     }
     #[test]
     fn test_index_to_col_row_end() {
-        let g = Galaxy::new(3, 0, 1000);
+        let g = Galaxy::new(3, 0);
         assert_eq!(g.index_to_col_row(8), (2, 2));
     }
     #[test]
     fn test_col_row_to_index_end() {
-        let g = Galaxy::new(3, 0, 1000);
+        let g = Galaxy::new(3, 0);
         assert_eq!(g.col_row_to_index(2, 2), 8);
     }
     #[test]
     fn test_index_edge_transform_top_right() {
-        let g = Galaxy::new(3, 0, 1000);
+        let g = Galaxy::new(3, 0);
         let index = 2;
         let (x, y) = g.index_to_col_row(index);
         assert_eq!(g.col_row_to_index(x, y), index);
@@ -818,7 +747,7 @@ mod tests_indexing {
     }
     #[test]
     fn test_index_edge_transform_bottom_left() {
-        let g = Galaxy::new(3, 0, 1000);
+        let g = Galaxy::new(3, 0);
         let index = 6;
         let (x, y) = g.index_to_col_row(index);
         assert_eq!(g.col_row_to_index(x, y), index);
@@ -827,138 +756,21 @@ mod tests_indexing {
 }
 
 #[cfg(test)]
-mod tests_neighbors_and_reach {
+mod tests_position_accessors {
     use super::*;
     #[test]
     fn test_mass() {
-        let g = Galaxy::new(3, 0, 1000);
+        let g = Galaxy::new(3, 0);
         assert_eq!(g.mass(), vec![0, 0, 0, 0, 0, 0, 0, 0, 0]);
     }
     #[test]
     fn test_x() {
-        let g = Galaxy::new(3, 0, 1000);
+        let g = Galaxy::new(3, 0);
         assert_eq!(g.x(), vec![0, 1, 2, 0, 1, 2, 0, 1, 2]);
     }
     #[test]
     fn test_y() {
-        let g = Galaxy::new(3, 0, 1000);
+        let g = Galaxy::new(3, 0);
         assert_eq!(g.y(), vec![0, 0, 0, 1, 1, 1, 2, 2, 2]);
-    }
-    #[test]
-    fn test_reach_range_start_edge() {
-        let g = Galaxy::new(3, 0, 1000);
-        assert_eq!(g.reach_range_start(0, 99), 0);
-    }
-    #[test]
-    fn test_reach_range_start_overflow() {
-        let g = Galaxy::new(3, 0, 1000);
-        assert_eq!(g.reach_range_start(1, 99), 0);
-    }
-    #[test]
-    fn test_reach_range_start_contained() {
-        let g = Galaxy::new(10, 0, 1000);
-        assert_eq!(g.reach_range_start(4, 2), 2);
-    }
-    #[test]
-    fn test_reach_range_end_edge() {
-        let g = Galaxy::new(3, 0, 1000);
-        assert_eq!(g.reach_range_end(2, 99), 2);
-    }
-    #[test]
-    fn test_reach_range_end_overflow() {
-        let g = Galaxy::new(3, 0, 1000);
-        assert_eq!(g.reach_range_end(0, 99), 2);
-    }
-    #[test]
-    fn test_reach_range_end_contained() {
-        let g = Galaxy::new(10, 0, 1000);
-        assert_eq!(g.reach_range_end(2, 2), 4);
-    }
-    #[test]
-    fn test_neighbor_size() {
-        let g = Galaxy::new(10, 0, 1000);
-        assert_eq!(g.neighbours(0, 1).len(), 3);
-    }
-    #[test]
-    fn test_neighbor_size_larger() {
-        let g = Galaxy::new(10, 0, 1000);
-        assert_eq!(g.neighbours(0, 2).len(), 8);
-        assert_eq!(g.neighbours(0, u16::MAX).len(), 99);
-    }
-    #[test]
-    fn test_neighbor_size_center() {
-        let g = Galaxy::new(3, 0, 1000);
-        assert_eq!(g.neighbours(4, 1).len(), 8);
-        assert_eq!(g.neighbours(4, u16::MAX).len(), 8);
-    }
-    #[test]
-    fn test_neighbor_size_differs_for_large_galaxy() {
-        let mut g = Galaxy::new(100, 0, 1000);
-        g.mass[0] = 1;
-        let gas_neighbours = g.neighbours_of_my_type(0).len();
-        g.mass[0] = 65535;
-        let star_neighbours = g.neighbours_of_my_type(0).len();
-        assert_ne!(gas_neighbours, star_neighbours);
-    }
-    #[test]
-    fn test_neighbor_size_same_for_small_galaxy() {
-        let mut g = Galaxy::new(1, 0, 1000);
-        g.mass[0] = 1;
-        let gas_neighbours = g.neighbours_of_my_type(0).len();
-        g.mass[0] = 59999;
-        let star_neighbours = g.neighbours_of_my_type(0).len();
-        assert_eq!(gas_neighbours, star_neighbours);
-    }
-}
-
-#[cfg(test)]
-mod tests_distance {
-    use super::*;
-    #[test]
-    fn test_distance_one() {
-        let g = Galaxy::new(3, 0, 1000);
-        let d = (g.distance(0, (1, 1)) * 100.0).round() / 100.0;
-        assert_eq!(d, 1.41);
-    }
-    #[test]
-    fn test_distance_two() {
-        let g = Galaxy::new(3, 0, 1000);
-        let d = (g.distance(0, (2, 2)) * 100.0).round() / 100.0;
-        assert_eq!(d, 2.83);
-    }
-    #[test]
-    fn test_distance_two_linear() {
-        let g = Galaxy::new(3, 0, 1000);
-        let d = (g.distance(0, (0, 2)) * 100.0).round() / 100.0;
-        assert_eq!(d, 2.00);
-    }
-}
-
-mod tests_degreess {
-    use super::*;
-    #[test]
-    fn test_degreess_x() {
-        let g = Galaxy::new(3, 0, 1000);
-        assert_eq!(g.degrees(0, (2, 0)).round() as u16, 90);
-    }
-    #[test]
-    fn test_degreess_y() {
-        let g = Galaxy::new(3, 0, 1000);
-        assert_eq!(g.degrees(0, (0, 2)).round() as u16, 0);
-    }
-    #[test]
-    fn test_degreess_z_one() {
-        let g = Galaxy::new(3, 0, 1000);
-        assert_eq!(g.degrees(0, (2, 2)).round() as u16, 45);
-    }
-    #[test]
-    fn test_degreess_z_two() {
-        let g = Galaxy::new(3, 0, 1000);
-        assert_eq!(g.degrees(0, (1, 2)).round() as u16, 27);
-    }
-    #[test]
-    fn test_degreess_z_three() {
-        let g = Galaxy::new(3, 0, 1000);
-        assert_eq!(g.degrees(0, (2, 1)).round() as u16, 63);
     }
 }
