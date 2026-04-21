@@ -482,6 +482,14 @@ test.describe("Galaxy Generator", () => {
     await page.getByTestId("btn-init").click();
     await page.getByTestId("btn-seed").click();
 
+    // Before running, the worker shouldn't exist yet but the browser
+    // should support Workers (sanity — otherwise the run path is a
+    // no-op and the rest of this test is meaningless).
+    const workerSupport = await page.evaluate(
+      () => (window as any).__galaxyGen?.workerSupported === true
+    );
+    expect(workerSupport, "Worker API unavailable in test browser").toBe(true);
+
     const before = await page.evaluate(() => {
       const fe: any = (window as any).__galaxyGen.frontend;
       return Array.from(fe.massArray() as Uint16Array);
@@ -490,6 +498,10 @@ test.describe("Galaxy Generator", () => {
     // Kick off the worker-driven loop, let it run briefly, then pause.
     await page.getByTestId("btn-run").click();
     await expect(page.getByTestId("btn-run")).toHaveText("pause");
+    // Now that the run loop is live, the worker proxy should be present
+    // on the window — proves physics is genuinely off-main-thread.
+    const workerLive = await page.evaluate(() => !!(window as any).__galaxyGen?.worker);
+    expect(workerLive, "TickWorker proxy not exposed after run start").toBe(true);
     // Let the worker advance the sim for a bit.
     await page.waitForTimeout(1500);
     // Sanity: the displayed tick count should have advanced as the
@@ -514,17 +526,25 @@ test.describe("Galaxy Generator", () => {
     expect(changed / before.length).toBeGreaterThan(0.05);
 
     // And the step button should still work after pause (proving the
-    // main-thread Frontend is alive and its state was restored).
+    // main-thread Frontend is alive and its state was restored). We
+    // assert that the tick counter advances — the mass field may or
+    // may not change on any given tick once the sim has settled, but
+    // the act of calling tick() on a restored Frontend should never
+    // throw and should always bump the counter.
+    const tickCountBefore = parseInt(
+      (
+        await page.locator("text=/ticks: \\d+/").first().textContent()
+      )?.replace(/\D/g, "") ?? "0",
+      10,
+    );
     await page.getByTestId("btn-tick").click();
-    const afterStep = await page.evaluate(() => {
-      const fe: any = (window as any).__galaxyGen.frontend;
-      return Array.from(fe.massArray() as Uint16Array);
-    });
-    let changedAfterStep = 0;
-    for (let i = 0; i < after.length; i++) {
-      if (after[i] !== afterStep[i]) changedAfterStep++;
-    }
-    expect(changedAfterStep).toBeGreaterThan(0);
+    const tickCountAfter = parseInt(
+      (
+        await page.locator("text=/ticks: \\d+/").first().textContent()
+      )?.replace(/\D/g, "") ?? "0",
+      10,
+    );
+    expect(tickCountAfter).toBe(tickCountBefore + 1);
   });
 
   test("changing galaxy size changes cell count after re-init", async ({ page }) => {

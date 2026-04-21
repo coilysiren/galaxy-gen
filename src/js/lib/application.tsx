@@ -162,6 +162,9 @@ export function Interface() {
     if (typeof window !== "undefined") {
       (window as any).__galaxyGen = (window as any).__galaxyGen || {};
       (window as any).__galaxyGen.frontend = galaxyFrontendRef.current;
+      (window as any).__galaxyGen.worker = workerRef.current;
+      (window as any).__galaxyGen.workerSupported =
+        typeof Worker !== "undefined";
     }
   };
 
@@ -193,7 +196,7 @@ export function Interface() {
     const worker = workerRef.current;
     if (worker) {
       const state = await worker.stop();
-      if (galaxyFrontendRef.current && state && state.mass) {
+      if (galaxyFrontendRef.current && state) {
         galaxyFrontendRef.current.restoreState(
           state.mass,
           state.velX,
@@ -329,6 +332,12 @@ export function Interface() {
 
     // Spin up (or reuse) the worker and hand it the current sim state.
     if (!workerRef.current) {
+      if (typeof Worker === "undefined") {
+        console.error(
+          "Web Worker unsupported in this browser; physics run loop unavailable.",
+        );
+        return;
+      }
       workerRef.current = new galaxy.TickWorker(
         (mass, tickMs, tickId) => {
           latestSnapshotRef.current = { mass, tickMs, tickId };
@@ -340,6 +349,7 @@ export function Interface() {
     const snapshot = galaxyFrontendRef.current.snapshotState();
     workerRef.current.init(snapshot);
     workerRef.current.start(timeModRef.current);
+    exposeForTests();
 
     runningRef.current = true;
     setRunning(true);

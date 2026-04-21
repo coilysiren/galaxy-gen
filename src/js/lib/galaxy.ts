@@ -156,11 +156,16 @@ export class Frontend {
 export class TickWorker {
   private worker: Worker;
   private onSnapshot: (mass: Uint16Array, tickMs: number, tickId: number) => void;
-  private stopResolver: ((state: StoppedState) => void) | null = null;
+  private stopResolver: ((state: StoppedState | null) => void) | null = null;
 
   constructor(
     onSnapshot: (mass: Uint16Array, tickMs: number, tickId: number) => void,
   ) {
+    if (typeof Worker === "undefined") {
+      throw new Error(
+        "Web Workers are not supported in this environment; TickWorker cannot be constructed.",
+      );
+    }
     this.worker = new Worker(new URL("./tick-worker.ts", import.meta.url), {
       type: "module",
     });
@@ -174,9 +179,12 @@ export class TickWorker {
     if (msg.type === "snapshot") {
       this.onSnapshot(msg.mass, msg.tickMs, msg.tickId);
     } else if (msg.type === "stopped") {
-      if (this.stopResolver) {
-        const resolver = this.stopResolver;
-        this.stopResolver = null;
+      if (!this.stopResolver) return;
+      const resolver = this.stopResolver;
+      this.stopResolver = null;
+      // Worker only omits state if it was never initialized — surface that
+      // to the caller as `null` so main thread knows to skip restoreState.
+      if (msg.mass) {
         resolver({
           mass: msg.mass,
           velX: msg.velX,
@@ -184,6 +192,8 @@ export class TickWorker {
           fracX: msg.fracX,
           fracY: msg.fracY,
         });
+      } else {
+        resolver(null);
       }
     }
   }
@@ -231,19 +241,19 @@ export class TickWorker {
   /**
    * Stop the loop and resolve with the final state so the main thread
    * can rehydrate its Frontend (preserving velocity / fractional pos).
+   * Resolves with `null` if the worker had no galaxy (i.e. stop called
+   * before init ever completed).
+   *
+   * Callers must not invoke `stop()` twice concurrently — the UI layer
+   * already guards this via `runningRef`.
    */
-  public stop(): Promise<StoppedState> {
+  public stop(): Promise<StoppedState | null> {
     if (this.stopResolver) {
-      // A stop is already in-flight; chain onto it.
-      return new Promise((resolve) => {
-        const prev = this.stopResolver;
-        this.stopResolver = (state) => {
-          if (prev) prev(state);
-          resolve(state);
-        };
-      });
+      return Promise.reject(
+        new Error("TickWorker.stop() is already in flight"),
+      );
     }
-    return new Promise<StoppedState>((resolve) => {
+    return new Promise<StoppedState | null>((resolve) => {
       this.stopResolver = resolve;
       this.worker.postMessage({ type: "stop" });
     });
