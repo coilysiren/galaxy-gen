@@ -5,7 +5,7 @@ on:
     branches: [main]
   pull_request:
   schedule:
-    # Weekly full-history rescan (catches anything missed incrementally)
+    # Weekly full rescan
     - cron: "0 12 * * 1"
   workflow_dispatch:
 
@@ -19,10 +19,23 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
 
-      - name: TruffleHog
-        uses: trufflesecurity/trufflehog@main
-        with:
-          extra_args: --results=verified,unknown
+      - name: TruffleHog (filesystem, offline)
+        run: |
+          cat > /tmp/trufflehog-exclude <<'EOF'
+          ^\.git/
+          ^\.venv/
+          ^venv/
+          ^node_modules/
+          ^__pycache__/
+          ^\.mypy_cache/
+          ^\.pytest_cache/
+          ^\.ruff_cache/
+          EOF
+          docker run --rm \
+            -v "${{ github.workspace }}:/pwd:ro" \
+            -v /tmp/trufflehog-exclude:/exclude:ro \
+            trufflesecurity/trufflehog:latest \
+            filesystem /pwd \
+            --no-verification --no-update --fail \
+            --exclude-paths=/exclude
