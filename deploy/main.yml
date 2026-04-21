@@ -1,0 +1,126 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: ${NAME}
+
+---
+# GHCR pull-secret, synced declaratively from AWS SSM via the cluster's
+# external-secrets operator. `/github/pat` is the shared PAT for ghcr.io/coilysiren
+# and lives in AWS SSM Parameter Store. ESO renders it into a
+# kubernetes.io/dockerconfigjson secret — no manual kubectl create, no PAT
+# materializing outside the cluster. Same pattern as eco-mcp-app.
+apiVersion: external-secrets.io/v1
+kind: ExternalSecret
+metadata:
+  name: docker-registry
+  namespace: ${NAME}
+spec:
+  refreshInterval: 1h
+  secretStoreRef:
+    name: aws-parameter-store
+    kind: ClusterSecretStore
+  target:
+    name: docker-registry
+    creationPolicy: Owner
+    template:
+      type: kubernetes.io/dockerconfigjson
+      data:
+        .dockerconfigjson: |
+          {"auths":{"ghcr.io":{"auth":"{{ printf "coilysiren:%s" .pat | b64enc }}"}}}
+  data:
+    - secretKey: pat
+      remoteRef:
+        key: /github/pat
+
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: ${NAME}-app
+  namespace: ${NAME}
+  labels:
+    app: ${NAME}-app
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: ${NAME}-app
+  template:
+    metadata:
+      labels:
+        app: ${NAME}-app
+    spec:
+      imagePullSecrets:
+        - name: docker-registry
+      containers:
+        - name: ${NAME}
+          image: ${IMAGE}
+          resources:
+            requests:
+              cpu: "25m"
+              memory: "32Mi"
+            limits:
+              cpu: "250m"
+              memory: "128Mi"
+          env:
+            - name: PORT
+              value: "8080"
+          ports:
+            - containerPort: 8080
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: 8080
+            initialDelaySeconds: 2
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: 8080
+            initialDelaySeconds: 10
+            periodSeconds: 30
+      restartPolicy: Always
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: ${NAME}-service
+  namespace: ${NAME}
+  annotations:
+    tailscale.com/expose: "true"
+spec:
+  type: ClusterIP
+  selector:
+    app: ${NAME}-app
+  ports:
+    - port: 80
+      targetPort: 8080
+      protocol: TCP
+
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: ${NAME}-ingress
+  namespace: ${NAME}
+  annotations:
+    cert-manager.io/cluster-issuer: letsencrypt-production
+    kubernetes.io/tls-acme: "true"
+spec:
+  ingressClassName: traefik
+  tls:
+    - hosts:
+        - ${DNS_NAME}
+      secretName: ${NAME}-tls
+  rules:
+    - host: ${DNS_NAME}
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: ${NAME}-service
+                port:
+                  number: 80

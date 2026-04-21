@@ -1,41 +1,79 @@
 # galaxy-gen
 
-`{ rust => wasm => js }` galaxy generation simulation
+`{ rust → wasm → js }` galaxy generation simulation. Gravitational physics
+(Newton's law on a cell grid) computed in Rust, compiled to WebAssembly via
+[wasm-pack](https://github.com/rustwasm/wasm-pack), rendered in the browser
+with React + [D3](https://d3js.org/).
 
-[previous verison](https://github.com/coilysiren/galaxySim), written in python
+Previous version (Python): [coilysiren/galaxySim](https://github.com/coilysiren/galaxySim).
 
-## commands
+## Quick start
 
-- `$ make install`
-- `$ make dev`
-- see [makefile](makefile) for others
+```bash
+make install     # cargo build + wasm-pack + npm install + playwright browsers
+make dev         # rust/wasm watcher + webpack-dev-server (dual auto-reload)
+make test        # rust unit tests + Playwright E2E
+```
 
-## infrastructure
+See the [makefile](makefile) for the full set of targets and
+[AGENTS.md](AGENTS.md) for the conventions.
 
-- `./src/rust/` is the rust backend, with [wasm-bindgen](https://github.com/rustwasm/wasm-bindgen) decorators. the first build stage runs rust tests via `cargo test`
-- `./pkg/` is created via [wasm-pack](https://github.com/ashleygwilliams/wasm-pack), which compiles the rust code to `wasm` + `js` + `typescript`
-- `./src/js/` imports `./pkg/` and runs js tests via `npm test`
-- `./dist/` is created via [webpack](https://webpack.js.org/), which compiles everything mentioned above + [angular](http://angular.io/)
-- http://galaxygen.coilysiren.me is updated via [heroku](https://www.heroku.com/) with the compiled code
+## Architecture
 
-Note: the compiled folders aren't present on the default branch. Go to [{ branch: deploy }](https://github.com/coilysiren/galaxy-gen/tree/deploy) to view them.
+- `src/rust/galaxy.rs` — core simulation (`Galaxy` + `Cell` structs, cell
+  types Gas / Star / Planet / White Hole, gravity, seeding, `tick`). Unit
+  tests live in `mod tests_*` blocks at the bottom of the file.
+- `src/rust/lib.rs` — crate root; re-exports `galaxy`.
+- `pkg/` — `wasm-pack` output: `.wasm` + `.js` + `.d.ts`. Gitignored; linked
+  into `node_modules/galaxy_gen_backend` by `npm install ./pkg`.
+- `src/js/lib/galaxy.ts` — `Frontend` class; the JS ↔ WASM boundary.
+- `src/js/lib/application.tsx` — React UI (inputs, buttons, `data-testid`s).
+- `src/js/lib/dataviz.tsx` — D3 scatter plot into `#dataviz`.
+- `src/js/lib/styles.css` — Tailwind v4 + custom coilysiren palette.
+- `e2e/galaxy.spec.ts` — Playwright end-to-end tests.
+- `dist/` — production webpack build output (gitignored).
 
-## code
+## Tooling
 
-## rust
+- **Rust**: `cargo check` / `cargo test` / `cargo fmt` / `cargo clippy`.
+- **WASM**: `wasm-pack build` compiles Rust to WebAssembly. The dev server
+  watches `pkg/**/*` and hot-reloads on rebuild (via `cargo watch`).
+- **JS**: webpack 5 + babel (React + TypeScript presets). Tailwind v4 via
+  PostCSS.
+- **Lint/format**: ESLint flat config (`eslint.config.mjs`) + Prettier.
+- **Tests**: Rust unit tests via `cargo test`; browser end-to-end via
+  [Playwright](https://playwright.dev/) (`npm run test:e2e`).
+- **CI**: GitHub Actions runs `rust`, `js`, and `e2e` jobs on every push/PR
+  to `main`.
 
-`rust/*` contains the rust logic, wrapped in calls to [wasm-bindgen](https://github.com/rustwasm/wasm-bindgen) to provide a js api
+## Similar projects
 
-the files there are compiled to `galaxy_gen_backend` as `wasm` + `js`
+Other open-source galaxy / n-body / WASM-sim projects worth a look:
 
-## rust files
+- [andrewdcampbell/galaxy-sim](https://github.com/andrewdcampbell/galaxy-sim)
+  — browser N-body galaxy formation with 20k gas particles (JS/WebGL).
+- [magwo/fullofstars](https://github.com/magwo/fullofstars) — the
+  progenitor of `galaxy-sim`; real-time N-body galaxy toy (JS/WebGL).
+- [simbleau/nbody-wasm-sim](https://github.com/simbleau/nbody-wasm-sim) —
+  2D N-body in Rust compiled to WASM with WebGPU rendering.
+- [MichaelJCole/n-body-wasm-webvr](https://github.com/MichaelJCole/n-body-wasm-webvr)
+  — N-body in a WASM worker thread with WebVR/A-Frame.
+- [someguynamedmatt/gravity](https://github.com/someguynamedmatt/gravity) —
+  gravity sim built with Rust + wasm-bindgen (same toolchain as galaxy-gen).
+- [zotho/rust_n_body](https://github.com/zotho/rust_n_body) — Rust N-body
+  with a WebAssembly browser demo.
+- [aestuans/blob](https://github.com/aestuans/blob) — Rust→WASM 2D fluid +
+  gravity sim via WebGL.
+- [DrA1ex/JS_ParticleSystem](https://github.com/DrA1ex/JS_ParticleSystem) —
+  "galaxy birth" browser sim using Barnes-Hut spatial tree + WebGL2.
+- [davrempe/webgl-nbody-sim](https://github.com/davrempe/webgl-nbody-sim)
+  — 3D gravitational N-body in vanilla JS/WebGL.
+- [holmgr/gemini](https://github.com/holmgr/gemini) — sci-fi galaxy
+  simulation in Rust (non-browser), heavy procedural generation.
 
-`galaxy.rs` represents the proxy of a real life `Galaxy`, like a [spiral](https://en.wikipedia.org/wiki/Spiral_galaxy) or [ring](https://en.wikipedia.org/wiki/Ring_galaxy).
+## Deployment
 
-`cell.rs` represents a unit of space within a galaxy, and holds all of the identifying information about that unit of space. The galactic terrain is composed of (a variable language quantity of) cells, and come in two types: [generic gas clouds](https://en.wikipedia.org/wiki/Nebula) and [star systems](https://en.wikipedia.org/wiki/Star_system).
-
-## js
-
-`src/js/*` handles rendering the data created by the rust backend
-
-The `wasm` + `js` apis are loaded into the main application [typescript](https://www.typescriptlang.org/) via async imports
+Deployed to [galaxy-gen.coilysiren.me](https://galaxy-gen.coilysiren.me).
+Docker image published to GitHub Container Registry, served through Caddy
+on k3s on `kai-server` via Tailscale. See the `deploy` GitHub Actions
+workflow for the pipeline.

@@ -1,0 +1,118 @@
+name: build-publish-deploy
+
+on:
+  push:
+    branches:
+      - main
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+      - run: cargo install wasm-pack
+      - run: sudo apt-get update && sudo apt-get install -y binaryen
+      - run: wasm-pack build
+      - run: cargo test
+      - run: npm ci
+      - run: npx playwright install --with-deps chromium
+      - name: Playwright E2E
+        env:
+          CI: "true"
+        run: npx playwright test
+      - run: npx tsc --noEmit
+      - if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report
+          path: playwright-report/
+          retention-days: 14
+
+  build-publish:
+    runs-on: ubuntu-latest
+    needs: test
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Build image
+        run: name=coilysiren-galaxy-gen make .build-docker
+      - name: Tag and push
+        env:
+          IMAGE_URL: ghcr.io/${{ github.repository }}/coilysiren-galaxy-gen:${{ github.sha }}
+        run: |
+          docker tag coilysiren-galaxy-gen:latest "$IMAGE_URL"
+          docker push "$IMAGE_URL"
+
+  deploy:
+    runs-on: ubuntu-latest
+    needs: build-publish
+    steps:
+      - uses: actions/checkout@v4
+      # The action auths with an ephemeral authkey and brings tailscale up.
+      # A second `sudo tailscale up` to advertise flags would try to reauth
+      # without a key and hang; push the flags into the action's inputs
+      # instead. Hostname is per-run to avoid machine-key collisions.
+      - uses: tailscale/github-action@v3
+        with:
+          oauth-client-id: ${{ secrets.TS_OAUTH_CLIENT_ID }}
+          oauth-secret: ${{ secrets.TS_OAUTH_SECRET }}
+          tags: tag:ci
+          args: --accept-dns --accept-routes
+          hostname: github-actions-${{ github.run_id }}
+      - name: Install kubectl
+        run: |
+          curl -LO "https://dl.k8s.io/release/$(curl -L -s https://dl.k8s.io/release/stable.txt)/bin/linux/amd64/kubectl"
+          sudo install -o root -g root -m 0755 kubectl /usr/local/bin/kubectl
+      - name: Materialize kubeconfig
+        env:
+          K8S_SERVER: ${{ secrets.K8S_SERVER }}
+          K8S_CA_DATA: ${{ secrets.K8S_CA_DATA }}
+          K8S_CLIENT_CERT_DATA: ${{ secrets.K8S_CLIENT_CERT_DATA }}
+          K8S_CLIENT_KEY_DATA: ${{ secrets.K8S_CLIENT_KEY_DATA }}
+        run: |
+          mkdir -p ~/.kube
+          cat <<EOF > ~/.kube/config
+          apiVersion: v1
+          kind: Config
+          clusters:
+          - name: default
+            cluster:
+              server: ${K8S_SERVER}
+              certificate-authority-data: ${K8S_CA_DATA}
+          contexts:
+          - name: default
+            context:
+              cluster: default
+              user: default
+          current-context: default
+          preferences: {}
+          users:
+          - name: default
+            user:
+              client-certificate-data: ${K8S_CLIENT_CERT_DATA}
+              client-key-data: ${K8S_CLIENT_KEY_DATA}
+          EOF
+      - name: Install envsubst and yq
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y gettext-base
+          sudo curl -L https://github.com/mikefarah/yq/releases/latest/download/yq_linux_amd64 -o /usr/local/bin/yq
+          sudo chmod +x /usr/local/bin/yq
+      - name: Apply manifests
+        env:
+          IMAGE_URL: ghcr.io/${{ github.repository }}/coilysiren-galaxy-gen:${{ github.sha }}
+        run: image-url="$IMAGE_URL" make .deploy
+      - name: Wait for rollout
+        run: kubectl -n coilysiren-galaxy-gen rollout status deploy/coilysiren-galaxy-gen-app --timeout=5m

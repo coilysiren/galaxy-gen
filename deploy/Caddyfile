@@ -1,0 +1,50 @@
+# galaxy-gen: static site served by Caddy. TLS is terminated upstream by
+# traefik + cert-manager in the k3s cluster; this server speaks plain HTTP
+# on the container port (default 8080) and trusts the ingress.
+
+:{$PORT:8080} {
+    root * /usr/share/caddy
+
+    encode zstd gzip
+
+    # Ensure .wasm is served with the correct MIME type so browsers can
+    # stream-instantiate it (otherwise Chrome falls back to a slower path).
+    @wasm {
+        path *.wasm
+    }
+    header @wasm Content-Type application/wasm
+
+    # Hashed bundle filenames are immutable; cache them aggressively.
+    @hashed {
+        path_regexp hashed ^/.+\.[0-9a-f]{8,}\..+$
+    }
+    header @hashed Cache-Control "public, max-age=31536000, immutable"
+
+    # index.html must revalidate so fresh deploys land immediately.
+    @html {
+        path *.html
+    }
+    header @html Cache-Control "no-cache"
+
+    # Basic security headers.
+    header {
+        X-Content-Type-Options "nosniff"
+        Referrer-Policy "strict-origin-when-cross-origin"
+        -Server
+    }
+
+    # SPA-style fallback: unknown paths serve index.html (no client routing
+    # today, but this keeps things sane if we add one later).
+    try_files {path} /index.html
+    file_server
+
+    # Liveness/readiness endpoint for k8s probes.
+    handle /healthz {
+        respond "ok" 200
+    }
+
+    log {
+        output stdout
+        format console
+    }
+}
