@@ -97,53 +97,138 @@ test.describe("Galaxy Generator", () => {
     expect(pctChanged).toBeGreaterThan(0.05);
   });
 
-  test("keyboard shortcuts: space toggles run, arrows adjust dt, R resets", async ({ page }) => {
+  test("keyboard shortcut: Space toggles run/pause", async ({ page }) => {
     await page.getByTestId("btn-init").click();
-
     const runBtn = page.getByTestId("btn-run");
-    const dtStat = page.getByTestId("stat-dt");
-
     await expect(runBtn).toHaveText("run");
-    await expect(dtStat).toHaveText("dt: 0.500");
 
-    // Space starts the sim.
     await page.locator("body").press("Space");
     await expect(runBtn).toHaveText("pause");
 
-    // Space again pauses it.
     await page.locator("body").press("Space");
     await expect(runBtn).toHaveText("run");
+  });
 
-    // ArrowUp scales dt by ×1.25 per press.
+  test("keyboard shortcut: Space does nothing before galaxy is initialised", async ({ page }) => {
+    // Run button is disabled; Space should be a no-op and must not throw.
+    await page.locator("body").press("Space");
+    await expect(page.getByTestId("btn-run")).toBeDisabled();
+  });
+
+  test("keyboard shortcut: ArrowUp raises dt", async ({ page }) => {
+    const dtStat = page.getByTestId("stat-dt");
+    await expect(dtStat).toHaveText("dt: 0.500");
+
+    await page.locator("body").press("ArrowUp");
+    // 0.5 * 1.25 = 0.625
+    await expect(dtStat).toHaveText("dt: 0.625");
+
     await page.locator("body").press("ArrowUp");
     await page.locator("body").press("ArrowUp");
-    await page.locator("body").press("ArrowUp");
+    const text = (await dtStat.textContent()) ?? "";
+    const dt = parseFloat(text.replace(/[^\d.]/g, ""));
+    // 0.5 * 1.25^3 ≈ 0.977
+    expect(dt).toBeCloseTo(0.977, 2);
+  });
 
-    const afterUp = await dtStat.textContent();
-    const afterUpVal = parseFloat((afterUp ?? "").replace(/[^\d.]/g, ""));
-    expect(afterUpVal).toBeGreaterThan(0.5);
-    // 0.5 * 1.25^3 = 0.9765625 → rounded to 0.977
-    expect(afterUpVal).toBeCloseTo(0.977, 2);
+  test("keyboard shortcut: ArrowDown lowers dt", async ({ page }) => {
+    const dtStat = page.getByTestId("stat-dt");
+    await expect(dtStat).toHaveText("dt: 0.500");
 
-    // ArrowDown brings it back down.
     await page.locator("body").press("ArrowDown");
-    await page.locator("body").press("ArrowDown");
-    const afterDown = await dtStat.textContent();
-    const afterDownVal = parseFloat((afterDown ?? "").replace(/[^\d.]/g, ""));
-    expect(afterDownVal).toBeLessThan(afterUpVal);
+    // 0.5 / 1.25 = 0.4
+    await expect(dtStat).toHaveText("dt: 0.400");
 
-    // R resets dt to the default.
+    await page.locator("body").press("ArrowDown");
+    const text = (await dtStat.textContent()) ?? "";
+    const dt = parseFloat(text.replace(/[^\d.]/g, ""));
+    // 0.5 / 1.25^2 = 0.32
+    expect(dt).toBeCloseTo(0.32, 2);
+  });
+
+  test("keyboard shortcut: dt is clamped to [0.01, 10]", async ({ page }) => {
+    const dtStat = page.getByTestId("stat-dt");
+
+    // Hammer ArrowUp a lot; dt should cap at 10.
+    for (let i = 0; i < 40; i++) {
+      await page.locator("body").press("ArrowUp");
+    }
+    const hiText = (await dtStat.textContent()) ?? "";
+    const hi = parseFloat(hiText.replace(/[^\d.]/g, ""));
+    expect(hi).toBeLessThanOrEqual(10);
+    expect(hi).toBeGreaterThan(9);
+
+    // Reset to default, then hammer ArrowDown; dt should floor at 0.01.
+    await page.locator("body").press("r");
+    for (let i = 0; i < 60; i++) {
+      await page.locator("body").press("ArrowDown");
+    }
+    const loText = (await dtStat.textContent()) ?? "";
+    const lo = parseFloat(loText.replace(/[^\d.]/g, ""));
+    expect(lo).toBeGreaterThanOrEqual(0.01);
+    expect(lo).toBeLessThan(0.02);
+  });
+
+  test("keyboard shortcut: R resets dt to default", async ({ page }) => {
+    const dtStat = page.getByTestId("stat-dt");
+
+    await page.locator("body").press("ArrowUp");
+    await page.locator("body").press("ArrowUp");
+    await expect(dtStat).not.toHaveText("dt: 0.500");
+
     await page.locator("body").press("r");
     await expect(dtStat).toHaveText("dt: 0.500");
+
+    // Uppercase variant also works (caps lock, etc.).
+    await page.locator("body").press("ArrowUp");
+    await page.locator("body").press("R");
+    await expect(dtStat).toHaveText("dt: 0.500");
+  });
+
+  test("keyboard shortcut: R does not affect the tick counter", async ({ page }) => {
+    // R only scopes to dt; it must not secretly reset sim state.
+    await page.getByTestId("btn-init").click();
+    await page.getByTestId("btn-seed").click();
+    await page.getByTestId("btn-tick").click();
+    await page.getByTestId("btn-tick").click();
+
+    const ticksStat = page.getByTestId("stat-ticks");
+    await expect(ticksStat).toHaveText("ticks: 2");
+
+    await page.locator("body").press("r");
+    await expect(ticksStat).toHaveText("ticks: 2");
   });
 
   test("keyboard shortcuts are ignored while typing in an input", async ({ page }) => {
     const sizeInput = page.getByTestId("input-galaxy-size");
-    await sizeInput.click();
-    await sizeInput.press("ArrowUp");
+    const dtStat = page.getByTestId("stat-dt");
 
-    // dt should not have changed because focus was inside an input.
-    await expect(page.getByTestId("stat-dt")).toHaveText("dt: 0.500");
+    await sizeInput.click();
+
+    // Neither arrow keys nor 'r' nor Space should trigger shortcuts while the
+    // cursor is inside an input — otherwise typing "0.5" into dt would
+    // inadvertently pause the sim on the space bar, etc.
+    await sizeInput.press("ArrowUp");
+    await sizeInput.press("ArrowDown");
+    await sizeInput.press("r");
+    await sizeInput.press("Space");
+    await expect(dtStat).toHaveText("dt: 0.500");
+  });
+
+  test("keyboard shortcuts are ignored when a modifier key is held", async ({ page }) => {
+    // Cmd/Ctrl/Alt chords should be left to the browser / OS, never to the sim.
+    const dtStat = page.getByTestId("stat-dt");
+    await page.locator("body").press("Meta+ArrowUp");
+    await page.locator("body").press("Control+ArrowUp");
+    await page.locator("body").press("Alt+ArrowUp");
+    await expect(dtStat).toHaveText("dt: 0.500");
+  });
+
+  test("keyboard hints row is visible to users", async ({ page }) => {
+    const hints = page.getByTestId("keyboard-hints");
+    await expect(hints).toBeVisible();
+    await expect(hints).toContainText("space");
+    await expect(hints).toContainText("reset");
   });
 
   test("changing galaxy size changes cell count after re-init", async ({ page }) => {

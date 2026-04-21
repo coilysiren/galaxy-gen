@@ -316,7 +316,7 @@ export function Interface() {
             </button>
             <div className="input-label ml-auto flex items-center gap-4 self-center">
               <span data-testid="stat-dt">dt: {timeModifier.toFixed(3)}</span>
-              <span>ticks: {tickCount}</span>
+              <span data-testid="stat-ticks">ticks: {tickCount}</span>
               <span>tick: {tickMs.toFixed(1)} ms</span>
               <span>fps: {fps}</span>
             </div>
