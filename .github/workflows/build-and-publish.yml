@@ -15,7 +15,15 @@ jobs:
           node-version: "20"
           cache: "npm"
       - run: cargo install wasm-pack
-      - run: sudo apt-get update && sudo apt-get install -y binaryen
+      - name: Install binaryen (pinned release)
+        # Ubuntu's apt binaryen produces WASM that trips
+        # `WebAssembly.Table.grow(): failed to grow table by 4` in
+        # chromium. Pin to an upstream release binary.
+        run: |
+          VER=version_119
+          curl -sSL "https://github.com/WebAssembly/binaryen/releases/download/${VER}/binaryen-${VER}-x86_64-linux.tar.gz" -o /tmp/binaryen.tgz
+          sudo tar -xzf /tmp/binaryen.tgz -C /usr/local --strip-components=1
+          wasm-opt --version
       - run: wasm-pack build
       - run: cargo test
       - run: npm ci

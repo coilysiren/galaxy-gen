@@ -134,6 +134,61 @@ metadata, surfaced here with admiration:
   - Crossed the line from "simulation" into "game" with trading and
     smuggling mechanics layered on top of the physics.
 
+## Ideas worth stealing
+
+Features drawn from the projects above that we could adopt here,
+ordered from highest impact-per-effort to most speculative:
+
+1. **Web Worker for the tick loop** (DrA1ex, MichaelJCole). Moves
+   physics off the main thread so the browser stays responsive during
+   a 250×250 sim. ~100-line change. Biggest UX win available without
+   a new rendering backend.
+2. **Seeded / reproducible RNG + URL-shareable state** (DrA1ex,
+   holmgr). `?seed=…&size=…&mass=…` in the query string, so an
+   interesting collapse can be linked, reproduced, and compared. Tiny
+   code change with outsized social payoff.
+3. **Multiple initial conditions** (DrA1ex). Beyond uniform random:
+   `rotation` (disk with angular velocity), `bang` (central
+   explosion), `collision` (two clusters on intercept). Each is a
+   one-function addition to `seed()` and produces very different
+   long-term behaviour.
+4. **Play/pause keyboard shortcut + speed control** (andrewdcampbell).
+   Spacebar to toggle, `]` / `[` to step dt up/down. Trivial and
+   massively improves "poking at it" ergonomics.
+5. **Camera pan + zoom** (andrewdcampbell). Click-drag on the canvas
+   to pan, scroll to zoom. Lets you watch a single clump evolve at
+   the end of a collapse instead of squinting at the 250×250 overview.
+6. **Collision toggle** (DrA1ex). Today we merge on grid collision
+   with momentum averaging. Optional inelastic vs elastic vs
+   disabled-merging modes are cheap to add and make the physics
+   feel tweakable.
+7. **Record + replay player** (DrA1ex). Capture mass/velocity every
+   N ticks into a flat buffer, let the user scrub the timeline. Great
+   for showing off a simulation without re-running it. Medium effort.
+8. **GPGPU fragment-shader force path** (davrempe). Upload positions
+   + masses as a floating-point texture, run the force kernel in a
+   fragment shader, ping-pong buffers each frame. Works in WebGL1,
+   so no WebGPU dependency. Would push the grid ceiling well past
+   250×250.
+9. **WebGPU compute shaders** (simbleau/nbody-wasm-sim). The
+   strictly better version of #8 — but WebGPU requires modern Chrome
+   and a bigger rewrite. The Rust side already has `wgpu` available
+   if we pull that dep in.
+10. **3D rendering option** (davrempe). The simulation is 2D today;
+    with canvas/WebGL switching to a 3D view of the same cells adds
+    a dimension of visual interest. Real value only if we move the
+    physics to 3D too, which is a bigger project.
+11. **Procedural world layer on top** (holmgr). Name the stars, give
+    them star systems / orbiting bodies when their mass crosses
+    thresholds. Turns the sim from "physics toy" into
+    "generate-a-galaxy-and-explore-it". Big departure in scope but
+    the physics foundation we have would carry it.
+
+Items 1-5 are one-sitting additions. 6-7 are a weekend each. 8+ is
+where the project becomes a different project; worth doing only if
+the physics layer gets pushed past what all-pairs + Barnes-Hut can
+handle on CPU.
+
 ## Deployment
 
 Deployed to [galaxy-gen.coilysiren.me](https://galaxy-gen.coilysiren.me).
