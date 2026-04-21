@@ -1,64 +1,47 @@
-import React from "react";
 import * as d3 from "d3";
 import * as galaxy from "./galaxy";
 
-const margin = { top: 40, right: 40, bottom: 40, left: 40 };
+// Logical canvas side length in px. The SVG uses a viewBox so the actual
+// rendered size scales to the panel width while coordinates stay stable.
+const CANVAS = 800;
+const MARGIN = 20;
 
-function getSizeModifier(galaxyFrontend: galaxy.Frontend) {
-  // TODO: flexible scaling
-  return Math.sqrt(galaxyFrontend.galaxySize * 10);
+function cellScale(galaxyFrontend: galaxy.Frontend) {
+  const usable = CANVAS - MARGIN * 2;
+  return usable / galaxyFrontend.galaxySize;
 }
 
 export function initViz(galaxyFrontend: galaxy.Frontend) {
-  const sizeModifier = getSizeModifier(galaxyFrontend);
-
-  // remove old svg
   d3.select("#dataviz svg").remove();
 
-  // append the svg object to the body of the page
-  const svg = d3
-    .select("#dataviz")
+  d3.select("#dataviz")
     .append("svg")
-    .style("overflow", "visible")
-    .append("g")
-    .attr("id", "axis")
-    .attr("transform", `translate(${margin.left}, ${margin.top})`);
-
-  // Add X axis
-  const x = d3
-    .scaleLinear()
-    .domain([0, galaxyFrontend.galaxySize])
-    .range([0, galaxyFrontend.galaxySize * sizeModifier]);
-
-  // Add Y axis
-  const y = d3
-    .scaleLinear()
-    .domain([0, galaxyFrontend.galaxySize])
-    .range([galaxyFrontend.galaxySize * sizeModifier, 0]);
+    .attr("viewBox", `0 0 ${CANVAS} ${CANVAS}`)
+    .attr("preserveAspectRatio", "xMidYMid meet")
+    .style("display", "block")
+    .style("width", "100%")
+    .style("height", "auto");
 }
 
 export function initData(galaxyFrontend: galaxy.Frontend) {
-  const sizeModifier = getSizeModifier(galaxyFrontend);
+  const scale = cellScale(galaxyFrontend);
+  const size = galaxyFrontend.galaxySize;
 
-  // remove old data
   d3.select("#dataviz svg #data").remove();
 
-  // append the svg object to the body of the page
   const svg = d3.select("#dataviz svg");
   svg
     .append("g")
     .attr("id", "data")
-    .selectAll("dot")
+    .selectAll("circle")
     .data(galaxyFrontend.cells())
     .join("circle")
-    .attr("cx", function (c: galaxy.Cell) {
-      return Math.round(c.x * sizeModifier + margin.left);
-    })
-    .attr("cy", function (c: galaxy.Cell) {
-      return Math.round(c.y * sizeModifier + margin.top);
-    })
-    .attr("r", function (c: galaxy.Cell) {
-      return Math.log(c.mass) > 0 ? Math.log(c.mass) : 0;
+    .attr("cx", (c: galaxy.Cell) => MARGIN + (c.x + 0.5) * scale)
+    .attr("cy", (c: galaxy.Cell) => MARGIN + (size - 1 - c.y + 0.5) * scale)
+    .attr("r", (c: galaxy.Cell) => {
+      const logMass = Math.log(c.mass);
+      if (!Number.isFinite(logMass) || logMass <= 0) return 0;
+      return Math.min(logMass * 0.6, scale * 0.45);
     })
     .style("fill", "#9192bb");
 }

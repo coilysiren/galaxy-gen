@@ -7,6 +7,7 @@ repository = "https://github.com/coilysiren/galaxy-gen"
 version = "0.0.1"
 authors = ["Kai Siren <coilysiren@gmail.com>"]
 license = "AGPL"
+edition = "2021"
 
 [lib]
 crate-type = ["cdylib", "rlib"]
@@ -14,14 +15,11 @@ path = "src/rust/lib.rs"
 
 [dependencies]
 console_error_panic_hook = "^0.1"
-specs = "^0.20"
-specs-derive = "^0.4"
 wasm-bindgen = "^0.2"
 getrandom = { version = "^0.3", features = ["wasm_js"] }
 rand = "^0.9"
 
-[dev-dependencies]
-cargo-watch = "^8"
-
 [profile.release]
-debug = true
+opt-level = "s"
+lto = true
+codegen-units = 1
