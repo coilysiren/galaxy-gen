@@ -3,6 +3,7 @@
 ## Architecture
 
 ### Rust Backend (`src/rust/`)
+
 - `lib.rs` — crate root, re-exports the `galaxy` module
 - `galaxy.rs` — core simulation logic: `Galaxy` struct with `Cell` grid, gravitational physics (Newton's law), acceleration, seeding, tick advancement. Exposed to JS via `wasm-bindgen`
 
@@ -11,10 +12,12 @@ Cell types by mass: Gas (below `min_star_mass`), Star (above). Planned but not y
 The Galaxy is immutable-style — methods like `seed()`, `tick()` return new Galaxy instances.
 
 ### WASM Bridge
+
 - Built with `wasm-pack`, output goes to `pkg/` (gitignored)
 - The JS package.json references `"galaxy_gen_backend": "file:pkg"` as a dev dependency
 
 ### JavaScript Frontend (`src/js/`)
+
 - `index.html` — Bootstrap 5 dark theme shell
 - `index.js` — React entry point
 - `lib/galaxy.ts` — `Frontend` class wrapping the WASM Galaxy, exposes `seed()`, `tick()`, `cells()`
@@ -23,12 +26,14 @@ The Galaxy is immutable-style — methods like `seed()`, `tick()` return new Gal
 - `lib/styles.css` — custom styles
 
 ### Build System
+
 - Rust: `cargo build`, `cargo test`
 - WASM: `wasm-pack build` (previously `wasm-pack init`)
 - JS: webpack 5 with babel (React + TypeScript presets), dev server via `webpack-dev-server`
 - `makefile` has convenience targets but some are outdated (references `wasm-pack init`)
 
 ### CI
+
 - GitHub Actions (`.github/workflows/action.yml`): two jobs — `rust` (build/check/test + wasm-pack) and `js` (wasm-pack + npm ci)
 
 ## Commands

@@ -1,25 +1,23 @@
 {
-  "files": ["src/js/index.js"],
-  "compileOnSave": true,
   "compilerOptions": {
-    "listEmittedFiles": true,
-    "listFiles": true,
-    "allowJs": true,
-    "checkJs": true,
-    "alwaysStrict": true,
-    "sourceMap": true,
-    "inlineSources": true,
+    "target": "ES2022",
+    "module": "ESNext",
+    "moduleResolution": "Bundler",
+    "jsx": "react-jsx",
+    "lib": ["ES2022", "DOM", "DOM.Iterable"],
+    "strict": false,
+    "noImplicitAny": false,
     "esModuleInterop": true,
-    "jsx": "react",
-    "module": "commonjs",
-    "outDir": "./dist/out-tsc",
-    "declaration": false,
-    "moduleResolution": "node",
-    "emitDecoratorMetadata": true,
-    "experimentalDecorators": true,
-    "target": "es5",
-    "typeRoots": ["node_modules/@types"],
-    "lib": ["es7", "dom"]
+    "allowSyntheticDefaultImports": true,
+    "resolveJsonModule": true,
+    "isolatedModules": true,
+    "skipLibCheck": true,
+    "forceConsistentCasingInFileNames": true,
+    "allowJs": true,
+    "checkJs": false,
+    "sourceMap": true,
+    "noEmit": true
   },
-  "exclude": ["node_modules"]
+  "include": ["src/**/*", "e2e/**/*"],
+  "exclude": ["node_modules", "dist", "pkg", "target"]
 }

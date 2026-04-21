@@ -60,5 +60,5 @@ export function initData(galaxyFrontend: galaxy.Frontend) {
     .attr("r", function (c: galaxy.Cell) {
       return Math.log(c.mass) > 0 ? Math.log(c.mass) : 0;
     })
-    .style("fill", "#69b3a2");
+    .style("fill", "#9192bb");
 }

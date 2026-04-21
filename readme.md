@@ -34,7 +34,6 @@ the files there are compiled to `galaxy_gen_backend` as `wasm` + `js`
 
 `cell.rs` represents a unit of space within a galaxy, and holds all of the identifying information about that unit of space. The galactic terrain is composed of (a variable language quantity of) cells, and come in two types: [generic gas clouds](https://en.wikipedia.org/wiki/Nebula) and [star systems](https://en.wikipedia.org/wiki/Star_system).
 
-
 ## js
 
 `src/js/*` handles rendering the data created by the rust backend

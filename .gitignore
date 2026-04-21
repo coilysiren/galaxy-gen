@@ -4,3 +4,8 @@ dist/
 pkg/
 node_modules/
 .claude/
+
+# Playwright
+playwright-report/
+test-results/
+.cache/
