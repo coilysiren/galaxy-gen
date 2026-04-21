@@ -23,3 +23,12 @@ rand = "^0.9"
 opt-level = "s"
 lto = true
 codegen-units = 1
+
+# Skip wasm-opt entirely. The binaryen shipped in Ubuntu's apt repo (what
+# CI uses) produces WASM that throws `WebAssembly.Table.grow(): failed to
+# grow table by 4` during instantiation in recent chromium — same binary
+# works fine locally with Homebrew's newer binaryen. Until the CI
+# binaryen is upgraded (or wasm-opt's table-optimization bug is fixed),
+# skipping it is the safer default. Size cost is ~+50KB gzipped.
+[package.metadata.wasm-pack.profile.release]
+wasm-opt = false
