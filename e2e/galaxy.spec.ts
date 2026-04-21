@@ -283,6 +283,87 @@ test.describe("Galaxy Generator", () => {
     expect(after).toEqual({ tx: 0, ty: 0, zoom: 1 });
   });
 
+  test("camera pan: click-drag on canvas updates data-cam-* on #dataviz", async ({ page }) => {
+    await page.getByTestId("btn-init").click();
+    await page.getByTestId("btn-seed").click();
+
+    const host = page.locator("#dataviz");
+    await expect(host).toHaveAttribute("data-cam-tx", "0.00");
+    await expect(host).toHaveAttribute("data-cam-ty", "0.00");
+    await expect(host).toHaveAttribute("data-cam-zoom", "1.0000");
+
+    // Zoom in first so that panning is actually allowed by the clamp
+    // (at zoom=1 the pan delta is clamped to 0,0 to keep the world in view).
+    await page.evaluate(() => {
+      const c = document.querySelector("#dataviz canvas") as HTMLCanvasElement;
+      const rect = c.getBoundingClientRect();
+      const cx = rect.left + rect.width / 2;
+      const cy = rect.top + rect.height / 2;
+      for (let i = 0; i < 5; i++) {
+        c.dispatchEvent(
+          new WheelEvent("wheel", {
+            deltaY: -200,
+            clientX: cx,
+            clientY: cy,
+            bubbles: true,
+            cancelable: true,
+          })
+        );
+      }
+    });
+
+    // Snapshot tx after zoom (zooming about center keeps tx negative).
+    const afterZoom = await host.evaluate((el: HTMLElement) => ({
+      tx: el.getAttribute("data-cam-tx"),
+      ty: el.getAttribute("data-cam-ty"),
+      zoom: el.getAttribute("data-cam-zoom"),
+    }));
+    expect(Number(afterZoom.zoom)).toBeGreaterThan(1.1);
+
+    // Drag the canvas from its center toward the top-left corner by
+    // dispatching pointer events directly (matches the handlers and avoids
+    // any ambiguity about mouse→pointer event synthesis under automation).
+    await page.evaluate(() => {
+      const c = document.querySelector("#dataviz canvas") as HTMLCanvasElement;
+      const rect = c.getBoundingClientRect();
+      const sx = rect.left + rect.width / 2;
+      const sy = rect.top + rect.height / 2;
+      const pe = (type: string, x: number, y: number) =>
+        new PointerEvent(type, {
+          pointerId: 1,
+          pointerType: "mouse",
+          isPrimary: true,
+          clientX: x,
+          clientY: y,
+          button: 0,
+          buttons: type === "pointerup" ? 0 : 1,
+          bubbles: true,
+          cancelable: true,
+        });
+      c.dispatchEvent(pe("pointerdown", sx, sy));
+      for (let i = 1; i <= 10; i++) {
+        c.dispatchEvent(pe("pointermove", sx - 10 * i, sy - 8 * i));
+      }
+      c.dispatchEvent(pe("pointerup", sx - 100, sy - 80));
+    });
+
+    const afterPan = await host.evaluate((el: HTMLElement) => ({
+      tx: el.getAttribute("data-cam-tx"),
+      ty: el.getAttribute("data-cam-ty"),
+      zoom: el.getAttribute("data-cam-zoom"),
+    }));
+    // Camera state must have changed (tx or ty moved) while zoom stayed put.
+    expect(afterPan.zoom).toBe(afterZoom.zoom);
+    const moved = afterPan.tx !== afterZoom.tx || afterPan.ty !== afterZoom.ty;
+    expect(moved).toBe(true);
+
+    // Reset view clears tx/ty/zoom back to identity.
+    await page.getByTestId("btn-reset-view").click();
+    await expect(host).toHaveAttribute("data-cam-tx", "0.00");
+    await expect(host).toHaveAttribute("data-cam-ty", "0.00");
+    await expect(host).toHaveAttribute("data-cam-zoom", "1.0000");
+  });
+
   test("changing galaxy size changes cell count after re-init", async ({ page }) => {
     const sizeInput = page.getByTestId("input-galaxy-size");
     await sizeInput.fill("20");
