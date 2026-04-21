@@ -107,10 +107,21 @@ jobs:
             ip="$host"
             tls_name=""
           else
-            ip=$(tailscale ip -4 "$host" | head -1)
-            if [[ -z "$ip" ]]; then
-              echo "tailscale ip lookup for $host returned empty" >&2
-              tailscale status >&2 || true
+            # `tailscale ip <host>` goes through the system DNS resolver,
+            # which on the Ubuntu runner is systemd-resolved and trips
+            # the same "server misbehaving" we're trying to avoid. Pull
+            # the IP directly out of `tailscale status --json` — this
+            # doesn't hit DNS at all.
+            sudo apt-get install -y jq >/dev/null 2>&1 || true
+            ip=$(tailscale status --json \
+              | jq -r --arg h "$host" '
+                  (.Peer // {}) | to_entries[]
+                  | select(.value.HostName == $h or .value.DNSName | startswith($h + "."))
+                  | .value.TailscaleIPs[0]
+                ' | head -1)
+            if [[ -z "$ip" || "$ip" == "null" ]]; then
+              echo "couldn't find tailnet IP for $host in tailscale status" >&2
+              tailscale status || true
               exit 1
             fi
             tls_name="$host"
