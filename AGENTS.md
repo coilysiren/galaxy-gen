@@ -5,6 +5,18 @@ physics are computed in Rust, compiled to WebAssembly via `wasm-pack`, and
 visualized with React + D3 in the browser. See `development.md` for
 architecture details.
 
+## Deploy reference
+
+Before touching any deploy config (Dockerfile, Makefile, `deploy/main.yml`,
+`.github/workflows/build-and-publish.yml`, or the Tailscale/k3s secrets),
+read
+[`coilysiren/infrastructure/docs/k3s-deploy-notes.md`](../infrastructure/docs/k3s-deploy-notes.md).
+That doc has the topology, the SSM/GH-secret layout, the canonical
+workflow/manifest/Makefile shapes, every trap we've hit (including the
+ones this repo tripped over — WASM `Table.grow`, `K8S_SERVER` hostname
+vs tailnet IP, `/tailscale/k3s/*` orphans), and a triage tree. When you
+resolve a new pitfall, add it there, not here.
+
 ## File Access
 
 You have full read access to files within `/Users/kai/projects/coilysiren`.
