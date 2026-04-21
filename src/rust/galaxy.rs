@@ -203,57 +203,110 @@ impl Galaxy {
         row * self.size + col
     }
 
-    /// O(N²) all-pairs sweep. We deliberately *don't* use Newton's-3rd-law
-    /// symmetry: the scatter writes that lets us sum a pair's effect into
-    /// both cells in one shot are a cache nightmare in WASM (no aliasing
-    /// proof → memory round-trip per write). Doing 2× the math but
-    /// keeping the inner loop to local scalars is substantially faster in
-    /// practice — the per-pair cost drops enough that the 2× overhead
-    /// pays for itself several times over, and the loop becomes
-    /// auto-vectorization-friendly.
+    /// Dispatches between two force-calc strategies:
+    ///   * **Direct O(N²)** for small active sets, where building a tree
+    ///     costs more than it saves. Uses an integer-r² lookup so the
+    ///     inner loop has no sqrt. O(A²) where A is active cell count.
+    ///   * **Barnes-Hut quadtree O(N log N)** for large active sets.
+    ///     Each body traverses the tree once; distant clumps of mass
+    ///     are summarized by their center-of-mass when `s/d < θ`.
     ///
-    /// Pre-computed f32 masses + (x,y) coords so the inner loop has zero
-    /// casts / zero allocations / zero memory traffic except the flat
-    /// reads from three contiguous `Vec<f32>`s.
+    /// Both paths read/write the same acc_x / acc_y buffers the
+    /// integrator consumes.
     fn gravitate_all(&mut self) {
         let n = self.n;
 
-        // Pre-convert masses to f32 once. The inner loop then touches four
-        // flat `Vec`s, all hot in cache for N ≤ ~15k.
-        let mut mass_f = Vec::<f32>::with_capacity(n);
+        // Build active list once: cells with nonzero mass. Pre-collapse a
+        // 250×250 sim has ~60k active cells; post-collapse often <200.
+        // Either way, iterating the active list instead of the full N²
+        // skips all the empty space.
+        let mut active: Vec<usize> = Vec::with_capacity(n);
         for i in 0..n {
-            mass_f.push(self.mass[i] as f32);
+            if self.mass[i] != 0 {
+                active.push(i);
+            }
         }
 
-        let mass_s = mass_f.as_slice();
+        // Clear accelerations for inactive cells up front.
+        for i in 0..n {
+            self.acc_x[i] = 0.0;
+            self.acc_y[i] = 0.0;
+        }
+
+        // Heuristic: O(A²) is cheaper than Barnes-Hut until A is big
+        // enough that log-tree traversal pays for building the tree.
+        // ~1000 is roughly where the crossover happens in WASM (all-pairs
+        // inner loop is ~2ns/pair, BH node visit is ~20ns).
+        const BH_THRESHOLD: usize = 1000;
+
+        if active.len() < BH_THRESHOLD {
+            self.gravitate_direct(&active);
+        } else {
+            self.gravitate_barnes_hut(&active);
+        }
+    }
+
+    /// O(A²) direct-sum over the active list. With the integer-r² lookup
+    /// table the inner loop is six adds / six muls / zero transcendentals.
+    fn gravitate_direct(&mut self, active: &[usize]) {
         let xs_i = self.xs_i.as_slice();
         let ys_i = self.ys_i.as_slice();
         let inv_r3_tbl = self.inv_r3.as_slice();
 
-        for i in 0..n {
-            let mi = mass_s[i];
-            if mi == 0.0 {
-                self.acc_x[i] = 0.0;
-                self.acc_y[i] = 0.0;
-                continue;
-            }
+        // Prebuild f32 masses for the active set so the inner loop stays
+        // cast-free.
+        let mut mass_f: Vec<f32> = Vec::with_capacity(active.len());
+        for &j in active {
+            mass_f.push(self.mass[j] as f32);
+        }
+
+        for (ai, &i) in active.iter().enumerate() {
             let ix = xs_i[i] as i32;
             let iy = ys_i[i] as i32;
             let mut ax = 0.0f32;
             let mut ay = 0.0f32;
 
-            for j in 0..n {
-                let mj = mass_s[j];
-                // Integer diffs → integer r² → table lookup. No sqrt, no
-                // transcendental math in the hot path.
+            for (aj, &j) in active.iter().enumerate() {
+                if ai == aj {
+                    continue;
+                }
                 let dx_i = xs_i[j] as i32 - ix;
                 let dy_i = ys_i[j] as i32 - iy;
                 let r2_idx = (dx_i * dx_i + dy_i * dy_i) as usize;
-                let k = inv_r3_tbl[r2_idx] * mj;
+                let k = inv_r3_tbl[r2_idx] * mass_f[aj];
                 ax += k * dx_i as f32;
                 ay += k * dy_i as f32;
             }
 
+            self.acc_x[i] = ax;
+            self.acc_y[i] = ay;
+        }
+    }
+
+    /// Barnes-Hut via flat-arena quadtree. θ = 0.7 gives good accuracy
+    /// for galaxy-scale gravity; smaller θ = more accurate but slower.
+    fn gravitate_barnes_hut(&mut self, active: &[usize]) {
+        const THETA: f32 = 0.7;
+        const THETA_SQ: f32 = THETA * THETA;
+        let soft = Galaxy::SOFTENING_SQ;
+        let g = Galaxy::GRAVATIONAL_CONSTANT;
+
+        // Collect f32 positions and masses for the active set.
+        let mut px: Vec<f32> = Vec::with_capacity(active.len());
+        let mut py: Vec<f32> = Vec::with_capacity(active.len());
+        let mut pm: Vec<f32> = Vec::with_capacity(active.len());
+        for &idx in active {
+            px.push(self.xs_i[idx] as f32);
+            py.push(self.ys_i[idx] as f32);
+            pm.push(self.mass[idx] as f32);
+        }
+
+        // Root bounds cover the full grid.
+        let size_f = self.size as f32;
+        let tree = build_quadtree(&px, &py, &pm, 0.0, 0.0, size_f);
+
+        for (ai, &i) in active.iter().enumerate() {
+            let (ax, ay) = tree.force(px[ai], py[ai], THETA_SQ, soft, g);
             self.acc_x[i] = ax;
             self.acc_y[i] = ay;
         }
@@ -435,6 +488,243 @@ fn wrap(value: i32, size: i32) -> i32 {
         m + size
     } else {
         m
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Barnes-Hut quadtree (flat-arena)
+// ---------------------------------------------------------------------------
+
+const NO_CHILD: u32 = u32::MAX;
+
+#[derive(Clone)]
+struct Node {
+    // Node's bounding box — centered quadrants split at (cx, cy) with
+    // half-side `h`. Root covers (0,0)-(size,size) so cx=h, cy=h.
+    cx: f32,
+    cy: f32,
+    h: f32,
+
+    // Aggregate mass and center-of-mass. For internal nodes these are
+    // running sums of descendants; for leaves they represent the one
+    // body the leaf contains.
+    mass: f32,
+    com_x: f32,
+    com_y: f32,
+
+    // Leaf state: index of contained body, or NO_CHILD if empty. An
+    // internal node has `body == NO_CHILD` and non-NO_CHILD child
+    // indices.
+    body: u32,
+
+    // Children (NE=0, NW=1, SW=2, SE=3). NO_CHILD means "empty quadrant".
+    children: [u32; 4],
+}
+
+impl Node {
+    fn empty(cx: f32, cy: f32, h: f32) -> Self {
+        Node {
+            cx,
+            cy,
+            h,
+            mass: 0.0,
+            com_x: 0.0,
+            com_y: 0.0,
+            body: NO_CHILD,
+            children: [NO_CHILD; 4],
+        }
+    }
+
+    fn is_leaf(&self) -> bool {
+        self.children.iter().all(|&c| c == NO_CHILD)
+    }
+}
+
+struct Tree {
+    nodes: Vec<Node>,
+}
+
+/// Build the Barnes-Hut quadtree. The root covers (0,0)..(size, size).
+fn build_quadtree(px: &[f32], py: &[f32], pm: &[f32], ox: f32, oy: f32, size: f32) -> Tree {
+    let h = size * 0.5;
+    let mut nodes: Vec<Node> = Vec::with_capacity(px.len() * 2);
+    // Root at index 0.
+    nodes.push(Node::empty(ox + h, oy + h, h));
+
+    for i in 0..px.len() {
+        if pm[i] == 0.0 {
+            continue;
+        }
+        insert(&mut nodes, 0, i as u32, px[i], py[i], pm[i]);
+    }
+    Tree { nodes }
+}
+
+/// Insert body `b` into the subtree rooted at `node_idx`. Grows the arena
+/// via `nodes.push(...)` — uses indices to avoid borrow-checker fights on
+/// recursive `&mut Vec<Node>`.
+fn insert(nodes: &mut Vec<Node>, node_idx: usize, b: u32, bx: f32, by: f32, bm: f32) {
+    let (cx, cy, h, existing_body, is_leaf) = {
+        let node = &nodes[node_idx];
+        (
+            node.cx,
+            node.cy,
+            node.h,
+            node.body,
+            node.is_leaf(),
+        )
+    };
+
+    if is_leaf && existing_body == NO_CHILD {
+        // Empty leaf — just drop the body in.
+        let n = &mut nodes[node_idx];
+        n.body = b;
+        n.mass = bm;
+        n.com_x = bx;
+        n.com_y = by;
+        return;
+    }
+
+    if is_leaf {
+        // Leaf with one body — subdivide and reinsert both into the
+        // appropriate quadrants.
+        let old_body = existing_body;
+        let old_x = nodes[node_idx].com_x;
+        let old_y = nodes[node_idx].com_y;
+        let old_m = nodes[node_idx].mass;
+
+        // Convert this node into an internal. Update CoM once at the end
+        // via the mass-weighted running sum.
+        {
+            let n = &mut nodes[node_idx];
+            n.body = NO_CHILD;
+            n.mass = 0.0;
+            n.com_x = 0.0;
+            n.com_y = 0.0;
+        }
+
+        // If both bodies hash to the same quadrant at a very deep level
+        // (e.g. two cells on the exact same grid point), just merge into
+        // a single leaf — further subdivision won't separate them.
+        if h < 1e-6 {
+            let n = &mut nodes[node_idx];
+            n.mass = old_m + bm;
+            n.com_x = (old_x * old_m + bx * bm) / n.mass;
+            n.com_y = (old_y * old_m + by * bm) / n.mass;
+            return;
+        }
+
+        subdivide_and_insert(nodes, node_idx, old_body, old_x, old_y, old_m);
+        subdivide_and_insert(nodes, node_idx, b, bx, by, bm);
+    } else {
+        // Internal — keep drilling.
+        subdivide_and_insert(nodes, node_idx, b, bx, by, bm);
+    }
+
+    // Update running mass + center-of-mass after the recursive insert.
+    let n = &mut nodes[node_idx];
+    let new_mass = n.mass + bm;
+    if new_mass > 0.0 {
+        n.com_x = (n.com_x * n.mass + bx * bm) / new_mass;
+        n.com_y = (n.com_y * n.mass + by * bm) / new_mass;
+    }
+    n.mass = new_mass;
+}
+
+fn subdivide_and_insert(
+    nodes: &mut Vec<Node>,
+    parent_idx: usize,
+    b: u32,
+    bx: f32,
+    by: f32,
+    bm: f32,
+) {
+    let (pcx, pcy, ph) = {
+        let p = &nodes[parent_idx];
+        (p.cx, p.cy, p.h)
+    };
+    let child_h = ph * 0.5;
+
+    // Quadrant index: 0=NE, 1=NW, 2=SW, 3=SE
+    let qi = if bx >= pcx {
+        if by >= pcy {
+            0
+        } else {
+            3
+        }
+    } else if by >= pcy {
+        1
+    } else {
+        2
+    };
+
+    let (child_cx, child_cy) = match qi {
+        0 => (pcx + child_h, pcy + child_h),
+        1 => (pcx - child_h, pcy + child_h),
+        2 => (pcx - child_h, pcy - child_h),
+        _ => (pcx + child_h, pcy - child_h),
+    };
+
+    let child_idx = nodes[parent_idx].children[qi];
+    if child_idx == NO_CHILD {
+        // Allocate a fresh empty child.
+        let new_idx = nodes.len() as u32;
+        nodes.push(Node::empty(child_cx, child_cy, child_h));
+        nodes[parent_idx].children[qi] = new_idx;
+        insert(nodes, new_idx as usize, b, bx, by, bm);
+    } else {
+        insert(nodes, child_idx as usize, b, bx, by, bm);
+    }
+}
+
+impl Tree {
+    /// Compute force on a body at (bx, by) from every mass in the tree
+    /// using the θ criterion: if `s/d < θ` for a node (s = node size,
+    /// d = distance to node CoM), treat the whole subtree as one point
+    /// mass at its center of mass.
+    fn force(&self, bx: f32, by: f32, theta_sq: f32, soft: f32, g: f32) -> (f32, f32) {
+        let mut ax = 0.0f32;
+        let mut ay = 0.0f32;
+        // Iterative DFS via an explicit stack to avoid recursion depth
+        // on large/deep trees. Flat arena lets us walk by index.
+        let mut stack: Vec<u32> = Vec::with_capacity(64);
+        stack.push(0);
+
+        while let Some(idx) = stack.pop() {
+            let n = &self.nodes[idx as usize];
+            if n.mass == 0.0 {
+                continue;
+            }
+            let dx = n.com_x - bx;
+            let dy = n.com_y - by;
+            let d2 = dx * dx + dy * dy;
+
+            // Same-body check: leaf at our exact position.
+            if d2 < 1e-6 {
+                continue;
+            }
+
+            let s = n.h * 2.0; // node side length
+            let s2 = s * s;
+
+            if n.is_leaf() || s2 < theta_sq * d2 {
+                // Accept this node as a point mass.
+                let r2 = d2 + soft;
+                let inv_r = 1.0 / r2.sqrt();
+                let inv_r3 = inv_r * inv_r * inv_r;
+                let k = g * inv_r3 * n.mass;
+                ax += k * dx;
+                ay += k * dy;
+            } else {
+                for &c in &n.children {
+                    if c != NO_CHILD {
+                        stack.push(c);
+                    }
+                }
+            }
+        }
+
+        (ax, ay)
     }
 }
 

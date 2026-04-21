@@ -23,7 +23,7 @@ test.describe("perf bench", () => {
     await waitForWasm(page);
   });
 
-  for (const size of [20, 50, 75, 100]) {
+  for (const size of [20, 50, 75, 100, 150, 250]) {
     test(`tick timings — size=${size}`, async ({ page }) => {
       await page.getByTestId("input-galaxy-size").fill(String(size));
       await page.getByTestId("btn-init").click();
@@ -43,7 +43,7 @@ test.describe("perf bench", () => {
         const mean = samples.reduce((a, b) => a + b, 0) / samples.length;
         const median = samples[Math.floor(samples.length / 2)];
         return { mean, median, min: samples[0], max: samples[samples.length - 1] };
-      }, size <= 50 ? 20 : 5);
+      }, size <= 75 ? 20 : size <= 150 ? 5 : 3);
 
       console.log(
         `TICK  size=${size.toString().padStart(3)}  ` +
@@ -70,7 +70,7 @@ test.describe("perf bench", () => {
         const mean = samples.reduce((a, b) => a + b, 0) / samples.length;
         const median = samples[Math.floor(samples.length / 2)];
         return { mean, median };
-      }, size <= 50 ? 20 : 5);
+      }, size <= 75 ? 20 : size <= 150 ? 5 : 3);
 
       console.log(
         `FRAME size=${size.toString().padStart(3)}  ` +
