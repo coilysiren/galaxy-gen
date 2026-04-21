@@ -84,34 +84,64 @@ jobs:
           curl -LO "https://dl.k8s.io/release/$(curl -L -s https://dl.k8s.io/release/stable.txt)/bin/linux/amd64/kubectl"
           sudo install -o root -g root -m 0755 kubectl /usr/local/bin/kubectl
       - name: Materialize kubeconfig
+        # The `K8S_SERVER` secret points at a tailnet hostname
+        # (`https://kai-server:6443`) that resolves only via Tailscale
+        # MagicDNS. The runner's systemd-resolved occasionally returns
+        # "server misbehaving" for it. Resolve it via `tailscale ip`
+        # up front and swap in the IP, keeping `tls-server-name` so
+        # cert verification still matches the hostname in the cert.
         env:
           K8S_SERVER: ${{ secrets.K8S_SERVER }}
           K8S_CA_DATA: ${{ secrets.K8S_CA_DATA }}
           K8S_CLIENT_CERT_DATA: ${{ secrets.K8S_CLIENT_CERT_DATA }}
           K8S_CLIENT_KEY_DATA: ${{ secrets.K8S_CLIENT_KEY_DATA }}
         run: |
+          set -e
+          # Extract host + port from the server URL.
+          hostport=${K8S_SERVER#https://}
+          host=${hostport%%:*}
+          port=${hostport##*:}
+          # If host is already an IP, use as-is; otherwise resolve via
+          # tailscale.
+          if [[ "$host" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            ip="$host"
+            tls_name=""
+          else
+            ip=$(tailscale ip -4 "$host" | head -1)
+            if [[ -z "$ip" ]]; then
+              echo "tailscale ip lookup for $host returned empty" >&2
+              tailscale status >&2 || true
+              exit 1
+            fi
+            tls_name="$host"
+          fi
+          echo "resolved $host -> $ip (tls-server-name=${tls_name:-<none>})"
+
           mkdir -p ~/.kube
-          cat <<EOF > ~/.kube/config
-          apiVersion: v1
-          kind: Config
-          clusters:
-          - name: default
-            cluster:
-              server: ${K8S_SERVER}
-              certificate-authority-data: ${K8S_CA_DATA}
-          contexts:
-          - name: default
-            context:
-              cluster: default
-              user: default
-          current-context: default
-          preferences: {}
-          users:
-          - name: default
-            user:
-              client-certificate-data: ${K8S_CLIENT_CERT_DATA}
-              client-key-data: ${K8S_CLIENT_KEY_DATA}
-          EOF
+          {
+            echo "apiVersion: v1"
+            echo "kind: Config"
+            echo "clusters:"
+            echo "- name: default"
+            echo "  cluster:"
+            echo "    server: https://${ip}:${port}"
+            if [[ -n "$tls_name" ]]; then
+              echo "    tls-server-name: ${tls_name}"
+            fi
+            echo "    certificate-authority-data: ${K8S_CA_DATA}"
+            echo "contexts:"
+            echo "- name: default"
+            echo "  context:"
+            echo "    cluster: default"
+            echo "    user: default"
+            echo "current-context: default"
+            echo "preferences: {}"
+            echo "users:"
+            echo "- name: default"
+            echo "  user:"
+            echo "    client-certificate-data: ${K8S_CLIENT_CERT_DATA}"
+            echo "    client-key-data: ${K8S_CLIENT_KEY_DATA}"
+          } > ~/.kube/config
       - name: Install envsubst and yq
         run: |
           sudo apt-get update
