@@ -116,6 +116,10 @@ export function Interface() {
     exposeForTests();
   };
 
+  const handleResetView = () => {
+    dataviz.resetView();
+  };
+
   const handleRunToggle = () => {
     if (!galaxyFrontendRef.current) return;
     if (runningRef.current) {
@@ -313,6 +317,16 @@ export function Interface() {
               }
             >
               {running ? "pause" : "run"}
+            </button>
+            <button
+              type="button"
+              className="btn-plum"
+              data-testid="btn-reset-view"
+              onClick={handleResetView}
+              disabled={!initialized}
+              title="Reset pan/zoom of the viewport"
+            >
+              reset view
             </button>
             <div className="input-label ml-auto flex items-center gap-4 self-center">
               <span data-testid="stat-dt">dt: {timeModifier.toFixed(3)}</span>

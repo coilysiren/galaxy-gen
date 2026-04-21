@@ -231,6 +231,58 @@ test.describe("Galaxy Generator", () => {
     await expect(hints).toContainText("reset");
   });
 
+  test("camera pan+zoom: wheel zooms, reset-view restores", async ({ page }) => {
+    await page.getByTestId("btn-init").click();
+    await page.getByTestId("btn-seed").click();
+
+    const canvas = page.locator("#dataviz canvas");
+    await expect(canvas).toBeVisible();
+
+    const resetBtn = page.getByTestId("btn-reset-view");
+    await expect(resetBtn).toBeVisible();
+    await expect(resetBtn).toBeEnabled();
+
+    const getCam = () =>
+      page.evaluate(() => {
+        const dv = (window as any).__galaxyGen?.dataviz;
+        return dv?.getCamera?.() ?? null;
+      });
+
+    // Baseline camera is identity.
+    const before = await getCam();
+    expect(before).toEqual({ tx: 0, ty: 0, zoom: 1 });
+
+    // Dispatch wheel events directly on the canvas so the camera zooms
+    // in regardless of pointer focus. Multiple small deltas mirror a
+    // trackpad pinch-zoom gesture.
+    await page.evaluate(() => {
+      const c = document.querySelector("#dataviz canvas") as HTMLCanvasElement;
+      const rect = c.getBoundingClientRect();
+      const cx = rect.left + rect.width / 2;
+      const cy = rect.top + rect.height / 2;
+      for (let i = 0; i < 10; i++) {
+        c.dispatchEvent(
+          new WheelEvent("wheel", {
+            deltaY: -200,
+            clientX: cx,
+            clientY: cy,
+            bubbles: true,
+            cancelable: true,
+          })
+        );
+      }
+    });
+
+    const zoomed = await getCam();
+    expect(zoomed).not.toBeNull();
+    expect(zoomed!.zoom).toBeGreaterThan(1.1);
+
+    // Reset view button restores identity transform.
+    await resetBtn.click();
+    const after = await getCam();
+    expect(after).toEqual({ tx: 0, ty: 0, zoom: 1 });
+  });
+
   test("changing galaxy size changes cell count after re-init", async ({ page }) => {
     const sizeInput = page.getByTestId("input-galaxy-size");
     await sizeInput.fill("20");
