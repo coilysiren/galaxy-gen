@@ -54,12 +54,21 @@ export function initData(galaxyFrontend: galaxy.Frontend) {
 }
 
 /** Fast-path per-tick update. Reads `massArray()` directly and mutates
- *  existing circles' radius / opacity. Avoids selectAll/join overhead. */
+ *  existing circles' radius + fill colour. Heavier cells get brighter,
+ *  warmer stars; empty cells get r=0 (invisible but kept in the DOM). */
 export function updateData(galaxyFrontend: galaxy.Frontend) {
   const mass = galaxyFrontend.massArray();
   const size = galaxyFrontend.galaxySize;
   const scale = (CANVAS - MARGIN * 2) / size;
   const rMax = scale * 0.5;
+
+  // Compute max mass to scale visuals dynamically. O(N) but trivial vs
+  // the gravity O(N²) we just finished.
+  let maxMass = 1;
+  for (let i = 0; i < mass.length; i++) {
+    if (mass[i] > maxMass) maxMass = mass[i];
+  }
+  const invLogMax = 1 / Math.log(maxMass + 1);
 
   const node = document.getElementById("dataviz");
   if (!node) return;
@@ -76,8 +85,16 @@ export function updateData(galaxyFrontend: galaxy.Frontend) {
       if (c.getAttribute("r") !== "0") c.setAttribute("r", "0");
       continue;
     }
-    const logMass = Math.log(m);
-    const r = Math.min(Math.max(logMass * 0.6, 0.3), rMax);
+    const t = Math.log(m + 1) * invLogMax; // 0..1 in log-mass space
+    const r = Math.max(0.5, Math.min(rMax, 0.5 + t * rMax * 1.4));
     c.setAttribute("r", r.toFixed(2));
+
+    // Fill: plum (#9192bb) → hot white-yellow as mass grows.
+    //   t=0   → rgb(145,146,187)  (plum-400)
+    //   t=1   → rgb(255,240,200)  (warm white)
+    const rC = ((145 + (255 - 145) * t) | 0).toString();
+    const gC = ((146 + (240 - 146) * t) | 0).toString();
+    const bC = ((187 + (200 - 187) * t) | 0).toString();
+    c.setAttribute("fill", `rgb(${rC},${gC},${bC})`);
   }
 }

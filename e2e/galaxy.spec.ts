@@ -68,6 +68,35 @@ test.describe("Galaxy Generator", () => {
     expect(after).toBeGreaterThan(0);
   });
 
+  test("ticks actually redistribute mass (sim is not frozen)", async ({ page }) => {
+    await page.getByTestId("btn-init").click();
+    await page.getByTestId("btn-seed").click();
+
+    const snapshotBefore = await page.evaluate(() => {
+      const fe: any = (window as any).__galaxyGen.frontend;
+      return Array.from(fe.massArray() as Uint16Array);
+    });
+
+    // Run enough ticks for the mass field to noticeably redistribute.
+    await page.evaluate(() => {
+      const fe: any = (window as any).__galaxyGen.frontend;
+      for (let i = 0; i < 120; i++) fe.tick(0.5);
+    });
+
+    const snapshotAfter = await page.evaluate(() => {
+      const fe: any = (window as any).__galaxyGen.frontend;
+      return Array.from(fe.massArray() as Uint16Array);
+    });
+
+    let changed = 0;
+    for (let i = 0; i < snapshotBefore.length; i++) {
+      if (snapshotBefore[i] !== snapshotAfter[i]) changed++;
+    }
+    // Anything less than ~5% changed means the sim is frozen.
+    const pctChanged = changed / snapshotBefore.length;
+    expect(pctChanged).toBeGreaterThan(0.05);
+  });
+
   test("changing galaxy size changes cell count after re-init", async ({ page }) => {
     const sizeInput = page.getByTestId("input-galaxy-size");
     await sizeInput.fill("20");

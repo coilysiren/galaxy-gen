@@ -17,6 +17,10 @@ path = "src/rust/lib.rs"
 name = "tick_bench"
 path = "benches/tick_bench.rs"
 
+[[bin]]
+name = "debug_sim"
+path = "benches/debug_sim.rs"
+
 [dependencies]
 console_error_panic_hook = "^0.1"
 wasm-bindgen = "^0.2"

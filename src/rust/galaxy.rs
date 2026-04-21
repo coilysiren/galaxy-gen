@@ -29,6 +29,16 @@ pub struct Galaxy {
     acc_x: Vec<f32>,
     acc_y: Vec<f32>,
 
+    // Persistent velocity (per mass bucket). Without this the sim
+    // restarts from rest every tick and produces imperceptible motion.
+    vel_x: Vec<f32>,
+    vel_y: Vec<f32>,
+
+    // Sub-grid fractional offsets so a cell can "accumulate" toward its
+    // next grid cell across several ticks instead of snapping immediately.
+    frac_x: Vec<f32>,
+    frac_y: Vec<f32>,
+
     // Integer (x, y) for each cell. Since grid positions are integers we
     // can take the diff as int and index an inv-r³ lookup with r² — no
     // `sqrt` in the hot loop.
@@ -52,13 +62,17 @@ impl Galaxy {
 
     // Newton's G is ~6.67e-11 in SI. At this grid scale (distances of 1-100,
     // masses of 1-65535) that's numerically invisible. Pick a value big
-    // enough to produce motion in a reasonable number of ticks but small
-    // enough that a single tick can't push a cell more than ~1 grid unit
-    // at time=0.01. Calibrated empirically.
-    pub const GRAVATIONAL_CONSTANT: f32 = 1.0e-3;
+    // enough to produce motion in a reasonable number of ticks; the
+    // velocity integrator (`apply_acceleration`) caps step size via
+    // `MAX_SUBGRID_STEP` so blowup isn't a concern even if G is punchy.
+    pub const GRAVATIONAL_CONSTANT: f32 = 5.0e-2;
 
     // Softening length to avoid division by ~0 when cells share a grid cell.
-    const SOFTENING_SQ: f32 = 0.25;
+    const SOFTENING_SQ: f32 = 1.0;
+
+    // Cap the per-tick position delta so we don't teleport halfway across
+    // the grid on a tight mass concentration.
+    const MAX_SUBGRID_STEP: f32 = 0.5;
 }
 
 #[wasm_bindgen]
@@ -93,6 +107,10 @@ impl Galaxy {
             mass: vec![cell_initial_mass; n],
             acc_x: vec![0.0; n],
             acc_y: vec![0.0; n],
+            vel_x: vec![0.0; n],
+            vel_y: vec![0.0; n],
+            frac_x: vec![0.0; n],
+            frac_y: vec![0.0; n],
             xs_i,
             ys_i,
             inv_r3,
@@ -115,6 +133,10 @@ impl Galaxy {
             mass,
             acc_x: vec![0.0; self.n],
             acc_y: vec![0.0; self.n],
+            vel_x: vec![0.0; self.n],
+            vel_y: vec![0.0; self.n],
+            frac_x: vec![0.0; self.n],
+            frac_y: vec![0.0; self.n],
             xs_i: self.xs_i.clone(),
             ys_i: self.ys_i.clone(),
             inv_r3: self.inv_r3.clone(),
@@ -130,6 +152,10 @@ impl Galaxy {
             mass: self.mass.clone(),
             acc_x: self.acc_x.clone(),
             acc_y: self.acc_y.clone(),
+            vel_x: self.vel_x.clone(),
+            vel_y: self.vel_y.clone(),
+            frac_x: self.frac_x.clone(),
+            frac_y: self.frac_y.clone(),
             xs_i: self.xs_i.clone(),
             ys_i: self.ys_i.clone(),
             inv_r3: self.inv_r3.clone(),
@@ -233,34 +259,110 @@ impl Galaxy {
         }
     }
 
-    /// Integrate one step: move each cell by ½·a·t² and merge colliding
-    /// cells by summing their masses at the destination index.
+    /// Semi-implicit Euler integration. For each mass-carrying grid cell:
+    ///   v += a · dt          (velocity carries across ticks — this is
+    ///                         what makes the galaxy actually *move* over
+    ///                         time instead of twitching once and freezing)
+    ///   Δ = clamp(v · dt, ±MAX_SUBGRID_STEP)
+    ///   frac += Δ            (accumulate sub-grid motion)
+    ///   when |frac| ≥ 1 we transfer to the neighboring grid cell, keep
+    ///   remainder in frac, and bring velocity with us.
+    ///
+    /// Mass merging: when two cells land on the same grid index we sum
+    /// their masses and take the momentum-weighted average velocity of
+    /// their components (p = Σmᵢvᵢ ⇒ v = p / Σmᵢ) so collisions conserve
+    /// momentum.
     fn apply_acceleration(&mut self, time: f32) {
+        let size = self.size as i32;
+        let max_step = Galaxy::MAX_SUBGRID_STEP;
+
+        // Zero the mass scratch; we'll also accumulate momentum here into
+        // parallel scratch vectors kept locally (small & stack-allocated
+        // per-tick is fine).
         for m in self.scratch_mass.iter_mut() {
             *m = 0;
         }
-
-        let size = self.size as i32;
-        let dt2 = 0.5 * time * time;
+        let mut p_x = vec![0.0f32; self.n];
+        let mut p_y = vec![0.0f32; self.n];
+        let mut frac_next_x = vec![0.0f32; self.n];
+        let mut frac_next_y = vec![0.0f32; self.n];
 
         for i in 0..self.n {
             let m = self.mass[i];
             if m == 0 {
+                // Clear velocity for empty cells so stale values don't
+                // propagate when this slot gets re-occupied later.
+                self.vel_x[i] = 0.0;
+                self.vel_y[i] = 0.0;
+                self.frac_x[i] = 0.0;
+                self.frac_y[i] = 0.0;
                 continue;
             }
+
+            // v += a · dt
+            let mut vx = self.vel_x[i] + self.acc_x[i] * time;
+            let mut vy = self.vel_y[i] + self.acc_y[i] * time;
+
+            // Damping so energy doesn't run away (no dissipation in an
+            // ideal N-body; but a grid-quantized sim integrates poorly
+            // at large dt and the system overheats without this).
+            vx *= 0.995;
+            vy *= 0.995;
+
+            // Sub-grid position update
+            let mut fx = self.frac_x[i] + (vx * time).clamp(-max_step, max_step);
+            let mut fy = self.frac_y[i] + (vy * time).clamp(-max_step, max_step);
+
             let (col, row) = (i as i32 % size, i as i32 / size);
-            let new_x = col + (self.acc_x[i] * dt2) as i32;
-            let new_y = row + (self.acc_y[i] * dt2) as i32;
-            let new_x = wrap(new_x, size) as u16;
-            let new_y = wrap(new_y, size) as u16;
-            let ni = self.col_row_to_index(new_x, new_y) as usize;
-            // Saturating add keeps us inside u16 on collisions.
+
+            // Transfer to neighboring cell(s) as fractional offset crosses
+            // ±0.5 (half-cell).
+            let mut new_col = col;
+            let mut new_row = row;
+            if fx >= 0.5 {
+                new_col += 1;
+                fx -= 1.0;
+            } else if fx <= -0.5 {
+                new_col -= 1;
+                fx += 1.0;
+            }
+            if fy >= 0.5 {
+                new_row += 1;
+                fy -= 1.0;
+            } else if fy <= -0.5 {
+                new_row -= 1;
+                fy += 1.0;
+            }
+
+            let new_col = wrap(new_col, size) as u16;
+            let new_row = wrap(new_row, size) as u16;
+            let ni = self.col_row_to_index(new_col, new_row) as usize;
+
+            // Merge: sum mass, accumulate momentum, keep the fraction of
+            // the *arriving* cell (approx — good enough for visuals).
             let sum = self.scratch_mass[ni].saturating_add(m as u32);
             self.scratch_mass[ni] = sum;
+            p_x[ni] += vx * m as f32;
+            p_y[ni] += vy * m as f32;
+            frac_next_x[ni] = fx;
+            frac_next_y[ni] = fy;
         }
 
-        for (i, m) in self.scratch_mass.iter().enumerate() {
-            self.mass[i] = (*m).min(u16::MAX as u32) as u16;
+        for i in 0..self.n {
+            let m32 = self.scratch_mass[i].min(u16::MAX as u32);
+            self.mass[i] = m32 as u16;
+            if m32 > 0 {
+                let mf = m32 as f32;
+                self.vel_x[i] = p_x[i] / mf;
+                self.vel_y[i] = p_y[i] / mf;
+                self.frac_x[i] = frac_next_x[i];
+                self.frac_y[i] = frac_next_y[i];
+            } else {
+                self.vel_x[i] = 0.0;
+                self.vel_y[i] = 0.0;
+                self.frac_x[i] = 0.0;
+                self.frac_y[i] = 0.0;
+            }
             self.acc_x[i] = 0.0;
             self.acc_y[i] = 0.0;
         }
