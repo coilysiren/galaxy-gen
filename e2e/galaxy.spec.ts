@@ -364,6 +364,55 @@ test.describe("Galaxy Generator", () => {
     await expect(host).toHaveAttribute("data-cam-zoom", "1.0000");
   });
 
+  test("url ?seed=… populates the seed input and init pushes full state to the URL", async ({
+    page,
+  }) => {
+    await page.goto("/?seed=42&size=30&mass=10&dt=0.25");
+    await waitForWasm(page);
+
+    // URL query params flow into the inputs on load.
+    await expect(page.getByTestId("input-seed")).toHaveValue("42");
+    await expect(page.getByTestId("input-galaxy-size")).toHaveValue("30");
+    await expect(page.getByTestId("input-seed-mass")).toHaveValue("10");
+    await expect(page.getByTestId("input-time-modifier")).toHaveValue("0.25");
+
+    // After Init, the URL should carry all four params (shareable state).
+    await page.getByTestId("btn-init").click();
+    const url = new URL(page.url());
+    expect(url.searchParams.get("seed")).toBe("42");
+    expect(url.searchParams.get("size")).toBe("30");
+    expect(url.searchParams.get("mass")).toBe("10");
+    expect(url.searchParams.get("dt")).toBe("0.25");
+  });
+
+  test("same seed produces the same mass distribution (reproducible)", async ({ page }) => {
+    // First run.
+    await page.getByTestId("input-seed").fill("12345");
+    await page.getByTestId("input-galaxy-size").fill("20");
+    await page.getByTestId("input-seed-mass").fill("50");
+    await page.getByTestId("btn-init").click();
+    await page.getByTestId("btn-seed").click();
+    const first = await page.evaluate(() => {
+      const fe: any = (window as any).__galaxyGen.frontend;
+      return Array.from(fe.massArray() as Uint16Array);
+    });
+
+    // Second run with the same seed.
+    await page.goto("/");
+    await waitForWasm(page);
+    await page.getByTestId("input-seed").fill("12345");
+    await page.getByTestId("input-galaxy-size").fill("20");
+    await page.getByTestId("input-seed-mass").fill("50");
+    await page.getByTestId("btn-init").click();
+    await page.getByTestId("btn-seed").click();
+    const second = await page.evaluate(() => {
+      const fe: any = (window as any).__galaxyGen.frontend;
+      return Array.from(fe.massArray() as Uint16Array);
+    });
+
+    expect(second).toEqual(first);
+  });
+
   test("changing galaxy size changes cell count after re-init", async ({ page }) => {
     const sizeInput = page.getByTestId("input-galaxy-size");
     await sizeInput.fill("20");

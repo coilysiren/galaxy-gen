@@ -27,6 +27,20 @@ export class Frontend {
     this.galaxy = next;
   }
 
+  /**
+   * Reproducible seed: given the same `(additionalMass, seed)` pair the
+   * resulting mass field is byte-identical to any prior/future call with
+   * the same inputs. This is what makes `?seed=…` URL sharing meaningful.
+   * `seed` is a u64 on the Rust side; JS numbers are doubles, but we
+   * pass it through as a BigInt so integer seeds up to 2^64-1 round-trip
+   * cleanly.
+   */
+  public seedWith(additionalMass: number, seed: bigint): void {
+    const next = this.galaxy.seed_with(additionalMass, seed);
+    this.galaxy.free();
+    this.galaxy = next;
+  }
+
   public tick(timeModifier: number): void {
     const next = this.galaxy.tick(timeModifier);
     this.galaxy.free();

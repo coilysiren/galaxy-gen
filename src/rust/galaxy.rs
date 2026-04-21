@@ -16,7 +16,8 @@
 //! `tick` returns a new `Galaxy` to preserve the existing JS API, but
 //! internally reuses scratch buffers and moves the resulting arrays.
 
-use rand::Rng;
+use rand::rngs::StdRng;
+use rand::{Rng, SeedableRng};
 use wasm_bindgen::prelude::*;
 
 #[wasm_bindgen]
@@ -112,27 +113,16 @@ impl Galaxy {
 
     pub fn seed(&self, additional: u16) -> Galaxy {
         let mut rng = rand::rng();
-        let mut mass = self.mass.clone();
-        if additional > 0 {
-            for m in mass.iter_mut() {
-                *m = m.saturating_add(rng.random_range(0..=additional));
-            }
-        }
-        Galaxy {
-            size: self.size,
-            n: self.n,
-            mass,
-            acc_x: vec![0.0; self.n],
-            acc_y: vec![0.0; self.n],
-            vel_x: vec![0.0; self.n],
-            vel_y: vec![0.0; self.n],
-            frac_x: vec![0.0; self.n],
-            frac_y: vec![0.0; self.n],
-            xs_i: self.xs_i.clone(),
-            ys_i: self.ys_i.clone(),
-            inv_r3: self.inv_r3.clone(),
-            scratch_mass: vec![0; self.n],
-        }
+        self.seed_with_rng(additional, &mut rng)
+    }
+
+    /// Reproducible variant of [`seed`] that draws randomness from a
+    /// `u64`-seeded ChaCha-based RNG (`StdRng`). Two galaxies seeded with
+    /// the same `(additional, seed)` pair produce byte-identical state —
+    /// this is what enables `?seed=…` URL sharing on the JS side.
+    pub fn seed_with(&self, additional: u16, seed: u64) -> Galaxy {
+        let mut rng = StdRng::seed_from_u64(seed);
+        self.seed_with_rng(additional, &mut rng)
     }
 
     pub fn tick(&self, time: f32) -> Galaxy {
@@ -182,6 +172,34 @@ impl Galaxy {
 }
 
 impl Galaxy {
+    /// Shared seeding kernel used by both the non-deterministic `seed()`
+    /// and the reproducible `seed_with(additional, seed)`. Splitting on
+    /// RNG lets the two expose different public APIs (wasm-bindgen doesn't
+    /// take generics) while keeping the mass-fill loop identical.
+    fn seed_with_rng<R: Rng + ?Sized>(&self, additional: u16, rng: &mut R) -> Galaxy {
+        let mut mass = self.mass.clone();
+        if additional > 0 {
+            for m in mass.iter_mut() {
+                *m = m.saturating_add(rng.random_range(0..=additional));
+            }
+        }
+        Galaxy {
+            size: self.size,
+            n: self.n,
+            mass,
+            acc_x: vec![0.0; self.n],
+            acc_y: vec![0.0; self.n],
+            vel_x: vec![0.0; self.n],
+            vel_y: vec![0.0; self.n],
+            frac_x: vec![0.0; self.n],
+            frac_y: vec![0.0; self.n],
+            xs_i: self.xs_i.clone(),
+            ys_i: self.ys_i.clone(),
+            inv_r3: self.inv_r3.clone(),
+            scratch_mass: vec![0; self.n],
+        }
+    }
+
     // (col, row) — x is column, y is row. Matches the pre-rewrite convention.
     #[inline]
     fn index_to_col_row(&self, index: u16) -> (u16, u16) {
@@ -690,6 +708,30 @@ mod tests_intial_generation {
         let g = g.seed(0);
         assert_eq!(before, g.mass);
     }
+    #[test]
+    fn test_seed_with_same_u64_is_reproducible() {
+        // Two galaxies seeded with the same (additional, seed) pair must
+        // produce identical cell state. This is the invariant the
+        // `?seed=…` URL feature relies on.
+        let a = Galaxy::new(10, 0).seed_with(100, 42);
+        let b = Galaxy::new(10, 0).seed_with(100, 42);
+        assert_eq!(a.mass, b.mass);
+    }
+
+    #[test]
+    fn test_seed_with_different_u64_differs() {
+        let a = Galaxy::new(10, 0).seed_with(100, 42);
+        let b = Galaxy::new(10, 0).seed_with(100, 43);
+        assert_ne!(a.mass, b.mass);
+    }
+
+    #[test]
+    fn test_seed_with_zero_additional_matches_base() {
+        let base = Galaxy::new(10, 0);
+        let seeded = base.seed_with(0, 42);
+        assert_eq!(base.mass, seeded.mass);
+    }
+
     #[test]
     fn test_seed_alters_data_twice() {
         let g = Galaxy::new(10, 0);

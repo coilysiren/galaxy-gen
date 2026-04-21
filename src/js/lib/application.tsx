@@ -10,10 +10,103 @@ const DT_STEP = 1.25;
 const DT_MIN = 0.01;
 const DT_MAX = 10;
 
+const DEFAULT_GALAXY_SIZE = 50;
+const DEFAULT_SEED_MASS = 25;
+
+// A u64 max is 2^64 - 1. We draw fresh randomize-button seeds uniformly
+// over the full u64 range so they look properly opaque.
+const U64_MAX = (1n << 64n) - 1n;
+
+/**
+ * Generate a fresh random u64 seed as a bigint. Uses `crypto.getRandomValues`
+ * so the seeds aren't correlated with `Math.random()`'s shared state.
+ */
+function randomU64Seed(): bigint {
+  if (typeof globalThis.crypto !== "undefined") {
+    const buf = new Uint32Array(2);
+    globalThis.crypto.getRandomValues(buf);
+    return (BigInt(buf[0]) << 32n) | BigInt(buf[1]);
+  }
+  // Fallback for non-secure contexts.
+  const hi = BigInt(Math.floor(Math.random() * 0x1_0000_0000));
+  const lo = BigInt(Math.floor(Math.random() * 0x1_0000_0000));
+  return (hi << 32n) | lo;
+}
+
+/** Parse a string as a u64 seed. Accepts decimal only. */
+function parseSeed(s: string): bigint | null {
+  if (!/^[0-9]+$/.test(s.trim())) return null;
+  try {
+    const n = BigInt(s.trim());
+    if (n < 0n || n > U64_MAX) return null;
+    return n;
+  } catch {
+    return null;
+  }
+}
+
+interface InitialParams {
+  galaxySize: number;
+  seedMass: number;
+  timeModifier: number;
+  seed: string;
+}
+
+function readInitialParams(): InitialParams {
+  const defaults: InitialParams = {
+    galaxySize: DEFAULT_GALAXY_SIZE,
+    seedMass: DEFAULT_SEED_MASS,
+    timeModifier: DEFAULT_DT,
+    seed: "",
+  };
+  if (typeof window === "undefined") return defaults;
+  const params = new URLSearchParams(window.location.search);
+  const sizeRaw = params.get("size");
+  const massRaw = params.get("mass");
+  const dtRaw = params.get("dt");
+  const seedRaw = params.get("seed");
+  const sizeN = sizeRaw != null ? parseInt(sizeRaw, 10) : NaN;
+  const massN = massRaw != null ? parseInt(massRaw, 10) : NaN;
+  const dtN = dtRaw != null ? parseFloat(dtRaw) : NaN;
+  return {
+    galaxySize: Number.isFinite(sizeN) && sizeN > 0 ? sizeN : defaults.galaxySize,
+    seedMass: Number.isFinite(massN) && massN >= 0 ? massN : defaults.seedMass,
+    timeModifier: Number.isFinite(dtN) && dtN > 0 ? dtN : defaults.timeModifier,
+    seed: seedRaw != null && parseSeed(seedRaw) != null ? seedRaw.trim() : "",
+  };
+}
+
+/**
+ * Push the current init parameters into the URL via `history.replaceState`
+ * so the page is shareable. We use `replaceState` (not `pushState`) so
+ * re-initializing doesn't pile up history entries.
+ */
+function writeUrlParams(p: {
+  galaxySize: number;
+  seedMass: number;
+  timeModifier: number;
+  seed: string;
+}): void {
+  if (typeof window === "undefined") return;
+  const params = new URLSearchParams();
+  params.set("seed", p.seed);
+  params.set("size", p.galaxySize.toString());
+  params.set("mass", p.seedMass.toString());
+  params.set("dt", p.timeModifier.toString());
+  const next = `${window.location.pathname}?${params.toString()}${window.location.hash}`;
+  window.history.replaceState(null, "", next);
+}
+
 export function Interface() {
-  const [galaxySize, setGalaxySize] = React.useState(50);
-  const [galaxySeedMass, setGalaxySeedMass] = React.useState(25);
-  const [timeModifier, setTimeModifier] = React.useState(DEFAULT_DT);
+  const initial = React.useMemo(() => readInitialParams(), []);
+
+  const [galaxySize, setGalaxySize] = React.useState(initial.galaxySize);
+  const [galaxySeedMass, setGalaxySeedMass] = React.useState(initial.seedMass);
+  const [timeModifier, setTimeModifier] = React.useState(initial.timeModifier);
+  // Seed is stored as a string so the input control is forgiving. The
+  // parse happens at Init / Seed time. Empty string = "use a fresh
+  // random seed next time we seed".
+  const [seed, setSeed] = React.useState<string>(initial.seed);
   const [wasmReady, setWasmReady] = React.useState(false);
   const [initialized, setInitialized] = React.useState(false);
   const [tickCount, setTickCount] = React.useState(0);
@@ -84,11 +177,24 @@ export function Interface() {
       return;
     }
     stopLoop();
+    // If the seed field is empty or invalid, fill one in so the URL
+    // always has a shareable value after Init.
+    let effectiveSeed = seed;
+    if (parseSeed(effectiveSeed) == null) {
+      effectiveSeed = randomU64Seed().toString();
+      setSeed(effectiveSeed);
+    }
     galaxyFrontendRef.current = new galaxy.Frontend(galaxySize);
     dataviz.initViz(galaxyFrontendRef.current);
     dataviz.initData(galaxyFrontendRef.current);
     setInitialized(true);
     setTickCount(0);
+    writeUrlParams({
+      galaxySize,
+      seedMass: galaxySeedMass,
+      timeModifier,
+      seed: effectiveSeed,
+    });
     exposeForTests();
   };
 
@@ -97,9 +203,24 @@ export function Interface() {
       console.error("galaxy not yet initialized");
       return;
     }
-    galaxyFrontendRef.current.seed(galaxySeedMass);
+    const parsed = parseSeed(seed);
+    if (parsed != null) {
+      galaxyFrontendRef.current.seedWith(galaxySeedMass, parsed);
+    } else {
+      galaxyFrontendRef.current.seed(galaxySeedMass);
+    }
     dataviz.initData(galaxyFrontendRef.current);
+    writeUrlParams({
+      galaxySize,
+      seedMass: galaxySeedMass,
+      timeModifier,
+      seed,
+    });
     exposeForTests();
+  };
+
+  const handleRandomizeSeed = () => {
+    setSeed(randomU64Seed().toString());
   };
 
   const handleTickClick = () => {
@@ -271,6 +392,31 @@ export function Interface() {
                 onChange={handleFloatChange(setTimeModifier)}
               />
             </label>
+          </div>
+
+          <div className="mt-4 grid gap-4 md:grid-cols-[1fr_auto]">
+            <label className="block">
+              <span className="input-label mb-1 block">Seed (u64, blank = random)</span>
+              <input
+                type="text"
+                className="input-field"
+                name="seed"
+                data-testid="input-seed"
+                placeholder="e.g. 42"
+                value={seed}
+                onChange={(e) => setSeed(e.target.value)}
+              />
+            </label>
+            <div className="flex items-end">
+              <button
+                type="button"
+                className="btn-plum"
+                data-testid="btn-randomize-seed"
+                onClick={handleRandomizeSeed}
+              >
+                randomize seed
+              </button>
+            </div>
           </div>
 
           <div className="mt-6 flex flex-wrap items-center gap-3">
