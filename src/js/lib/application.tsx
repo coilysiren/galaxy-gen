@@ -12,9 +12,16 @@ export function Interface() {
   const [wasmReady, setWasmReady] = React.useState(false);
   const [initialized, setInitialized] = React.useState(false);
   const [tickCount, setTickCount] = React.useState(0);
+  const [running, setRunning] = React.useState(false);
+  const [fps, setFps] = React.useState(0);
+  const [tickMs, setTickMs] = React.useState(0);
 
   const wasmModuleRef = React.useRef<any>(null);
   const galaxyFrontendRef = React.useRef<galaxy.Frontend | null>(null);
+  const runningRef = React.useRef(false);
+  const rafRef = React.useRef<number | null>(null);
+  const timeModRef = React.useRef(timeModifier);
+  timeModRef.current = timeModifier;
 
   React.useEffect(() => {
     wasm.then((module) => {
@@ -25,13 +32,15 @@ export function Interface() {
         (window as any).__galaxyGen.wasmReady = true;
       }
     });
+    return () => {
+      if (rafRef.current != null) cancelAnimationFrame(rafRef.current);
+    };
   }, []);
 
   const exposeForTests = () => {
     if (typeof window !== "undefined") {
       (window as any).__galaxyGen = (window as any).__galaxyGen || {};
       (window as any).__galaxyGen.frontend = galaxyFrontendRef.current;
-      (window as any).__galaxyGen.tickCount = tickCount;
     }
   };
 
@@ -49,13 +58,25 @@ export function Interface() {
     };
   };
 
+  const stopLoop = React.useCallback(() => {
+    runningRef.current = false;
+    setRunning(false);
+    if (rafRef.current != null) {
+      cancelAnimationFrame(rafRef.current);
+      rafRef.current = null;
+    }
+  }, []);
+
   const handleInitClick = () => {
-    if (!wasmModuleRef.current) {
+    const module = wasmModuleRef.current;
+    if (!module) {
       console.error("wasm not yet loaded");
       return;
     }
+    stopLoop();
     galaxyFrontendRef.current = new galaxy.Frontend(galaxySize, timeModifier);
     dataviz.initViz(galaxyFrontendRef.current);
+    dataviz.initData(galaxyFrontendRef.current);
     setInitialized(true);
     setTickCount(0);
     exposeForTests();
@@ -76,31 +97,81 @@ export function Interface() {
       console.error("galaxy not yet initialized");
       return;
     }
+    const t0 = performance.now();
     galaxyFrontendRef.current.tick(timeModifier);
-    dataviz.initData(galaxyFrontendRef.current);
+    const elapsed = performance.now() - t0;
+    setTickMs(elapsed);
+    dataviz.updateData(galaxyFrontendRef.current);
     setTickCount((n) => n + 1);
     exposeForTests();
   };
 
+  const tickLoop = React.useCallback(() => {
+    if (!runningRef.current || !galaxyFrontendRef.current) return;
+
+    const t0 = performance.now();
+    galaxyFrontendRef.current.tick(timeModRef.current);
+    const tickElapsed = performance.now() - t0;
+
+    dataviz.updateData(galaxyFrontendRef.current);
+
+    // Update counters every frame (cheap with a ref-guarded rAF).
+    fpsSamplesRef.current.push(performance.now());
+    const cutoff = performance.now() - 1000;
+    while (
+      fpsSamplesRef.current.length > 0 &&
+      fpsSamplesRef.current[0] < cutoff
+    ) {
+      fpsSamplesRef.current.shift();
+    }
+    setFps(fpsSamplesRef.current.length);
+    setTickMs(tickElapsed);
+    setTickCount((n) => n + 1);
+
+    rafRef.current = requestAnimationFrame(tickLoop);
+  }, []);
+
+  const fpsSamplesRef = React.useRef<number[]>([]);
+
+  const handleRunToggle = () => {
+    if (!galaxyFrontendRef.current) return;
+    if (runningRef.current) {
+      stopLoop();
+    } else {
+      fpsSamplesRef.current = [];
+      runningRef.current = true;
+      setRunning(true);
+      rafRef.current = requestAnimationFrame(tickLoop);
+    }
+  };
+
   return (
-    <div data-testid="app" data-wasm-ready={wasmReady ? "true" : "false"} className="min-h-screen">
-      <nav className="nav-strip py-3 px-6 text-[#eeeeee] uppercase text-xs font-bold flex items-center justify-between">
+    <div
+      data-testid="app"
+      data-wasm-ready={wasmReady ? "true" : "false"}
+      className="min-h-screen"
+    >
+      <nav className="nav-strip flex items-center justify-between px-6 py-3 text-xs font-bold uppercase text-[#eeeeee]">
         <span>./galaxy-gen</span>
-        <span className="text-[color:var(--color-plum-400)]">rust → wasm → js</span>
+        <span className="text-[color:var(--color-plum-400)]">
+          rust → wasm → js
+        </span>
       </nav>
 
-      <main className="max-w-6xl mx-auto px-4 sm:px-6 py-10">
+      <main className="mx-auto max-w-6xl px-4 py-10 sm:px-6">
         <header className="mb-8">
-          <h1 className="text-4xl md:text-5xl tracking-[0.1em]">Galaxy Generator</h1>
-          <p className="mt-3 text-[color:var(--color-plum-400)] tracking-[0.08em]">
+          <h1 className="text-4xl tracking-[0.1em] md:text-5xl">
+            Galaxy Generator
+          </h1>
+          <p className="mt-3 tracking-[0.08em] text-[color:var(--color-plum-400)]">
             Gravitational sim computed in Rust, rendered with D3 in the browser.
           </p>
         </header>
 
-        <section className="panel p-6 md:p-8 mb-8">
+        <section className="panel mb-8 p-6 md:p-8">
           <div className="grid gap-4 md:grid-cols-3">
             <label className="block">
-              <span className="input-label block mb-1">Galaxy Size</span>
+              <span className="input-label mb-1 block">Galaxy Size</span>
               <input
                 type="text"
                 className="input-field"
@@ -111,7 +182,7 @@ export function Interface() {
               />
             </label>
             <label className="block">
-              <span className="input-label block mb-1">Seed Mass</span>
+              <span className="input-label mb-1 block">Seed Mass</span>
               <input
                 type="text"
                 className="input-field"
@@ -122,7 +193,7 @@ export function Interface() {
               />
             </label>
             <label className="block">
-              <span className="input-label block mb-1">Time Modifier</span>
+              <span className="input-label mb-1 block">Time Modifier</span>
               <input
                 type="text"
                 className="input-field"
@@ -134,7 +205,7 @@ export function Interface() {
             </label>
           </div>
 
-          <div className="mt-6 flex flex-wrap gap-3">
+          <div className="mt-6 flex flex-wrap items-center gap-3">
             <button
               type="button"
               className="btn-plum"
@@ -158,11 +229,32 @@ export function Interface() {
               className="btn-plum"
               data-testid="btn-tick"
               onClick={handleTickClick}
-              disabled={!initialized}
+              disabled={!initialized || running}
             >
               advance time
             </button>
-            <div className="ml-auto input-label self-center">ticks: {tickCount}</div>
+            <button
+              type="button"
+              className="btn-plum"
+              data-testid="btn-run"
+              onClick={handleRunToggle}
+              disabled={!initialized}
+              style={
+                running
+                  ? {
+                      background: "var(--color-plum-900)",
+                      borderColor: "var(--color-plum-400)",
+                    }
+                  : undefined
+              }
+            >
+              {running ? "pause" : "run"}
+            </button>
+            <div className="input-label ml-auto flex items-center gap-4 self-center">
+              <span>ticks: {tickCount}</span>
+              <span>tick: {tickMs.toFixed(1)} ms</span>
+              <span>fps: {fps}</span>
+            </div>
           </div>
 
           {!wasmReady && (

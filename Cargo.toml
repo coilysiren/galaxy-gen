@@ -13,6 +13,10 @@ edition = "2021"
 crate-type = ["cdylib", "rlib"]
 path = "src/rust/lib.rs"
 
+[[bin]]
+name = "tick_bench"
+path = "benches/tick_bench.rs"
+
 [dependencies]
 console_error_panic_hook = "^0.1"
 wasm-bindgen = "^0.2"
@@ -24,11 +28,9 @@ opt-level = "s"
 lto = true
 codegen-units = 1
 
-# Skip wasm-opt entirely. The binaryen shipped in Ubuntu's apt repo (what
-# CI uses) produces WASM that throws `WebAssembly.Table.grow(): failed to
-# grow table by 4` during instantiation in recent chromium — same binary
-# works fine locally with Homebrew's newer binaryen. Until the CI
-# binaryen is upgraded (or wasm-opt's table-optimization bug is fixed),
-# skipping it is the safer default. Size cost is ~+50KB gzipped.
+# Re-enable wasm-opt with an explicit, conservative flag set. The earlier
+# `failed to grow table by 4` error was caused by the unused `specs` crate
+# dragging rayon/atomic_refcell/etc into the bundle, not by wasm-opt
+# itself. With specs removed, -O3 runs clean.
 [package.metadata.wasm-pack.profile.release]
-wasm-opt = false
+wasm-opt = ["-O3", "--enable-bulk-memory"]
