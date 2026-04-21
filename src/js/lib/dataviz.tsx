@@ -18,6 +18,7 @@ interface Camera {
 }
 
 interface State {
+  host: HTMLElement;
   canvas: HTMLCanvasElement;
   ctx: CanvasRenderingContext2D;
   size: number;
@@ -26,6 +27,16 @@ interface State {
   camera: Camera;
   lastMass: Uint16Array | null;
   cleanup: () => void;
+}
+
+// Reflect camera onto #dataviz as data-* attributes so E2E tests (and
+// anything outside the JS module boundary) can observe pan/zoom without
+// pulling in the module. Rounded to keep DOM churn low but still observable.
+function publishCamera(s: State) {
+  const { host, camera } = s;
+  host.setAttribute("data-cam-tx", camera.tx.toFixed(2));
+  host.setAttribute("data-cam-ty", camera.ty.toFixed(2));
+  host.setAttribute("data-cam-zoom", camera.zoom.toFixed(4));
 }
 
 let state: State | null = null;
@@ -111,6 +122,7 @@ export function initViz(galaxyFrontend: galaxy.Frontend) {
     const tx = x - k * (x - state.camera.tx);
     const ty = y - k * (y - state.camera.ty);
     state.camera = clampPan({ tx, ty, zoom: newZoom });
+    publishCamera(state);
     redraw();
   };
 
@@ -138,6 +150,7 @@ export function initViz(galaxyFrontend: galaxy.Frontend) {
       ty: dragCam.ty + dy,
       zoom: state.camera.zoom,
     });
+    publishCamera(state);
     redraw();
   };
 
@@ -166,6 +179,7 @@ export function initViz(galaxyFrontend: galaxy.Frontend) {
   };
 
   state = {
+    host,
     canvas,
     ctx,
     size,
@@ -175,6 +189,7 @@ export function initViz(galaxyFrontend: galaxy.Frontend) {
     lastMass: null,
     cleanup,
   };
+  publishCamera(state);
 
   // Keep a hidden SVG peer so existing tests asserting `#dataviz svg`
   // and circle counts still pass.
@@ -264,6 +279,7 @@ function drawFrame(s: State, mass: Uint16Array) {
 export function resetView() {
   if (!state) return;
   state.camera = { tx: 0, ty: 0, zoom: 1 };
+  publishCamera(state);
   if (state.lastMass) drawFrame(state, state.lastMass);
 }
 
