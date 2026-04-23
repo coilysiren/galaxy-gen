@@ -982,7 +982,7 @@ mod tests_intial_generation {
     fn test_seed_rotation_has_positive_total_angular_momentum() {
         // Net L_z = Σ m_i (x_i v_{y,i} - y_i v_{x,i}) around the grid center
         // must be strongly positive — that's the whole point of the mode.
-        let g = Galaxy::new(30, 0, 1000).seed_with_mode(10, InitialCondition::Rotation);
+        let g = Galaxy::new(30, 0).seed_with_mode(10, InitialCondition::Rotation);
         let size = g.size as f32;
         let cx = size * 0.5;
         let cy = size * 0.5;
