@@ -23,14 +23,14 @@ jobs:
       - name: TruffleHog (filesystem, offline)
         run: |
           cat > /tmp/trufflehog-exclude <<'EOF'
-          ^\.git/
-          ^\.venv/
-          ^venv/
-          ^node_modules/
-          ^__pycache__/
-          ^\.mypy_cache/
-          ^\.pytest_cache/
-          ^\.ruff_cache/
+          (^|/)\.git/
+          (^|/)\.venv/
+          (^|/)venv/
+          (^|/)node_modules/
+          (^|/)__pycache__/
+          (^|/)\.mypy_cache/
+          (^|/)\.pytest_cache/
+          (^|/)\.ruff_cache/
           EOF
           docker run --rm \
             -v "${{ github.workspace }}:/pwd:ro" \
