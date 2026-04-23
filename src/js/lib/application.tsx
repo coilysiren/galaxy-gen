@@ -110,6 +110,8 @@ export function Interface() {
   const [initialCondition, setInitialCondition] = React.useState<galaxy.InitialCondition>(
     galaxy.InitialCondition.Uniform
   );
+  const [backend, setBackend] = React.useState<galaxy.ComputeBackend>("cpu");
+  const [webgpuAvailable, setWebgpuAvailable] = React.useState(false);
   const [wasmReady, setWasmReady] = React.useState(false);
   const [initialized, setInitialized] = React.useState(false);
   const [tickCount, setTickCount] = React.useState(0);
@@ -140,6 +142,7 @@ export function Interface() {
   const renderedTickIdRef = React.useRef<number>(-1);
 
   React.useEffect(() => {
+    setWebgpuAvailable(galaxy.isWebGPUAvailable());
     wasm.then((module) => {
       wasmModuleRef.current = module;
       setWasmReady(true);
@@ -147,6 +150,10 @@ export function Interface() {
         (window as any).__galaxyGen = (window as any).__galaxyGen || {};
         (window as any).__galaxyGen.wasmReady = true;
         (window as any).__galaxyGen.dataviz = dataviz;
+        // Parity tests need the raw wasm module + Frontend constructor
+        // so they can spin up an independent galaxy on a different backend.
+        (window as any).__galaxyGen.wasm = module;
+        (window as any).__galaxyGen.Frontend = galaxy.Frontend;
       }
     });
     return () => {
@@ -237,6 +244,17 @@ export function Interface() {
       setSeed(effectiveSeed);
     }
     galaxyFrontendRef.current = new galaxy.Frontend(galaxySize);
+    // Re-apply the selected backend so Init doesn't silently revert to CPU.
+    // If WebGPU init fails here (e.g. lost device), we fall back to CPU
+    // and surface a console warning.
+    if (backend === "webgpu") {
+      galaxyFrontendRef.current
+        .enableWebGPU()
+        .catch((err) => {
+          console.warn("[webgpu] enable on init failed, staying on CPU:", err);
+          setBackend("cpu");
+        });
+    }
     dataviz.initViz(galaxyFrontendRef.current);
     dataviz.initData(galaxyFrontendRef.current);
     setInitialized(true);
@@ -275,18 +293,45 @@ export function Interface() {
     setSeed(randomU64Seed().toString());
   };
 
-  const handleTickClick = () => {
+  const handleTickClick = async () => {
     if (!galaxyFrontendRef.current) {
       console.error("galaxy not yet initialized");
       return;
     }
     const t0 = performance.now();
-    galaxyFrontendRef.current.tick(timeModifier);
+    // Route through tickAsync so the single-step button exercises the
+    // selected backend (WebGPU force calc lands via tick_with_accel).
+    await galaxyFrontendRef.current.tickAsync(timeModifier);
     const elapsed = performance.now() - t0;
     setTickMs(elapsed);
     dataviz.updateData(galaxyFrontendRef.current);
     setTickCount((n) => n + 1);
     exposeForTests();
+  };
+
+  const handleBackendChange = async (next: galaxy.ComputeBackend) => {
+    if (next === backend) return;
+    // Stop any in-flight run loop so we don't switch backends mid-tick.
+    if (runningRef.current) {
+      await stopLoop();
+    }
+    if (next === "webgpu") {
+      if (!galaxyFrontendRef.current) {
+        // No Frontend yet — just record the choice; Init applies it.
+        setBackend("webgpu");
+        return;
+      }
+      try {
+        await galaxyFrontendRef.current.enableWebGPU();
+        setBackend("webgpu");
+      } catch (err) {
+        console.warn("[webgpu] enable failed, staying on CPU:", err);
+        setBackend("cpu");
+      }
+    } else {
+      galaxyFrontendRef.current?.useCPU();
+      setBackend("cpu");
+    }
   };
 
   const handleResetView = () => {
@@ -320,6 +365,34 @@ export function Interface() {
     rafRef.current = requestAnimationFrame(renderLoop);
   }, []);
 
+  // Main-thread run loop used when the WebGPU backend is selected. The
+  // Web Worker can't drive the GPU path (worker has its own WASM instance
+  // and WebGPU isn't shareable across threads), so we tick in rAF and
+  // await the GPU force calc each frame.
+  const gpuRunLoop = React.useCallback(async () => {
+    if (!runningRef.current || !galaxyFrontendRef.current) return;
+    const t0 = performance.now();
+    await galaxyFrontendRef.current.tickAsync(timeModRef.current);
+    const elapsed = performance.now() - t0;
+    if (!runningRef.current || !galaxyFrontendRef.current) return;
+
+    dataviz.updateData(galaxyFrontendRef.current);
+    fpsSamplesRef.current.push(performance.now());
+    const cutoff = performance.now() - 1000;
+    while (
+      fpsSamplesRef.current.length > 0 &&
+      fpsSamplesRef.current[0] < cutoff
+    ) {
+      fpsSamplesRef.current.shift();
+    }
+    setFps(fpsSamplesRef.current.length);
+    setTickMs(elapsed);
+    setTickCount((n) => n + 1);
+    rafRef.current = requestAnimationFrame(() => {
+      void gpuRunLoop();
+    });
+  }, []);
+
   const handleRunToggle = async () => {
     if (!galaxyFrontendRef.current) return;
     if (runningRef.current) {
@@ -330,7 +403,19 @@ export function Interface() {
     latestSnapshotRef.current = null;
     renderedTickIdRef.current = -1;
 
-    // Spin up (or reuse) the worker and hand it the current sim state.
+    if (backend === "webgpu") {
+      // Main-thread rAF loop: physics runs in WASM on the main thread,
+      // forces come from the GPU compute shader. No worker involved.
+      runningRef.current = true;
+      setRunning(true);
+      exposeForTests();
+      rafRef.current = requestAnimationFrame(() => {
+        void gpuRunLoop();
+      });
+      return;
+    }
+
+    // CPU backend: spin up (or reuse) the worker and hand it the current sim state.
     if (!workerRef.current) {
       if (typeof Worker === "undefined") {
         console.error(
@@ -497,6 +582,25 @@ export function Interface() {
                 <option value={galaxy.InitialCondition.Bang}>bang (central explosion)</option>
                 <option value={galaxy.InitialCondition.Collision}>
                   collision (two clusters on intercept)
+                </option>
+              </select>
+            </label>
+            <label className="block md:col-span-3">
+              <span className="input-label mb-1 block">Compute Backend</span>
+              <select
+                className="input-field"
+                name="computeBackend"
+                data-testid="select-compute-backend"
+                value={backend}
+                onChange={(event) =>
+                  void handleBackendChange(event.target.value as galaxy.ComputeBackend)
+                }
+              >
+                <option value="cpu">cpu (rust barnes-hut, web worker)</option>
+                <option value="webgpu" disabled={!webgpuAvailable}>
+                  {webgpuAvailable
+                    ? "webgpu (compute shader, main thread)"
+                    : "webgpu (unavailable in this browser)"}
                 </option>
               </select>
             </label>
