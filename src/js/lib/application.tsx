@@ -226,16 +226,25 @@ export function Interface() {
     }
     latestSnapshotRef.current = null;
     renderedTickIdRef.current = -1;
-    // If the seed field is empty or invalid, fill one in so the URL
-    // always has a shareable value after Init.
+    // Always have a shareable seed on the URL after init.
     let effectiveSeed = seed;
     if (parseSeed(effectiveSeed) == null) {
       effectiveSeed = randomU64Seed().toString();
       setSeed(effectiveSeed);
     }
-    galaxyFrontendRef.current = new galaxy.Frontend(galaxySize);
-    dataviz.initViz(galaxyFrontendRef.current);
-    dataviz.initData(galaxyFrontendRef.current);
+    const parsed = parseSeed(effectiveSeed);
+    const next = new galaxy.Frontend(galaxySize);
+    // Reproducible path only covers Uniform (seed_with_mode doesn't take
+    // a u64 seed). Non-uniform modes fall back to rand::rng() and respect
+    // the selected InitialCondition.
+    if (parsed != null && initialCondition === galaxy.InitialCondition.Uniform) {
+      next.seedWith(galaxySeedMass, parsed);
+    } else {
+      next.seed(galaxySeedMass, initialCondition);
+    }
+    galaxyFrontendRef.current = next;
+    dataviz.initViz(next);
+    dataviz.initData(next);
     setInitialized(true);
     setTickCount(0);
     writeUrlParams({
@@ -243,27 +252,6 @@ export function Interface() {
       seedMass: galaxySeedMass,
       timeModifier,
       seed: effectiveSeed,
-    });
-    exposeForTests();
-  };
-
-  const handleSeedClick = () => {
-    if (!galaxyFrontendRef.current) {
-      console.error("galaxy not yet initialized");
-      return;
-    }
-    const parsed = parseSeed(seed);
-    if (parsed != null) {
-      galaxyFrontendRef.current.seedWith(galaxySeedMass, parsed);
-    } else {
-      galaxyFrontendRef.current.seed(galaxySeedMass, initialCondition);
-    }
-    dataviz.initData(galaxyFrontendRef.current);
-    writeUrlParams({
-      galaxySize,
-      seedMass: galaxySeedMass,
-      timeModifier,
-      seed,
     });
     exposeForTests();
   };
@@ -494,16 +482,7 @@ export function Interface() {
               onClick={handleInitClick}
               disabled={!wasmReady}
             >
-              init new galaxy
-            </button>
-            <button
-              type="button"
-              className="btn-plum"
-              data-testid="btn-seed"
-              onClick={handleSeedClick}
-              disabled={!initialized}
-            >
-              seed the galaxy
+              generate galaxy
             </button>
             <button
               type="button"

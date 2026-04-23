@@ -50,7 +50,6 @@ test.describe("Galaxy Generator", () => {
     await expect(page.getByTestId("input-seed-mass")).toHaveValue("25");
     await expect(page.getByTestId("stat-dt")).toHaveText("dt: 0.500");
     await expect(page.getByTestId("btn-init")).toBeVisible();
-    await expect(page.getByTestId("btn-seed")).toBeVisible();
     await expect(page.getByTestId("btn-tick")).toBeVisible();
   });
 
@@ -61,7 +60,6 @@ test.describe("Galaxy Generator", () => {
 
   test("seed populates cells and draws circles", async ({ page }) => {
     await page.getByTestId("btn-init").click();
-    await page.getByTestId("btn-seed").click();
 
     const circles = page.locator("#dataviz svg #data circle");
     await expect(circles.first()).toBeAttached();
@@ -77,7 +75,6 @@ test.describe("Galaxy Generator", () => {
 
   test("tick advances the simulation without errors", async ({ page }) => {
     await page.getByTestId("btn-init").click();
-    await page.getByTestId("btn-seed").click();
 
     const before = await page.locator("#dataviz svg #data circle").count();
     await page.getByTestId("btn-tick").click();
@@ -90,7 +87,6 @@ test.describe("Galaxy Generator", () => {
 
   test("ticks actually redistribute mass (sim is not frozen)", async ({ page }) => {
     await page.getByTestId("btn-init").click();
-    await page.getByTestId("btn-seed").click();
 
     const snapshotBefore = await page.evaluate(() => {
       const fe: any = (window as any).__galaxyGen.frontend;
@@ -124,7 +120,6 @@ test.describe("Galaxy Generator", () => {
     test.skip(!hasGpu, "navigator.gpu not available in this Chromium");
 
     await page.getByTestId("btn-init").click();
-    await page.getByTestId("btn-seed").click();
 
     // Enable WebGPU directly on the exposed Frontend (the UI selector was
     // removed; parity/smoke coverage still exercises the WGSL path).
@@ -320,7 +315,6 @@ test.describe("Galaxy Generator", () => {
   test("keyboard shortcut: R does not affect the tick counter", async ({ page }) => {
     // R only scopes to dt; it must not secretly reset sim state.
     await page.getByTestId("btn-init").click();
-    await page.getByTestId("btn-seed").click();
     await page.getByTestId("btn-tick").click();
     await page.getByTestId("btn-tick").click();
 
@@ -365,7 +359,6 @@ test.describe("Galaxy Generator", () => {
 
   test("camera pan+zoom: wheel zooms, reset-view restores", async ({ page }) => {
     await page.getByTestId("btn-init").click();
-    await page.getByTestId("btn-seed").click();
 
     const canvas = page.locator("#dataviz canvas");
     await expect(canvas).toBeVisible();
@@ -417,7 +410,6 @@ test.describe("Galaxy Generator", () => {
 
   test("camera pan: click-drag on canvas updates data-cam-* on #dataviz", async ({ page }) => {
     await page.getByTestId("btn-init").click();
-    await page.getByTestId("btn-seed").click();
 
     const host = page.locator("#dataviz");
     await expect(host).toHaveAttribute("data-cam-tx", "0.00");
@@ -522,7 +514,6 @@ test.describe("Galaxy Generator", () => {
     await page.goto("/?seed=12345&size=20&mass=50");
     await waitForWasm(page);
     await page.getByTestId("btn-init").click();
-    await page.getByTestId("btn-seed").click();
     const first = await page.evaluate(() => {
       const fe: any = (window as any).__galaxyGen.frontend;
       return Array.from(fe.massArray() as Uint16Array);
@@ -532,7 +523,6 @@ test.describe("Galaxy Generator", () => {
     await page.goto("/?seed=12345&size=20&mass=50");
     await waitForWasm(page);
     await page.getByTestId("btn-init").click();
-    await page.getByTestId("btn-seed").click();
     const second = await page.evaluate(() => {
       const fe: any = (window as any).__galaxyGen.frontend;
       return Array.from(fe.massArray() as Uint16Array);
@@ -550,18 +540,17 @@ test.describe("Galaxy Generator", () => {
     );
     expect(optionValues).toEqual(["0", "1", "2", "3"]);
 
-    await page.getByTestId("btn-init").click();
-
     // Walk each non-uniform mode. Bang (2) zeroes the baseline grid and
     // only fills a central disc, so <50% of cells should have mass.
     // Collision (3) is the same story. Rotation (1) fills the grid but
     // also sets per-cell velocities, so a few ticks should visibly move
     // mass around. Assert that each mode produces a DIFFERENT mass field
-    // than Uniform.
+    // than Uniform. Init now seeds in the same click, so each mode change
+    // needs a fresh re-init to take effect.
     const snapshots: Record<string, number[]> = {};
     for (const mode of ["0", "1", "2", "3"]) {
       await select.selectOption(mode);
-      await page.getByTestId("btn-seed").click();
+      await page.getByTestId("btn-init").click();
       // Advance a few ticks to let the mode-specific velocities take effect.
       for (let i = 0; i < 5; i++) await page.getByTestId("btn-tick").click();
       snapshots[mode] = await page.evaluate(() => {
@@ -597,7 +586,6 @@ test.describe("Galaxy Generator", () => {
 
   test("run button ticks via the worker and pause resumes state cleanly", async ({ page }) => {
     await page.getByTestId("btn-init").click();
-    await page.getByTestId("btn-seed").click();
 
     // Before running, the worker shouldn't exist yet but the browser
     // should support Workers (sanity — otherwise the run path is a
@@ -668,7 +656,6 @@ test.describe("Galaxy Generator", () => {
     const sizeInput = page.getByTestId("input-galaxy-size");
     await sizeInput.fill("20");
     await page.getByTestId("btn-init").click();
-    await page.getByTestId("btn-seed").click();
 
     const cellCount = await page.evaluate(() => {
       const frontend = (window as any).__galaxyGen?.frontend;

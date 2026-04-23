@@ -27,7 +27,6 @@ test.describe("perf bench", () => {
     test(`tick timings — size=${size}`, async ({ page }) => {
       await page.getByTestId("input-galaxy-size").fill(String(size));
       await page.getByTestId("btn-init").click();
-      await page.getByTestId("btn-seed").click();
 
       const result = await page.evaluate((iters) => {
         const fe: any = (window as any).__galaxyGen.frontend;
