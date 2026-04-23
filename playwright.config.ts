@@ -30,7 +30,20 @@ export default defineConfig({
   projects: [
     {
       name: "chromium",
-      use: { ...devices["Desktop Chrome"] },
+      use: {
+        ...devices["Desktop Chrome"],
+        // Enable WebGPU in headless Chromium so the WebGPU backend
+        // (feature-detect + compute shader) can be smoke-tested end-
+        // to-end. Harmless when the tests don't touch the GPU path.
+        launchOptions: {
+          args: [
+            "--enable-unsafe-webgpu",
+            "--enable-features=Vulkan",
+            "--use-vulkan=swiftshader",
+            "--use-webgpu-adapter=swiftshader",
+          ],
+        },
+      },
     },
   ],
   webServer: {

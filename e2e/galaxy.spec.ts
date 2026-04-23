@@ -117,6 +117,129 @@ test.describe("Galaxy Generator", () => {
     expect(pctChanged).toBeGreaterThan(0.05);
   });
 
+  test("compute backend select is present with cpu + webgpu options", async ({ page }) => {
+    const select = page.getByTestId("select-compute-backend");
+    await expect(select).toBeVisible();
+    await expect(select).toHaveValue("cpu");
+
+    // Option list always contains both entries; webgpu may be disabled
+    // in environments where navigator.gpu is absent.
+    const optionValues = await select
+      .locator("option")
+      .evaluateAll((opts: HTMLOptionElement[]) => opts.map((o) => o.value));
+    expect(optionValues).toEqual(["cpu", "webgpu"]);
+  });
+
+  test("webgpu backend ticks produce non-frozen simulation when available", async ({ page }) => {
+    // Skip when the Chromium launch didn't expose navigator.gpu (older
+    // versions, missing swiftshader, etc). CPU path is covered above.
+    const hasGpu = await page.evaluate(() => Boolean((navigator as any).gpu));
+    test.skip(!hasGpu, "navigator.gpu not available in this Chromium");
+
+    await page.getByTestId("btn-init").click();
+    await page.getByTestId("btn-seed").click();
+
+    // Switch to WebGPU. The handler is async - give it a beat so the
+    // GPU device is live before we start ticking.
+    await page.getByTestId("select-compute-backend").selectOption("webgpu");
+    await page.waitForTimeout(200);
+
+    const snapshotBefore = await page.evaluate(() => {
+      const fe: any = (window as any).__galaxyGen.frontend;
+      return Array.from(fe.massArray() as Uint16Array);
+    });
+
+    // Await each tick so the async GPU path completes before we sample.
+    await page.evaluate(async () => {
+      const fe: any = (window as any).__galaxyGen.frontend;
+      for (let i = 0; i < 60; i++) {
+        await fe.tickAsync(0.5);
+      }
+    });
+
+    const snapshotAfter = await page.evaluate(() => {
+      const fe: any = (window as any).__galaxyGen.frontend;
+      return Array.from(fe.massArray() as Uint16Array);
+    });
+
+    let changed = 0;
+    for (let i = 0; i < snapshotBefore.length; i++) {
+      if (snapshotBefore[i] !== snapshotAfter[i]) changed++;
+    }
+    const pctChanged = changed / snapshotBefore.length;
+    expect(pctChanged).toBeGreaterThan(0.05);
+  });
+
+  test("webgpu and cpu produce matching mass totals for small N", async ({ page }) => {
+    // Parity check: for identical deterministic initial state, running
+    // CPU tick() and WebGPU tickAsync() side-by-side for the same number
+    // of steps gives matching mass arrays. Small N so both paths run
+    // direct-sum O(N^2) and not Barnes-Hut.
+    const hasGpu = await page.evaluate(() => Boolean((navigator as any).gpu));
+    test.skip(!hasGpu, "navigator.gpu not available in this Chromium");
+
+    await expect(page.getByTestId("app")).toHaveAttribute("data-wasm-ready", "true");
+
+    const result = await page.evaluate(async () => {
+      const wasm = (window as any).__galaxyGen.wasm;
+      const Frontend = (window as any).__galaxyGen.Frontend;
+      if (!wasm || !Frontend) return { skipped: "wasm/Frontend not exposed" };
+
+      const size = 10;
+      const timeMod = 0.1;
+      const ticks = 10;
+
+      // Two Frontends with identical deterministic initial mass field
+      // (cell_initial_mass=2, no random seed). Frontend's constructor
+      // default is cell_initial_mass=0, so bypass and assign pre-built
+      // wasm.Galaxy instances directly.
+      const cpuFe: any = new Frontend(size);
+      const gpuFe: any = new Frontend(size);
+      cpuFe.galaxy.free();
+      cpuFe.galaxy = new wasm.Galaxy(size, 2);
+      gpuFe.galaxy.free();
+      gpuFe.galaxy = new wasm.Galaxy(size, 2);
+
+      for (let i = 0; i < ticks; i++) cpuFe.tick(timeMod);
+
+      try {
+        await gpuFe.enableWebGPU();
+      } catch {
+        // GPU device init failed - we'll still run ticks on CPU fallback.
+      }
+      for (let i = 0; i < ticks; i++) await gpuFe.tickAsync(timeMod);
+
+      const cpuMass = Array.from(cpuFe.massArray() as Uint16Array);
+      const gpuMass = Array.from(gpuFe.massArray() as Uint16Array);
+      const gpuBackend = gpuFe.currentBackend();
+      return { cpuMass, gpuMass, gpuBackend };
+    });
+
+    if ((result as any).skipped) {
+      test.skip(true, (result as any).skipped);
+      return;
+    }
+    const r = result as { cpuMass: number[]; gpuMass: number[]; gpuBackend: string };
+
+    expect(r.cpuMass.length).toBe(r.gpuMass.length);
+
+    // Mass conservation: totals must match across backends exactly (both
+    // paths run the same Rust integrator + collision merge).
+    const cpuTotal = r.cpuMass.reduce((a, b) => a + b, 0);
+    const gpuTotal = r.gpuMass.reduce((a, b) => a + b, 0);
+    expect(gpuTotal).toBe(cpuTotal);
+
+    // Per-cell agreement: Rust int-r^2 lookup vs WGSL float inverseSqrt
+    // aren't bit-identical. If GPU fell back to CPU we get exact match;
+    // otherwise allow ~10% of cells to differ by rounding.
+    let diffs = 0;
+    for (let i = 0; i < r.cpuMass.length; i++) {
+      if (r.cpuMass[i] !== r.gpuMass[i]) diffs++;
+    }
+    const threshold = r.gpuBackend === "webgpu" ? 0.1 : 0.0;
+    expect(diffs / r.cpuMass.length).toBeLessThanOrEqual(threshold);
+  });
+
   test("keyboard shortcut: Space toggles run/pause", async ({ page }) => {
     await page.getByTestId("btn-init").click();
     const runBtn = page.getByTestId("btn-run");
