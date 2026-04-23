@@ -586,19 +586,28 @@ test.describe("Galaxy Generator", () => {
       expect(snapshots[mode].length).toBe(50 * 50);
     }
 
-    // Each mode should produce a distinct mass field after ticks. We
-    // compare by number of cells with nonzero mass — uniform fills the
-    // whole grid, bang/collision are sparse, rotation is somewhere in
-    // between after mass merges.
+    // Each non-uniform mode should produce a mass field that differs
+    // meaningfully from uniform's. Ordering by nonzero-cell count is
+    // too strict: uniform collapses into dense clusters under gravity
+    // while bang's outward-radial velocity spreads mass into a growing
+    // ring, so bang can end up with more nonzero cells than uniform.
     const nonzero = (a: number[]) => a.filter((m) => m > 0).length;
-    const uniformNZ = nonzero(snapshots["0"]);
-    const bangNZ = nonzero(snapshots["2"]);
-    const collisionNZ = nonzero(snapshots["3"]);
-    expect(uniformNZ).toBeGreaterThan(bangNZ);
-    expect(uniformNZ).toBeGreaterThan(collisionNZ);
+    const diffCount = (a: number[], b: number[]) => {
+      let n = 0;
+      for (let i = 0; i < a.length; i++) if (a[i] !== b[i]) n++;
+      return n;
+    };
+    const uniform = snapshots["0"];
+    const minDistinctCells = Math.floor(uniform.length * 0.1);
+    for (const mode of ["1", "2", "3"]) {
+      expect(
+        diffCount(uniform, snapshots[mode]),
+        `mode ${mode} snapshot should differ from uniform`,
+      ).toBeGreaterThan(minDistinctCells);
+    }
     // Bang + collision should each have SOME mass left after 5 ticks.
-    expect(bangNZ).toBeGreaterThan(0);
-    expect(collisionNZ).toBeGreaterThan(0);
+    expect(nonzero(snapshots["2"])).toBeGreaterThan(0);
+    expect(nonzero(snapshots["3"])).toBeGreaterThan(0);
   });
 
   test("run button ticks via the worker and pause resumes state cleanly", async ({ page }) => {
