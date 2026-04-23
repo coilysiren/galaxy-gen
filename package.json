@@ -36,6 +36,7 @@
     "@types/react-dom": "^19.2.3",
     "@typescript-eslint/eslint-plugin": "^8.59.0",
     "@typescript-eslint/parser": "^8.59.0",
+    "@webgpu/types": "^0.1.69",
     "autoprefixer": "^10.5.0",
     "babel-loader": "^10.1.1",
     "copy-webpack-plugin": "^14.0.0",
