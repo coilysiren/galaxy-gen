@@ -67,6 +67,7 @@ test: test-rust test-e2e ## Run all tests (rust + e2e)
 	docker build \
 		--progress plain \
 		--build-arg BUILDKIT_INLINE_CACHE=1 \
+		--build-arg SENTRY_DSN=$(SENTRY_DSN) \
 		--cache-from $(name):latest \
 		-t $(name):$(git-hash) \
 		-t $(name):latest \

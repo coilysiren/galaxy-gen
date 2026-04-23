@@ -44,6 +44,13 @@ COPY package.json package-lock.json ./
 COPY webpack.config.js postcss.config.js tsconfig.json ./
 RUN npm ci
 RUN npm install ./pkg --no-save
+
+# Sentry DSN is baked into the JS bundle at build time by webpack's
+# DefinePlugin (see webpack.config.js). Browser is the runtime, so a
+# k8s env var would be too late. Absent ARG = empty DSN = Sentry stays
+# disabled, which is the correct local/dev default.
+ARG SENTRY_DSN=""
+ENV SENTRY_DSN=${SENTRY_DSN}
 RUN npm run build
 
 # -----------------------------------------------------------------------------

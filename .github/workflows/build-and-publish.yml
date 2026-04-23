@@ -53,7 +53,14 @@ jobs:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
-      - run: name=coilysiren-galaxy-gen make .build-docker
+      # SENTRY_DSN is baked into the JS bundle at build time via webpack
+      # DefinePlugin. The GH secret is synced from /sentry-dsn/galaxy-gen in
+      # AWS SSM via `aws ssm get-parameter ... | gh secret set SENTRY_DSN`,
+      # same local-sync pattern as TS_OAUTH_*. See infrastructure/docs/k3s-deploy-notes.md.
+      - name: build docker
+        env:
+          SENTRY_DSN: ${{ secrets.SENTRY_DSN }}
+        run: name=coilysiren-galaxy-gen make .build-docker
       - run: docker tag coilysiren-galaxy-gen:latest ghcr.io/${{ github.repository }}/coilysiren-galaxy-gen:${{ github.sha }}
       - run: docker push ghcr.io/${{ github.repository }}/coilysiren-galaxy-gen:${{ github.sha }}
 

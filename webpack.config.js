@@ -1,4 +1,5 @@
 const CopyWebpackPlugin = require("copy-webpack-plugin");
+const webpack = require("webpack");
 const path = require("path");
 
 module.exports = {
@@ -38,6 +39,13 @@ module.exports = {
         { from: "src/js/index.html" },
         { from: "src/js/favicon.svg" },
       ],
+    }),
+    // Bake SENTRY_DSN into the bundle at build time. The browser is the
+    // runtime, so there is no later env-injection hook. Falls back to an
+    // empty string so the `if (process.env.SENTRY_DSN)` guard in index.js
+    // short-circuits cleanly when the var is unset (local dev).
+    new webpack.DefinePlugin({
+      "process.env.SENTRY_DSN": JSON.stringify(process.env.SENTRY_DSN || ""),
     }),
   ],
   mode: "development",
