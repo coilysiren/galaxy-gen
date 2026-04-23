@@ -110,8 +110,6 @@ export function Interface() {
   const [initialCondition, setInitialCondition] = React.useState<galaxy.InitialCondition>(
     galaxy.InitialCondition.Uniform
   );
-  const [backend, setBackend] = React.useState<galaxy.ComputeBackend>("cpu");
-  const [webgpuAvailable, setWebgpuAvailable] = React.useState(false);
   const [wasmReady, setWasmReady] = React.useState(false);
   const [initialized, setInitialized] = React.useState(false);
   const [tickCount, setTickCount] = React.useState(0);
@@ -142,7 +140,6 @@ export function Interface() {
   const renderedTickIdRef = React.useRef<number>(-1);
 
   React.useEffect(() => {
-    setWebgpuAvailable(galaxy.isWebGPUAvailable());
     wasm.then((module) => {
       wasmModuleRef.current = module;
       setWasmReady(true);
@@ -178,13 +175,6 @@ export function Interface() {
   const handleIntChange = (setter: (n: number) => void) => {
     return (event: React.ChangeEvent<HTMLInputElement>) => {
       const value = parseInt(event.target.value, 10);
-      setter(Number.isNaN(value) ? 0 : value);
-    };
-  };
-
-  const handleFloatChange = (setter: (n: number) => void) => {
-    return (event: React.ChangeEvent<HTMLInputElement>) => {
-      const value = parseFloat(event.target.value);
       setter(Number.isNaN(value) ? 0 : value);
     };
   };
@@ -244,17 +234,6 @@ export function Interface() {
       setSeed(effectiveSeed);
     }
     galaxyFrontendRef.current = new galaxy.Frontend(galaxySize);
-    // Re-apply the selected backend so Init doesn't silently revert to CPU.
-    // If WebGPU init fails here (e.g. lost device), we fall back to CPU
-    // and surface a console warning.
-    if (backend === "webgpu") {
-      galaxyFrontendRef.current
-        .enableWebGPU()
-        .catch((err) => {
-          console.warn("[webgpu] enable on init failed, staying on CPU:", err);
-          setBackend("cpu");
-        });
-    }
     dataviz.initViz(galaxyFrontendRef.current);
     dataviz.initData(galaxyFrontendRef.current);
     setInitialized(true);
@@ -289,10 +268,6 @@ export function Interface() {
     exposeForTests();
   };
 
-  const handleRandomizeSeed = () => {
-    setSeed(randomU64Seed().toString());
-  };
-
   const handleTickClick = async () => {
     if (!galaxyFrontendRef.current) {
       console.error("galaxy not yet initialized");
@@ -307,31 +282,6 @@ export function Interface() {
     dataviz.updateData(galaxyFrontendRef.current);
     setTickCount((n) => n + 1);
     exposeForTests();
-  };
-
-  const handleBackendChange = async (next: galaxy.ComputeBackend) => {
-    if (next === backend) return;
-    // Stop any in-flight run loop so we don't switch backends mid-tick.
-    if (runningRef.current) {
-      await stopLoop();
-    }
-    if (next === "webgpu") {
-      if (!galaxyFrontendRef.current) {
-        // No Frontend yet — just record the choice; Init applies it.
-        setBackend("webgpu");
-        return;
-      }
-      try {
-        await galaxyFrontendRef.current.enableWebGPU();
-        setBackend("webgpu");
-      } catch (err) {
-        console.warn("[webgpu] enable failed, staying on CPU:", err);
-        setBackend("cpu");
-      }
-    } else {
-      galaxyFrontendRef.current?.useCPU();
-      setBackend("cpu");
-    }
   };
 
   const handleResetView = () => {
@@ -365,34 +315,6 @@ export function Interface() {
     rafRef.current = requestAnimationFrame(renderLoop);
   }, []);
 
-  // Main-thread run loop used when the WebGPU backend is selected. The
-  // Web Worker can't drive the GPU path (worker has its own WASM instance
-  // and WebGPU isn't shareable across threads), so we tick in rAF and
-  // await the GPU force calc each frame.
-  const gpuRunLoop = React.useCallback(async () => {
-    if (!runningRef.current || !galaxyFrontendRef.current) return;
-    const t0 = performance.now();
-    await galaxyFrontendRef.current.tickAsync(timeModRef.current);
-    const elapsed = performance.now() - t0;
-    if (!runningRef.current || !galaxyFrontendRef.current) return;
-
-    dataviz.updateData(galaxyFrontendRef.current);
-    fpsSamplesRef.current.push(performance.now());
-    const cutoff = performance.now() - 1000;
-    while (
-      fpsSamplesRef.current.length > 0 &&
-      fpsSamplesRef.current[0] < cutoff
-    ) {
-      fpsSamplesRef.current.shift();
-    }
-    setFps(fpsSamplesRef.current.length);
-    setTickMs(elapsed);
-    setTickCount((n) => n + 1);
-    rafRef.current = requestAnimationFrame(() => {
-      void gpuRunLoop();
-    });
-  }, []);
-
   const handleRunToggle = async () => {
     if (!galaxyFrontendRef.current) return;
     if (runningRef.current) {
@@ -403,19 +325,7 @@ export function Interface() {
     latestSnapshotRef.current = null;
     renderedTickIdRef.current = -1;
 
-    if (backend === "webgpu") {
-      // Main-thread rAF loop: physics runs in WASM on the main thread,
-      // forces come from the GPU compute shader. No worker involved.
-      runningRef.current = true;
-      setRunning(true);
-      exposeForTests();
-      rafRef.current = requestAnimationFrame(() => {
-        void gpuRunLoop();
-      });
-      return;
-    }
-
-    // CPU backend: spin up (or reuse) the worker and hand it the current sim state.
+    // Spin up (or reuse) the worker and hand it the current sim state.
     if (!workerRef.current) {
       if (typeof Worker === "undefined") {
         console.error(
@@ -528,7 +438,7 @@ export function Interface() {
         </header>
 
         <section className="panel mb-8 p-6 md:p-8">
-          <div className="grid gap-4 md:grid-cols-3">
+          <div className="grid gap-4 md:grid-cols-2">
             <label className="block">
               <span className="input-label mb-1 block">Galaxy Size</span>
               <input
@@ -551,18 +461,7 @@ export function Interface() {
                 onChange={handleIntChange(setGalaxySeedMass)}
               />
             </label>
-            <label className="block">
-              <span className="input-label mb-1 block">Time Modifier</span>
-              <input
-                type="text"
-                className="input-field"
-                name="timeModifier"
-                data-testid="input-time-modifier"
-                value={timeModifier.toString()}
-                onChange={handleFloatChange(setTimeModifier)}
-              />
-            </label>
-            <label className="block md:col-span-3">
+            <label className="block md:col-span-2">
               <span className="input-label mb-1 block">Initial Condition</span>
               <select
                 className="input-field"
@@ -585,50 +484,6 @@ export function Interface() {
                 </option>
               </select>
             </label>
-            <label className="block md:col-span-3">
-              <span className="input-label mb-1 block">Compute Backend</span>
-              <select
-                className="input-field"
-                name="computeBackend"
-                data-testid="select-compute-backend"
-                value={backend}
-                onChange={(event) =>
-                  void handleBackendChange(event.target.value as galaxy.ComputeBackend)
-                }
-              >
-                <option value="cpu">cpu (rust barnes-hut, web worker)</option>
-                <option value="webgpu" disabled={!webgpuAvailable}>
-                  {webgpuAvailable
-                    ? "webgpu (compute shader, main thread)"
-                    : "webgpu (unavailable in this browser)"}
-                </option>
-              </select>
-            </label>
-          </div>
-
-          <div className="mt-4 grid gap-4 md:grid-cols-[1fr_auto]">
-            <label className="block">
-              <span className="input-label mb-1 block">Seed (u64, blank = random)</span>
-              <input
-                type="text"
-                className="input-field"
-                name="seed"
-                data-testid="input-seed"
-                placeholder="e.g. 42"
-                value={seed}
-                onChange={(e) => setSeed(e.target.value)}
-              />
-            </label>
-            <div className="flex items-end">
-              <button
-                type="button"
-                className="btn-plum"
-                data-testid="btn-randomize-seed"
-                onClick={handleRandomizeSeed}
-              >
-                randomize seed
-              </button>
-            </div>
           </div>
 
           <div className="mt-6 flex flex-wrap items-center gap-3">

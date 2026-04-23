@@ -48,7 +48,7 @@ test.describe("Galaxy Generator", () => {
     await expect(page.getByRole("heading", { name: "Galaxy Generator" })).toBeVisible();
     await expect(page.getByTestId("input-galaxy-size")).toHaveValue("50");
     await expect(page.getByTestId("input-seed-mass")).toHaveValue("25");
-    await expect(page.getByTestId("input-time-modifier")).toHaveValue("0.5");
+    await expect(page.getByTestId("stat-dt")).toHaveText("dt: 0.500");
     await expect(page.getByTestId("btn-init")).toBeVisible();
     await expect(page.getByTestId("btn-seed")).toBeVisible();
     await expect(page.getByTestId("btn-tick")).toBeVisible();
@@ -117,19 +117,6 @@ test.describe("Galaxy Generator", () => {
     expect(pctChanged).toBeGreaterThan(0.05);
   });
 
-  test("compute backend select is present with cpu + webgpu options", async ({ page }) => {
-    const select = page.getByTestId("select-compute-backend");
-    await expect(select).toBeVisible();
-    await expect(select).toHaveValue("cpu");
-
-    // Option list always contains both entries; webgpu may be disabled
-    // in environments where navigator.gpu is absent.
-    const optionValues = await select
-      .locator("option")
-      .evaluateAll((opts: HTMLOptionElement[]) => opts.map((o) => o.value));
-    expect(optionValues).toEqual(["cpu", "webgpu"]);
-  });
-
   test("webgpu backend ticks produce non-frozen simulation when available", async ({ page }) => {
     // Skip when the Chromium launch didn't expose navigator.gpu (older
     // versions, missing swiftshader, etc). CPU path is covered above.
@@ -139,10 +126,12 @@ test.describe("Galaxy Generator", () => {
     await page.getByTestId("btn-init").click();
     await page.getByTestId("btn-seed").click();
 
-    // Switch to WebGPU. The handler is async - give it a beat so the
-    // GPU device is live before we start ticking.
-    await page.getByTestId("select-compute-backend").selectOption("webgpu");
-    await page.waitForTimeout(200);
+    // Enable WebGPU directly on the exposed Frontend (the UI selector was
+    // removed; parity/smoke coverage still exercises the WGSL path).
+    await page.evaluate(async () => {
+      const fe: any = (window as any).__galaxyGen.frontend;
+      await fe.enableWebGPU();
+    });
 
     const snapshotBefore = await page.evaluate(() => {
       const fe: any = (window as any).__galaxyGen.frontend;
@@ -507,17 +496,17 @@ test.describe("Galaxy Generator", () => {
     await expect(host).toHaveAttribute("data-cam-zoom", "1.0000");
   });
 
-  test("url ?seed=… populates the seed input and init pushes full state to the URL", async ({
+  test("url query params flow into state and init pushes full state back to the URL", async ({
     page,
   }) => {
     await page.goto("/?seed=42&size=30&mass=10&dt=0.25");
     await waitForWasm(page);
 
-    // URL query params flow into the inputs on load.
-    await expect(page.getByTestId("input-seed")).toHaveValue("42");
+    // size/mass are still UI-visible; verify those. seed/dt are URL-only
+    // now and flow through state without a dedicated input.
     await expect(page.getByTestId("input-galaxy-size")).toHaveValue("30");
     await expect(page.getByTestId("input-seed-mass")).toHaveValue("10");
-    await expect(page.getByTestId("input-time-modifier")).toHaveValue("0.25");
+    await expect(page.getByTestId("stat-dt")).toHaveText("dt: 0.250");
 
     // After Init, the URL should carry all four params (shareable state).
     await page.getByTestId("btn-init").click();
@@ -529,10 +518,9 @@ test.describe("Galaxy Generator", () => {
   });
 
   test("same seed produces the same mass distribution (reproducible)", async ({ page }) => {
-    // First run.
-    await page.getByTestId("input-seed").fill("12345");
-    await page.getByTestId("input-galaxy-size").fill("20");
-    await page.getByTestId("input-seed-mass").fill("50");
+    // First run, seed from URL param.
+    await page.goto("/?seed=12345&size=20&mass=50");
+    await waitForWasm(page);
     await page.getByTestId("btn-init").click();
     await page.getByTestId("btn-seed").click();
     const first = await page.evaluate(() => {
@@ -541,11 +529,8 @@ test.describe("Galaxy Generator", () => {
     });
 
     // Second run with the same seed.
-    await page.goto("/");
+    await page.goto("/?seed=12345&size=20&mass=50");
     await waitForWasm(page);
-    await page.getByTestId("input-seed").fill("12345");
-    await page.getByTestId("input-galaxy-size").fill("20");
-    await page.getByTestId("input-seed-mass").fill("50");
     await page.getByTestId("btn-init").click();
     await page.getByTestId("btn-seed").click();
     const second = await page.evaluate(() => {
