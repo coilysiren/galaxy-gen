@@ -17,7 +17,7 @@
 //! internally reuses scratch buffers and moves the resulting arrays.
 
 use rand::rngs::StdRng;
-use rand::{Rng, SeedableRng};
+use rand::{Rng, RngExt, SeedableRng};
 use wasm_bindgen::prelude::*;
 
 /// Initial-condition presets selectable from the UI. Each produces a
