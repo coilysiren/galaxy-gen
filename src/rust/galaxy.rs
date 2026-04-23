@@ -301,6 +301,46 @@ impl Galaxy {
         next
     }
 
+    /// Tick path for external force providers (e.g. a WebGPU compute
+    /// shader that computes accelerations in JS). Skips `gravitate_all`
+    /// and uses the caller-supplied `acc_x` / `acc_y` (each length `n`)
+    /// as the per-cell acceleration for the integration step.
+    ///
+    /// Collisions and the semi-implicit Euler integrator are still done
+    /// on the CPU - this matches the Rust `tick()` behaviour exactly
+    /// aside from where the forces were computed.
+    ///
+    /// Mismatched slice lengths are defensively treated as zero-force
+    /// so a bad caller can't panic across the WASM boundary.
+    pub fn tick_with_accel(&self, time: f32, acc_x: &[f32], acc_y: &[f32]) -> Galaxy {
+        let n = self.n;
+        let mut next = Galaxy {
+            size: self.size,
+            n,
+            mass: self.mass.clone(),
+            acc_x: if acc_x.len() == n {
+                acc_x.to_vec()
+            } else {
+                vec![0.0; n]
+            },
+            acc_y: if acc_y.len() == n {
+                acc_y.to_vec()
+            } else {
+                vec![0.0; n]
+            },
+            vel_x: self.vel_x.clone(),
+            vel_y: self.vel_y.clone(),
+            frac_x: self.frac_x.clone(),
+            frac_y: self.frac_y.clone(),
+            xs_i: self.xs_i.clone(),
+            ys_i: self.ys_i.clone(),
+            inv_r3: self.inv_r3.clone(),
+            scratch_mass: vec![0; n],
+        };
+        next.apply_acceleration(time);
+        next
+    }
+
     /// Flat-buffer exposure for zero-copy JS reads via wasm.memory.
     pub fn mass_ptr(&self) -> *const u16 {
         self.mass.as_ptr()
@@ -1140,6 +1180,101 @@ mod tests_intial_generation {
         let third = g.mass.clone();
         assert_ne!(first, third);
         assert_ne!(second, third);
+    }
+
+    #[test]
+    fn test_tick_with_accel_no_panic() {
+        let g = Galaxy::new(8, 1).seed(1);
+        let n = g.n;
+        let acc_x = vec![0.1f32; n];
+        let acc_y = vec![-0.1f32; n];
+        let next = g.tick_with_accel(0.5, &acc_x, &acc_y);
+        assert_eq!(next.mass.len(), n);
+    }
+
+    #[test]
+    fn test_tick_with_accel_zero_forces_keeps_mass_total() {
+        // With zero forces, velocities don't grow so mass shouldn't
+        // redistribute in the first tick. Total mass must be preserved.
+        let g = Galaxy::new(6, 3).seed(0);
+        let before: u64 = g.mass.iter().map(|&m| m as u64).sum();
+        let n = g.n;
+        let zeros = vec![0.0f32; n];
+        let next = g.tick_with_accel(0.5, &zeros, &zeros);
+        let after: u64 = next.mass.iter().map(|&m| m as u64).sum();
+        assert_eq!(before, after);
+    }
+
+    #[test]
+    fn test_tick_with_accel_mismatched_slice_no_panic() {
+        // Caller-supplied slice length mismatch is treated as zero-force
+        // so a bad caller can't panic across the WASM boundary.
+        let g = Galaxy::new(4, 1);
+        let bad = vec![1.0f32; 3];
+        let _ = g.tick_with_accel(0.5, &bad, &bad);
+    }
+
+    #[test]
+    fn test_tick_with_accel_positive_x_force_moves_mass_right() {
+        // Sanity check the external-force path actually integrates forces
+        // in the right direction. Start with a single mass in the middle
+        // of an otherwise empty grid, then apply uniform +x-only ticks.
+        // The mass centroid must end up at a larger x column than it
+        // started. Uniform fill would be ambiguous under toroidal wrap.
+        let mut g = Galaxy::new(12, 0);
+        let start_col: i32 = 2;
+        let start_row: i32 = 6;
+        let start_idx = (start_row * 12 + start_col) as usize;
+        g.mass[start_idx] = 100;
+
+        let centroid_x = |g: &Galaxy| -> f64 {
+            let mut sum_mx: f64 = 0.0;
+            let mut sum_m: f64 = 0.0;
+            for i in 0..g.n {
+                let m = g.mass[i] as f64;
+                if m > 0.0 {
+                    let col = (i as u16 % g.size) as f64;
+                    sum_mx += col * m;
+                    sum_m += m;
+                }
+            }
+            if sum_m == 0.0 {
+                0.0
+            } else {
+                sum_mx / sum_m
+            }
+        };
+
+        let c0 = centroid_x(&g);
+
+        // Uniform +x force for a small number of ticks - enough to move
+        // but not enough to wrap around the 12-wide toroidal grid.
+        let n = g.n;
+        let ax = vec![5.0f32; n];
+        let ay = vec![0.0f32; n];
+        let mut cur = g;
+        for _ in 0..6 {
+            cur = cur.tick_with_accel(0.5, &ax, &ay);
+        }
+
+        let c1 = centroid_x(&cur);
+        assert!(
+            c1 > c0,
+            "uniform +x force should push centroid right: before={c0}, after={c1}"
+        );
+    }
+
+    #[test]
+    fn test_tick_with_accel_matches_tick_when_forces_are_zero() {
+        // With zero external forces AND zero existing velocity, nothing
+        // moves: mass field must be identical after one tick.
+        let g = Galaxy::new(8, 2).seed(42);
+        let n = g.n;
+        let zeros = vec![0.0f32; n];
+
+        let no_force = g.tick_with_accel(0.5, &zeros, &zeros);
+
+        assert_eq!(no_force.mass, g.mass);
     }
 }
 
