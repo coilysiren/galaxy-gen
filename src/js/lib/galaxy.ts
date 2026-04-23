@@ -1,4 +1,5 @@
 import * as wasm from "galaxy_gen_backend/galaxy_gen_backend";
+import { WebGPUForceBackend, isWebGPUAvailable as _isWebGPUAvailable } from "./webgpu";
 
 export interface Cell {
   mass: number;
@@ -14,6 +15,10 @@ export enum InitialCondition {
   Bang = 2,
   Collision = 3,
 }
+
+export type ComputeBackend = "cpu" | "webgpu";
+
+export const isWebGPUAvailable = _isWebGPUAvailable;
 
 /**
  * Thin JS wrapper over the Rust/WASM Galaxy. `massArray()` returns a
@@ -36,9 +41,40 @@ export class Frontend {
   // fresh data without having to re-enter WASM on the main thread.
   private overrideMass: Uint16Array | null = null;
 
+  // Backend selection. CPU path goes through `Galaxy.tick`; WebGPU path
+  // computes forces in WGSL and hands accelerations to `Galaxy.tick_with_accel`.
+  private backend: ComputeBackend = "cpu";
+  private gpuBackend: WebGPUForceBackend | null = null;
+
   constructor(galaxySize: number) {
     this.galaxy = new wasm.Galaxy(galaxySize, 0);
     this.galaxySize = galaxySize;
+  }
+
+  /**
+   * Enable the WebGPU backend. Throws if WebGPU is unavailable or device
+   * init fails; the frontend stays on the previous backend in that case
+   * so the caller can fall back cleanly.
+   */
+  public async enableWebGPU(): Promise<void> {
+    const result = await WebGPUForceBackend.create();
+    if (!result.ok || !result.backend) {
+      throw new Error(result.reason ?? "webgpu unavailable");
+    }
+    this.gpuBackend = result.backend;
+    this.backend = "webgpu";
+  }
+
+  public useCPU(): void {
+    this.backend = "cpu";
+    if (this.gpuBackend) {
+      this.gpuBackend.destroy();
+      this.gpuBackend = null;
+    }
+  }
+
+  public currentBackend(): ComputeBackend {
+    return this.backend;
   }
 
   public seed(additionalMass: number, mode: InitialCondition = InitialCondition.Uniform): void {
@@ -71,6 +107,32 @@ export class Frontend {
     const next = this.galaxy.tick(timeModifier);
     this.galaxy.free();
     this.galaxy = next;
+  }
+
+  /**
+   * Async tick routed through the currently selected backend. CPU falls
+   * through to the sync `tick()`. WebGPU computes accelerations on the
+   * GPU and hands them to the Rust integrator via `tick_with_accel`. On
+   * GPU failure we log a warning, fall back to CPU permanently, and
+   * still advance the sim via the sync tick path.
+   */
+  public async tickAsync(timeModifier: number): Promise<void> {
+    if (this.backend === "cpu" || !this.gpuBackend) {
+      this.tick(timeModifier);
+      return;
+    }
+    try {
+      this.overrideMass = null;
+      const mass = this.galaxy.mass();
+      const { acc_x, acc_y } = await this.gpuBackend.computeAccelerations(mass, this.galaxySize);
+      const next = this.galaxy.tick_with_accel(timeModifier, acc_x, acc_y);
+      this.galaxy.free();
+      this.galaxy = next;
+    } catch (err) {
+      console.warn("[webgpu] tick failed, falling back to CPU:", err);
+      this.useCPU();
+      this.tick(timeModifier);
+    }
   }
 
   /** Fast path for the renderer — one memcpy, no per-cell object churn. */
