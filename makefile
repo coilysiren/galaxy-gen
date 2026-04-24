@@ -90,6 +90,7 @@ publish: build-docker .publish ## Push the image to GHCR
 		DNS_NAME=$(dns-name) \
 		IMAGE=$(image-url) \
 		envsubst < deploy/main.yml | kubectl apply -f -
+	kubectl rollout status deployment/$(name-dashed)-app -n $(name-dashed) --timeout=5m
 
 # Stream the rendered manifest over Tailscale SSH and apply on kai-server.
 # Fallback path when the tailnet kubectl route is unavailable.
