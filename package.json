@@ -40,7 +40,6 @@
     "autoprefixer": "^10.5.0",
     "babel-loader": "^10.1.1",
     "copy-webpack-plugin": "^14.0.0",
-    "crypto-browserify": "^3.12.1",
     "css-loader": "^7.1.4",
     "d3": "^7.9.0",
     "eslint": "^9.39.4",
@@ -62,5 +61,8 @@
   },
   "dependencies": {
     "@sentry/browser": "^10.50.0"
+  },
+  "overrides": {
+    "uuid": "^14.0.0"
   }
 }

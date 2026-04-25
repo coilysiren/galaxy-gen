@@ -16,9 +16,6 @@ module.exports = {
     // Follow symlinks so edits to the wasm-pack output under pkg/
     // (linked into node_modules/galaxy_gen_backend) trigger rebuilds.
     symlinks: false,
-    fallback: {
-      crypto: require.resolve("crypto-browserify"),
-    },
   },
   module: {
     rules: [
