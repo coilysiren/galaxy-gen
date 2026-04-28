@@ -70,3 +70,14 @@ GitHub Actions (`.github/workflows/action.yml`) runs three jobs on push/PR to `m
 - `rust` - `cargo build` / `check` / `test` / `wasm-pack build`
 - `js` - `wasm-pack build` / `npm ci` / `npm run build`
 - `e2e` - `wasm-pack build` / `npm ci` / `playwright test` (uploads HTML report artifact on failure)
+
+---
+
+## Post-push follow-up (auto-schedule)
+
+Per the workspace "Default to proactive scheduling" rule: after pushing to `main`, schedule a wake-up to verify the build-publish-deploy job landed on kai-server. CI builds the docker image, pushes to ghcr.io, and rolls out a k8s deployment; total time is ~6-12 min.
+
+- **Cadence**: 720s (12 min) after push.
+- **Verify CI**: `coily gh run list --repo coilysiren/galaxy-gen --limit 1` should show `completed/success`. Re-schedule once at +300s if in progress; surface and stop on failure.
+- **Verify rollout**: `coily kubectl --context=kai-server -n coilysiren-galaxy-gen rollout status deployment/coilysiren-galaxy-gen-app --timeout=2m`.
+- **Skip** for docs-only pushes.
