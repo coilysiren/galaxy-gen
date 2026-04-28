@@ -111,3 +111,32 @@ jobs:
               client-key-data: ${{ secrets.K8S_CLIENT_KEY_DATA }}
           EOF
       - run: make .deploy
+      - name: rollout status
+        env:
+          NS: coilysiren-galaxy-gen
+          DEP: coilysiren-galaxy-gen-app
+        run: kubectl -n "$NS" rollout status deployment/"$DEP" --timeout=10m
+      - name: rollout diagnostics on failure
+        if: failure()
+        env:
+          NS: coilysiren-galaxy-gen
+          DEP: coilysiren-galaxy-gen-app
+        run: |
+          echo "::group::pods"
+          kubectl -n "$NS" get pods -o wide || true
+          echo "::endgroup::"
+          echo "::group::describe deployment"
+          kubectl -n "$NS" describe deployment "$DEP" || true
+          echo "::endgroup::"
+          echo "::group::describe pods"
+          kubectl -n "$NS" describe pods -l app="$DEP" || true
+          echo "::endgroup::"
+          echo "::group::events"
+          kubectl -n "$NS" get events --sort-by=.lastTimestamp | tail -50 || true
+          echo "::endgroup::"
+          echo "::group::logs (current)"
+          kubectl -n "$NS" logs --tail=200 -l app="$DEP" --all-containers=true || true
+          echo "::endgroup::"
+          echo "::group::logs (previous)"
+          kubectl -n "$NS" logs --tail=200 -l app="$DEP" --all-containers=true --previous || true
+          echo "::endgroup::"
