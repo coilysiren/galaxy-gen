@@ -8,3 +8,14 @@ repos:
         language: system
         pass_filenames: false
         stages: [pre-commit, pre-push]
+
+  - repo: local
+    hooks:
+      - id: coily-trailer
+        name: coily audit-log trailer
+        description: Append Audit-log trailers to the commit message based on coily's audit log for this repo.
+        entry: coily git trailer-hook
+        language: system
+        stages: [prepare-commit-msg]
+        always_run: true
+        require_serial: true
