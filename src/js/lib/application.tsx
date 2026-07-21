@@ -129,6 +129,7 @@ export function Interface() {
     stars: Float32Array;
     transients: Float32Array;
     snCount: number;
+    lensScale: number;
   } | null>(null);
   const renderedTickIdRef = React.useRef<number>(-1);
 
@@ -277,6 +278,7 @@ export function Interface() {
       galaxyFrontendRef.current.setOverrideMass(snap.mass);
       galaxyFrontendRef.current.setOverrideStars(snap.stars);
       galaxyFrontendRef.current.setOverrideTransients(snap.transients);
+      galaxyFrontendRef.current.setOverrideLensScale(snap.lensScale);
       dataviz.updateData(galaxyFrontendRef.current, snap.tickId);
       setStarCount(snap.stars.length / 4);
       setSnCount(snap.snCount);
@@ -315,7 +317,7 @@ export function Interface() {
         return;
       }
       workerRef.current = new galaxy.TickWorker(
-        (mass, tickMs, tickId, stars, transients, snCount) => {
+        (mass, tickMs, tickId, stars, transients, snCount, lensScale) => {
           latestSnapshotRef.current = {
             mass,
             tickMs,
@@ -323,6 +325,7 @@ export function Interface() {
             stars,
             transients,
             snCount,
+            lensScale,
           };
         },
       );

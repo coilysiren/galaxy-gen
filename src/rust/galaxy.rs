@@ -48,10 +48,17 @@ pub struct Galaxy {
     events: EventQueue,
 
     pub(crate) stars: Stars,
-    /// Central black hole point mass, set at seed time. Participates in
+    /// Central black hole point mass, set at seed time and live
+    /// thereafter: it grows by accreting core gas and capturing stars,
+    /// and shrinks by (exaggerated) Hawking evaporation. Participates in
     /// the coarse gravity field (stars feel it); the gas force kernels
     /// predate it and stay untouched to preserve their tuning.
     bh_mass: f32,
+    /// Seed-time black hole mass; the renderer scales the lens depth by
+    /// sqrt(bh_mass / bh_mass_initial).
+    bh_mass_initial: f32,
+    /// Mass lost to Hawking radiation - a ledger sink like dissipation.
+    radiated_total: f64,
     /// Coarse acceleration field (FIELD_RES x FIELD_RES over the world),
     /// rebuilt by process_gravity_field, bilinear-sampled by stars.
     field_ax: Vec<f32>,
@@ -197,6 +204,24 @@ impl Galaxy {
     /// Renderer transient window (ticks) for executed-event flashes.
     const TRANSIENT_WINDOW: u64 = 90;
 
+    // Black hole lifecycle. Accretion eats a fraction of the gas within
+    // BH_ACCRETION_RADIUS of the center each run; stars inside
+    // BH_CAPTURE_RADIUS are swallowed via BlackHoleCapture events.
+    // Hawking evaporation follows the physically-shaped dM/dt =
+    // -HAWKING_COEFF / M^2 (small holes evaporate in a runaway, big
+    // ones barely leak), with the coefficient exaggerated enormously -
+    // a real stellar-mass hole radiates nanokelvins and would outlive
+    // 10^60 sessions.
+    const BH_ACCRETION_RADIUS: i32 = 2;
+    const BH_ACCRETION_FRACTION: f32 = 0.01;
+    /// Capture needs BOTH deep proximity and low speed - fast stars
+    /// slingshot through the center, only slow ones fall in. Without the
+    /// speed gate every orbit through the core re-rolls the capture dice
+    /// and the hole eats the galaxy.
+    const BH_CAPTURE_RADIUS: f32 = 0.5;
+    const BH_CAPTURE_MAX_SPEED: f32 = 0.8;
+    const HAWKING_COEFF: f32 = 12_000.0;
+
     // RNG stream ids (see rng_stream).
     const RNG_COLLAPSE_WATCH: u64 = 1;
     const RNG_STAR_BIRTH: u64 = 2;
@@ -251,6 +276,8 @@ impl Galaxy {
             events: EventQueue::new(),
             stars: Stars::new(),
             bh_mass: 0.0,
+            bh_mass_initial: 0.0,
+            radiated_total: 0.0,
             field_ax: vec![0.0; Galaxy::FIELD_RES * Galaxy::FIELD_RES],
             field_ay: vec![0.0; Galaxy::FIELD_RES * Galaxy::FIELD_RES],
             radiation: vec![0.0; Galaxy::FIELD_RES * Galaxy::FIELD_RES],
@@ -410,6 +437,8 @@ impl Galaxy {
         g.events = EventQueue::new();
         g.stars = Stars::new();
         g.bh_mass = total_mass as f32 * Galaxy::BH_MASS_FRACTION;
+        g.bh_mass_initial = g.bh_mass;
+        g.radiated_total = 0.0;
         g.radiation = vec![0.0; Galaxy::FIELD_RES * Galaxy::FIELD_RES];
         g.collapse_heat = vec![0; self.n];
         g.dissipated_total = 0;
@@ -523,6 +552,19 @@ impl Galaxy {
         out
     }
 
+    pub fn bh_mass_value(&self) -> f32 {
+        self.bh_mass
+    }
+
+    /// Lens-depth scale for the renderer: sqrt of the black hole's mass
+    /// relative to its seeded mass. 0 once the hole has evaporated.
+    pub fn bh_lens_scale(&self) -> f32 {
+        if self.bh_mass_initial <= 0.0 {
+            return 0.0;
+        }
+        (self.bh_mass / self.bh_mass_initial).max(0.0).sqrt()
+    }
+
     /// Executed-event count by kind index (EventKind discriminant).
     /// Instrumentation surface for debug_sim and the UI stats row.
     pub fn events_executed(&self, kind: u32) -> u64 {
@@ -532,6 +574,7 @@ impl Galaxy {
             1 => StarBirth,
             2 => Supernova,
             3 => ShockWave,
+            5 => BlackHoleCapture,
             _ => CloudDissipate,
         };
         self.events.executed_count(k)
@@ -569,19 +612,24 @@ impl Galaxy {
         self.radiation.copy_from_slice(&data[res * 2..]);
     }
 
-    /// Versioned scheduler/event/RNG state: [version=3, tick lo/hi, seed
-    /// lo/hi, bh_mass bits, dissipated lo/hi, next_cluster, next_star,
-    /// n_cells, heat bytes packed 4-per-u32, heat_parent lo/hi per cell,
-    /// then the event-queue flat form]. Opaque to JS.
+    /// Versioned scheduler/event/RNG state: [version=4, tick lo/hi, seed
+    /// lo/hi, bh_mass bits, bh_initial bits, radiated f64 bits lo/hi,
+    /// dissipated lo/hi, next_cluster, next_star, n_cells, heat bytes
+    /// packed 4-per-u32, heat_parent lo/hi per cell, then the
+    /// event-queue flat form]. Opaque to JS.
     pub fn sim_state_meta(&self) -> Vec<u32> {
         let heat_words = self.n.div_ceil(4);
-        let mut out = Vec::with_capacity(11 + heat_words + self.n * 2 + 6);
-        out.push(3u32);
+        let mut out = Vec::with_capacity(14 + heat_words + self.n * 2 + 6);
+        out.push(4u32);
         out.push(self.tick_count as u32);
         out.push((self.tick_count >> 32) as u32);
         out.push(self.master_seed as u32);
         out.push((self.master_seed >> 32) as u32);
         out.push(self.bh_mass.to_bits());
+        out.push(self.bh_mass_initial.to_bits());
+        let rad_bits = self.radiated_total.to_bits();
+        out.push(rad_bits as u32);
+        out.push((rad_bits >> 32) as u32);
         out.push(self.dissipated_total as u32);
         out.push((self.dissipated_total >> 32) as u32);
         out.push(self.next_cluster_id);
@@ -603,27 +651,30 @@ impl Galaxy {
     }
 
     pub fn restore_sim_state_meta(&mut self, data: &[u32]) {
-        if data.len() < 11 || data[0] != 3 {
+        if data.len() < 14 || data[0] != 4 {
             return;
         }
         self.tick_count = data[1] as u64 | ((data[2] as u64) << 32);
         self.master_seed = data[3] as u64 | ((data[4] as u64) << 32);
         self.bh_mass = f32::from_bits(data[5]);
-        self.dissipated_total = data[6] as u64 | ((data[7] as u64) << 32);
-        self.next_cluster_id = data[8];
-        self.next_star_id = data[9];
-        let n_cells = data[10] as usize;
+        self.bh_mass_initial = f32::from_bits(data[6]);
+        self.radiated_total =
+            f64::from_bits(data[7] as u64 | ((data[8] as u64) << 32));
+        self.dissipated_total = data[9] as u64 | ((data[10] as u64) << 32);
+        self.next_cluster_id = data[11];
+        self.next_star_id = data[12];
+        let n_cells = data[13] as usize;
         if n_cells != self.n {
             return;
         }
         let heat_words = n_cells.div_ceil(4);
-        let parents_at = 11 + heat_words;
+        let parents_at = 14 + heat_words;
         let events_at = parents_at + n_cells * 2;
         if data.len() < events_at {
             return;
         }
         for i in 0..n_cells {
-            let w = data[11 + i / 4];
+            let w = data[14 + i / 4];
             self.collapse_heat[i] = ((w >> (8 * (i % 4))) & 0xFF) as u8;
         }
         for i in 0..n_cells {
@@ -1073,6 +1124,99 @@ impl Galaxy {
         }
     }
 
+    /// The black hole feeds: a fraction of nearby core gas accretes each
+    /// run, and stars inside the capture radius are marked for capture
+    /// (the swallow itself is a BlackHoleCapture event next tick).
+    pub(crate) fn process_bh_accretion(&mut self, _time: f32) {
+        if self.bh_mass <= 0.0 {
+            return;
+        }
+        let size = self.size as i32;
+        let c = size / 2;
+        for dr in -Galaxy::BH_ACCRETION_RADIUS..=Galaxy::BH_ACCRETION_RADIUS {
+            for dc in -Galaxy::BH_ACCRETION_RADIUS..=Galaxy::BH_ACCRETION_RADIUS {
+                if dc * dc + dr * dr > Galaxy::BH_ACCRETION_RADIUS * Galaxy::BH_ACCRETION_RADIUS
+                {
+                    continue;
+                }
+                let i = self.col_row_to_index(
+                    wrap(c + dc, size) as u16,
+                    wrap(c + dr, size) as u16,
+                ) as usize;
+                let m = self.mass[i];
+                if m == 0 {
+                    continue;
+                }
+                let take = ((m as f32 * Galaxy::BH_ACCRETION_FRACTION) as u16).min(m);
+                if take == 0 {
+                    continue;
+                }
+                self.mass[i] -= take;
+                self.bh_mass += take as f32;
+            }
+        }
+        let center = self.size as f32 * 0.5;
+        let cap_sq = Galaxy::BH_CAPTURE_RADIUS * Galaxy::BH_CAPTURE_RADIUS;
+        let tick = self.tick_count;
+        let speed_sq = Galaxy::BH_CAPTURE_MAX_SPEED * Galaxy::BH_CAPTURE_MAX_SPEED;
+        for i in 0..self.stars.len() {
+            let dx = self.stars.pos_x[i] - center;
+            let dy = self.stars.pos_y[i] - center;
+            let vx = self.stars.vel_x[i];
+            let vy = self.stars.vel_y[i];
+            if dx * dx + dy * dy <= cap_sq && vx * vx + vy * vy <= speed_sq {
+                self.events.emit(
+                    tick,
+                    crate::events::EventKind::BlackHoleCapture,
+                    self.stars.id[i],
+                    crate::events::NO_REF,
+                    self.stars.mass[i],
+                    crate::events::NO_PARENT,
+                );
+            }
+        }
+    }
+
+    /// Hawking evaporation: dM = -HAWKING_COEFF / M^2 per sim-time unit.
+    /// Negligible while the hole is fat, runaway once it gets small -
+    /// the shape of the real thing, at a wildly exaggerated rate. The
+    /// radiated mass leaves the baryonic ledger through radiated_total
+    /// and heats the core radiation field on its way out.
+    pub(crate) fn process_bh_evaporation(&mut self, time: f32) {
+        if self.bh_mass <= 0.0 {
+            return;
+        }
+        let elapsed = time * 8.0;
+        let loss = (Galaxy::HAWKING_COEFF / (self.bh_mass * self.bh_mass) * elapsed)
+            .min(self.bh_mass);
+        self.bh_mass -= loss;
+        self.radiated_total += loss as f64;
+        if self.bh_mass < 1.0 {
+            // Final flash: the last scrap evaporates entirely.
+            self.radiated_total += self.bh_mass as f64;
+            self.bh_mass = 0.0;
+        }
+        let res = Galaxy::FIELD_RES;
+        self.radiation[(res / 2) * res + res / 2] += loss * 0.5;
+    }
+
+    /// Swallow a captured star, re-checked loosely against the capture
+    /// radius since a tick passed between emission and execution.
+    fn handle_bh_capture(&mut self, ev: &Event) {
+        let Some(i) = self.stars.index_of_id(ev.source) else {
+            return;
+        };
+        let center = self.size as f32 * 0.5;
+        let dx = self.stars.pos_x[i] - center;
+        let dy = self.stars.pos_y[i] - center;
+        let slack = Galaxy::BH_CAPTURE_RADIUS * 2.0;
+        if dx * dx + dy * dy > slack * slack {
+            return;
+        }
+        self.bh_mass += self.stars.mass[i];
+        self.stars.swap_remove(i);
+    }
+
     /// Execute this tick's due events in stable order. Handlers may emit
     /// follow-up events, which land next tick by construction.
     fn execute_events(&mut self, due: Vec<Event>, _time: f32) {
@@ -1083,6 +1227,7 @@ impl Galaxy {
                 crate::events::EventKind::Supernova => self.handle_supernova(&ev),
                 crate::events::EventKind::ShockWave => self.handle_shock_wave(&ev),
                 crate::events::EventKind::CloudDissipate => {}
+                crate::events::EventKind::BlackHoleCapture => self.handle_bh_capture(&ev),
             }
             self.events.record_executed(ev);
         }
@@ -1220,11 +1365,16 @@ impl Galaxy {
             .sum()
     }
 
-    /// Baryonic ledger: gas + stars + in-flight births + dissipated sink.
+    /// Baryonic ledger: gas + stars + in-flight births + the black hole
+    /// + the dissipated and radiated sinks.
     pub(crate) fn baryonic_total(&self) -> f64 {
         let gas: f64 = self.mass.iter().map(|&m| m as f64).sum();
         let stars: f64 = self.stars.mass.iter().map(|&m| m as f64).sum();
-        gas + stars + self.pending_birth_mass() + self.dissipated_total as f64
+        gas + stars
+            + self.pending_birth_mass()
+            + self.dissipated_total as f64
+            + self.bh_mass as f64
+            + self.radiated_total
     }
 
     /// Stateless per-(process, tick) RNG stream. Derivation depends only
@@ -2135,11 +2285,12 @@ mod tests_golden {
         h
     }
 
-    /// Phase-0 acceptance: re-expressing the tick as registered processes
-    /// changed nothing. Golden values captured on the pre-registry
-    /// pipeline (uniform seed 42 / bang seed 7, size 50, 100 ticks at
-    /// dt 0.5). If a deliberate physics change lands, recapture and say
-    /// so in the commit.
+    /// Golden values pin the mass field after 100 ticks (uniform seed 42
+    /// / bang seed 7, size 50, dt 0.5). Bang recaptured when black-hole
+    /// accretion landed (its dense core feeds the hole inside the golden
+    /// window; uniform's cells are light enough that the integer take
+    /// rounds to zero there). If another deliberate change lands,
+    /// recapture and say so in the commit.
     #[test]
     fn test_golden_uniform_mass_field() {
         let mut g = Galaxy::new(50, 0).seed_with_mode_seeded(25, InitialCondition::Uniform, 42);
@@ -2155,7 +2306,7 @@ mod tests_golden {
         for _ in 0..100 {
             g = g.tick(0.5);
         }
-        assert_eq!(mass_hash(&g), 18166966706675598303);
+        assert_eq!(mass_hash(&g), 9442849267090298022);
     }
 
     #[test]
@@ -2387,6 +2538,53 @@ mod tests_causal_loop {
             g.events.executed_count(EventKind::StarBirth),
             g.events.executed_count(EventKind::Supernova),
             g.events.executed_count(EventKind::ShockWave),
+        );
+    }
+}
+
+#[cfg(test)]
+mod tests_black_hole {
+    use super::*;
+    use crate::events::EventKind;
+
+    #[test]
+    fn test_capture_swallows_a_central_star_and_ledger_holds() {
+        let mut g = Galaxy::new(50, 0).seed_with_mode_seeded(25, InitialCondition::Uniform, 42);
+        let initial = g.baryonic_total();
+        let bh0 = g.bh_mass_value();
+        g.spawn_star(25.2, 25.2, 0.0, 0.0, 40.0);
+        for _ in 0..40 {
+            g = g.tick(0.5);
+        }
+        assert_eq!(g.star_count(), 0, "central star must be swallowed");
+        assert!(g.events.executed_count(EventKind::BlackHoleCapture) > 0);
+        assert!(g.bh_mass_value() > bh0, "the hole must grow from the meal");
+        assert!(
+            (g.baryonic_total() - (initial + 40.0)).abs() < 1.0,
+            "ledger must account the swallowed star"
+        );
+    }
+
+    #[test]
+    fn test_hawking_evaporation_runs_away_for_a_small_hole() {
+        // Small seeded mass -> small hole. dM/dt = -H/M^2 barely leaks
+        // while fat and runs away once small - it must fully evaporate,
+        // land in the radiated sink, and take the lens with it.
+        let mut g = Galaxy::new(20, 0).seed_with_mode_seeded(2, InitialCondition::Uniform, 7);
+        let bh0 = g.bh_mass_value();
+        assert!(bh0 > 0.0 && bh0 < 100.0, "test wants a small hole, got {bh0}");
+        let initial = g.baryonic_total();
+        for _ in 0..2000 {
+            g = g.tick(0.5);
+            if g.bh_mass_value() == 0.0 {
+                break;
+            }
+        }
+        assert_eq!(g.bh_mass_value(), 0.0, "small hole must evaporate away");
+        assert_eq!(g.bh_lens_scale(), 0.0, "no hole, no lens");
+        assert!(
+            (g.baryonic_total() - initial).abs() < 2.0,
+            "radiated sink must close the ledger"
         );
     }
 }

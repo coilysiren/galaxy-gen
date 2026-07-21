@@ -20,6 +20,7 @@ pub enum StateKey {
     StarLifecycle,
     CollapseWatch,
     EventQueue,
+    BlackHole,
 }
 
 pub struct ProcessDescriptor {
@@ -120,6 +121,28 @@ static REGISTRY: &[ProcessDescriptor] = &[
         run: Galaxy::process_stellar_aging,
     },
     ProcessDescriptor {
+        // The hole feeds: core gas accretion plus BlackHoleCapture
+        // emission for stars inside the capture radius.
+        name: "bh_accretion",
+        reads: &[StateKey::GasMass, StateKey::StarKinematics, StateKey::BlackHole],
+        writes: &[StateKey::GasMass, StateKey::BlackHole, StateKey::EventQueue],
+        requires_fresh: &[],
+        cadence: 8,
+        phase_offset: 2,
+        run: Galaxy::process_bh_accretion,
+    },
+    ProcessDescriptor {
+        // Hawking evaporation - the shrink half of the lifecycle. Feeds
+        // the radiated ledger sink and heats the core radiation field.
+        name: "bh_evaporation",
+        reads: &[StateKey::BlackHole],
+        writes: &[StateKey::BlackHole, StateKey::RadiationField],
+        requires_fresh: &[],
+        cadence: 8,
+        phase_offset: 6,
+        run: Galaxy::process_bh_evaporation,
+    },
+    ProcessDescriptor {
         // Emits CloudDissipate; feeds the dissipated ledger sink.
         name: "gas_dissipation",
         reads: &[StateKey::GasMass, StateKey::RadiationField],
@@ -193,6 +216,8 @@ mod tests_graph {
                 "radiation_field",
                 "collapse_watch",
                 "stellar_aging",
+                "bh_accretion",
+                "bh_evaporation",
                 "gas_dissipation",
             ]
         );

@@ -95,6 +95,7 @@ interface State {
   lastMass: Uint16Array | null;
   lastStars: Float32Array | null;
   lastTransients: Float32Array | null;
+  lastLensScale: number;
   cleanup: () => void;
 }
 
@@ -265,6 +266,7 @@ export function initViz(galaxyFrontend: galaxy.Frontend) {
     lastMass: null,
     lastStars: null,
     lastTransients: null,
+    lastLensScale: 1,
     cleanup,
   };
   publishCamera(state);
@@ -283,6 +285,7 @@ export function updateData(galaxyFrontend: galaxy.Frontend, simTick?: number) {
   state.lastMass = mass.slice();
   state.lastStars = galaxyFrontend.starRenderArray().slice();
   state.lastTransients = galaxyFrontend.transientsArray().slice();
+  state.lastLensScale = galaxyFrontend.lensScale();
   drawFrame(state, state.lastMass);
 }
 
@@ -362,9 +365,11 @@ function drawFrame(s: State, mass: Uint16Array) {
 function applyBlackHoleLens(s: State) {
   const { ctx, canvas, size, scale, camera, dpr } = s;
   // Black hole sits at the world center = canvas center pre-camera.
+  // Lens depth follows the hole's live mass: it deepens as the hole
+  // feeds and vanishes if Hawking evaporation finishes it off.
   const cssX = camera.zoom * (CANVAS / 2) + camera.tx;
   const cssY = camera.zoom * (CANVAS / 2) + camera.ty;
-  const thetaCss = LENS_THETA_E_FRAC * size * scale * camera.zoom;
+  const thetaCss = LENS_THETA_E_FRAC * size * scale * camera.zoom * s.lastLensScale;
   const bx = cssX * dpr;
   const by = cssY * dpr;
   const te = thetaCss * dpr;

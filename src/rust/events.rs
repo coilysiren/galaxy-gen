@@ -16,7 +16,11 @@ pub enum EventKind {
     Supernova = 2,
     ShockWave = 3,
     CloudDissipate = 4,
+    /// A star crossed the central black hole's capture radius.
+    BlackHoleCapture = 5,
 }
+
+pub const EVENT_KIND_COUNT: usize = 6;
 
 /// No-source / no-target / no-parent sentinels.
 pub const NO_REF: u32 = u32::MAX;
@@ -54,7 +58,7 @@ pub struct EventQueue {
     seq_tick: u64,
     seq_in_tick: u32,
     /// Per-kind executed-event counters for instrumentation.
-    executed_counts: [u64; 5],
+    executed_counts: [u64; EVENT_KIND_COUNT],
 }
 
 impl EventQueue {
@@ -66,7 +70,7 @@ impl EventQueue {
             next_id: 1,
             seq_tick: 0,
             seq_in_tick: 0,
-            executed_counts: [0; 5],
+            executed_counts: [0; EVENT_KIND_COUNT],
         }
     }
 
@@ -205,6 +209,7 @@ fn kind_from_u32(v: u32) -> EventKind {
         1 => EventKind::StarBirth,
         2 => EventKind::Supernova,
         3 => EventKind::ShockWave,
+        5 => EventKind::BlackHoleCapture,
         _ => EventKind::CloudDissipate,
     }
 }

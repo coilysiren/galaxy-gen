@@ -25,6 +25,7 @@ export class Frontend {
   private overrideMass: Uint16Array | null = null;
   private overrideStars: Float32Array | null = null;
   private overrideTransients: Float32Array | null = null;
+  private overrideLensScale: number | null = null;
   // CPU uses `Galaxy.tick`; WebGPU uses `tick_with_accel` after WGSL forces.
   private backend: ComputeBackend = "cpu";
   private gpuBackend: WebGPUForceBackend | null = null;
@@ -134,6 +135,15 @@ export class Frontend {
     return Number(this.galaxy.events_executed(2));
   }
 
+  /** Lens depth relative to the seeded black hole; 0 = evaporated. */
+  public lensScale(): number {
+    return this.overrideLensScale ?? this.galaxy.bh_lens_scale();
+  }
+
+  public setOverrideLensScale(v: number): void {
+    this.overrideLensScale = v;
+  }
+
   /** Debug/test spawn; production stars come from StarBirth events. */
   public spawnStar(x: number, y: number, vx: number, vy: number, mass: number): number {
     this.overrideStars = null;
@@ -236,6 +246,7 @@ export class TickWorker {
     stars: Float32Array,
     transients: Float32Array,
     snCount: number,
+    lensScale: number,
   ) => void;
   private stopResolver: ((state: StoppedState | null) => void) | null = null;
 
@@ -247,6 +258,7 @@ export class TickWorker {
       stars: Float32Array,
       transients: Float32Array,
       snCount: number,
+      lensScale: number,
     ) => void,
   ) {
     if (typeof Worker === "undefined") {
@@ -272,6 +284,7 @@ export class TickWorker {
         msg.stars,
         msg.transients,
         msg.snCount,
+        msg.lensScale,
       );
     } else if (msg.type === "stopped") {
       if (!this.stopResolver) return;

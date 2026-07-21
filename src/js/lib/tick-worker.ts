@@ -79,6 +79,7 @@ function runOneTick() {
     stars,
     transients,
     snCount: Number(galaxy.events_executed(2)),
+    lensScale: galaxy.bh_lens_scale(),
   };
   (self as unknown as Worker).postMessage(payload, [
     mass.buffer,
