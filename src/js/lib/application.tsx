@@ -49,6 +49,9 @@ interface InitialParams {
   seedLocked: boolean;
   /// `?debug=1`: dev surfaces - camera interaction plus perf stats.
   debug: boolean;
+  /// `?t=N`: with a seed, auto-generate and fast-forward to this tick -
+  /// (seed, size, t) is a complete address for a moment in time.
+  warpTicks: number;
 }
 
 function readInitialParams(): InitialParams {
@@ -57,6 +60,7 @@ function readInitialParams(): InitialParams {
     seed: "",
     seedLocked: false,
     debug: false,
+    warpTicks: 0,
   };
   if (typeof window === "undefined") return defaults;
   const params = new URLSearchParams(window.location.search);
@@ -69,7 +73,23 @@ function readInitialParams(): InitialParams {
     seed: seedRaw != null && parseSeed(seedRaw) != null ? seedRaw.trim() : "",
     seedLocked: lockRaw != null && lockRaw !== "0" && lockRaw !== "false",
     debug: params.has("debug"),
+    warpTicks: (() => {
+      const t = parseInt(params.get("t") ?? "", 10);
+      return Number.isFinite(t) && t > 0 ? t : 0;
+    })(),
   };
+}
+
+/** Patch only the `t` param on the current URL (pause / step / warp). */
+function patchUrlTick(t: number): void {
+  if (typeof window === "undefined") return;
+  const params = new URLSearchParams(window.location.search);
+  params.set("t", String(Math.round(t)));
+  window.history.replaceState(
+    null,
+    "",
+    `${window.location.pathname}?${params.toString()}${window.location.hash}`,
+  );
 }
 
 /** Push init params to URL via replaceState (avoids history pileup). */
@@ -105,6 +125,9 @@ export function Interface() {
   const [wasmReady, setWasmReady] = React.useState(false);
   const [initialized, setInitialized] = React.useState(false);
   const [tickCount, setTickCount] = React.useState(0);
+  const [warping, setWarping] = React.useState(false);
+  // ?t= permalink warp, consumed by the first generate.
+  const pendingWarpRef = React.useRef(initial.warpTicks);
   const [running, setRunning] = React.useState(false);
   const [fps, setFps] = React.useState(0);
   const [tickMs, setTickMs] = React.useState(0);
@@ -141,6 +164,18 @@ export function Interface() {
     lensScale: number;
   } | null>(null);
   const renderedTickIdRef = React.useRef<number>(-1);
+
+  // Permalink auto-load: a URL with seed + t generates and warps on
+  // arrival, no click needed.
+  const autoLoadedRef = React.useRef(false);
+  React.useEffect(() => {
+    if (!wasmReady || autoLoadedRef.current) return;
+    autoLoadedRef.current = true;
+    if (initial.warpTicks > 0 && initial.seed) {
+      handleInitClick();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [wasmReady]);
 
   React.useEffect(() => {
     wasm.then((module) => {
@@ -204,7 +239,10 @@ export function Interface() {
           state.field,
           state.meta,
         );
-        dataviz.updateData(galaxyFrontendRef.current);
+        const tick = galaxyFrontendRef.current.tickCount();
+        setTickCount(tick);
+        dataviz.updateData(galaxyFrontendRef.current, tick);
+        patchUrlTick(tick);
       }
     }
   }, []);
@@ -260,6 +298,9 @@ export function Interface() {
     setGasPct(100);
     initialGasRef.current = Math.max(1, next.gasTotal());
     initialBhRef.current = Math.max(1, next.bhMass());
+    const warp = pendingWarpRef.current;
+    pendingWarpRef.current = 0;
+    if (warp > 0) void warpTo(warp);
     writeUrlParams({
       galaxySize,
       seed: effectiveSeed,
@@ -278,19 +319,43 @@ export function Interface() {
     await galaxyFrontendRef.current.tickAsync(DT);
     const elapsed = performance.now() - t0;
     setTickMs(elapsed);
-    setTickCount((n) => {
-      const next = n + 1;
-      dataviz.updateData(galaxyFrontendRef.current!, next);
-      return next;
-    });
     const fe = galaxyFrontendRef.current;
+    const tick = fe.tickCount();
+    setTickCount(tick);
+    dataviz.updateData(fe, tick);
+    refreshStats(fe);
+    patchUrlTick(tick);
+    exposeForTests();
+  };
+
+  const refreshStats = (fe: galaxy.Frontend) => {
     setStarCount(fe.starCount());
     setSnCount(fe.supernovaCount());
     setBirthCount(fe.birthCount());
     setCaptureCount(fe.captureCount());
     setBhFactor(fe.bhMass() / initialBhRef.current);
     setGasPct((100 * fe.gasTotal()) / initialGasRef.current);
-    exposeForTests();
+  };
+
+  // Fast-forward to a target tick in chunks that yield to the event
+  // loop, so a permalink warp keeps the tab responsive.
+  const warpTo = async (target: number) => {
+    const fe = galaxyFrontendRef.current;
+    if (!fe) return;
+    setWarping(true);
+    const CHUNK = 40;
+    while (fe.tickCount() < target) {
+      const n = Math.min(CHUNK, target - fe.tickCount());
+      for (let k = 0; k < n; k++) fe.tick(DT);
+      setTickCount(fe.tickCount());
+      await new Promise((r) => setTimeout(r, 0));
+    }
+    const tick = fe.tickCount();
+    dataviz.updateData(fe, tick);
+    setTickCount(tick);
+    refreshStats(fe);
+    patchUrlTick(tick);
+    setWarping(false);
   };
 
   // RAF render loop; physics is in the worker. Skip redraw if no new snapshot.
@@ -437,16 +502,16 @@ export function Interface() {
                 className="btn-plum w-full"
                 data-testid="btn-init"
                 onClick={handleInitClick}
-                disabled={!wasmReady}
+                disabled={!wasmReady || warping}
               >
-                generate
+                {warping ? "warping…" : "generate"}
               </button>
               <button
                 type="button"
                 className="btn-plum w-full"
                 data-testid="btn-run"
                 onClick={handleRunToggle}
-                disabled={!initialized}
+                disabled={!initialized || warping}
                 style={
                   running
                     ? {
@@ -463,54 +528,64 @@ export function Interface() {
                 className="btn-plum w-full"
                 data-testid="btn-tick"
                 onClick={handleTickClick}
-                disabled={!initialized || running}
+                disabled={!initialized || running || warping}
               >
                 step
               </button>
             </div>
 
-            <div className="input-label mt-5 space-y-1">
-              <div className="flex justify-between" data-testid="stat-ticks">
-                <span>ticks:</span>
-                <span> {tickCount}</span>
-              </div>
-              <div className="flex justify-between" data-testid="stat-stars">
-                <span>stars</span>
-                <span>{starCount.toLocaleString()}</span>
-              </div>
-              <div className="flex justify-between" data-testid="stat-sn">
-                <span>supernovae</span>
-                <span>{snCount.toLocaleString()}</span>
-              </div>
-              <div className="flex justify-between">
-                <span>star births</span>
-                <span>{birthCount.toLocaleString()}</span>
-              </div>
-              <div className="flex justify-between">
-                <span>eaten by black hole</span>
-                <span>{captureCount.toLocaleString()}</span>
-              </div>
-              <div className="flex justify-between">
-                <span>black hole</span>
-                <span>×{bhFactor.toFixed(2)}</span>
-              </div>
-              <div className="flex justify-between">
-                <span>gas reservoir</span>
-                <span>{gasPct.toFixed(0)}%</span>
-              </div>
-              {debug && (
-                <>
-                  <div className="flex justify-between">
-                    <span>tick</span>
-                    <span>{tickMs.toFixed(1)} ms</span>
-                  </div>
-                  <div className="flex justify-between">
-                    <span>fps</span>
-                    <span>{fps}</span>
-                  </div>
-                </>
-              )}
-            </div>
+            {/* A table so a plain copy-paste yields "label<TAB>value"
+                per line - no copy button needed. */}
+            <table className="input-label mt-5 w-full border-separate border-spacing-y-1">
+              <tbody>
+                <tr>
+                  <td>ticks</td>
+                  <td className="text-right" data-testid="stat-ticks">
+                    {tickCount}
+                  </td>
+                </tr>
+                <tr>
+                  <td>stars</td>
+                  <td className="text-right" data-testid="stat-stars">
+                    {starCount.toLocaleString()}
+                  </td>
+                </tr>
+                <tr>
+                  <td>supernovae</td>
+                  <td className="text-right" data-testid="stat-sn">
+                    {snCount.toLocaleString()}
+                  </td>
+                </tr>
+                <tr>
+                  <td>clusters born</td>
+                  <td className="text-right">{birthCount.toLocaleString()}</td>
+                </tr>
+                <tr>
+                  <td>eaten by black hole</td>
+                  <td className="text-right">{captureCount.toLocaleString()}</td>
+                </tr>
+                <tr>
+                  <td>black hole</td>
+                  <td className="text-right">×{bhFactor.toFixed(2)}</td>
+                </tr>
+                <tr>
+                  <td>gas reservoir</td>
+                  <td className="text-right">{gasPct.toFixed(0)}%</td>
+                </tr>
+                {debug && (
+                  <>
+                    <tr>
+                      <td>tick ms</td>
+                      <td className="text-right">{tickMs.toFixed(1)}</td>
+                    </tr>
+                    <tr>
+                      <td>fps</td>
+                      <td className="text-right">{fps}</td>
+                    </tr>
+                  </>
+                )}
+              </tbody>
+            </table>
 
             {!wasmReady && (
               <p className="mt-4 text-xs tracking-widest uppercase text-[color:var(--color-plum-400)]">

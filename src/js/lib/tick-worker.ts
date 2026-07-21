@@ -41,7 +41,6 @@ type GalaxyInstance = InstanceType<WasmModule["Galaxy"]>;
 let galaxy: GalaxyInstance | null = null;
 let timeModifier = 0.5;
 let running = false;
-let tickId = 0;
 let scheduled = false;
 
 // Tick-rate ceiling. Uncapped, small grids run thousands of ticks/sec and
@@ -73,12 +72,13 @@ function runOneTick() {
   const radiation: Float32Array = galaxy.radiation_field();
   let gasTotal = 0;
   for (let i = 0; i < mass.length; i++) gasTotal += mass[i];
-  tickId += 1;
   const payload = {
     type: "snapshot" as const,
     mass,
     tickMs,
-    tickId,
+    // The sim's own tick counter - continuous across pause/resume, so
+    // the UI's frame reference never resets mid-run.
+    tickId: galaxy.sim_tick(),
     stars,
     transients,
     radiation,
@@ -117,7 +117,6 @@ function handleInit(msg: InitMsg) {
   galaxy.restore_sim_state_stars(msg.stars);
   galaxy.restore_sim_state_field(msg.field);
   galaxy.restore_sim_state_meta(msg.meta);
-  tickId = 0;
 }
 
 function handleStart(msg: StartMsg) {

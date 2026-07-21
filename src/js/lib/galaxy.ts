@@ -157,6 +157,11 @@ export class Frontend {
     return this.galaxy.bh_mass_value();
   }
 
+  /** Authoritative sim tick - the frame reference. */
+  public tickCount(): number {
+    return this.galaxy.sim_tick();
+  }
+
   public gasTotal(): number {
     const mass = this.massArray();
     let total = 0;

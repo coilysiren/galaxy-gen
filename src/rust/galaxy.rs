@@ -613,6 +613,13 @@ impl Galaxy {
         self.bh_mass
     }
 
+    /// Authoritative simulation tick, continuous across worker
+    /// pause/resume (it rides the meta state). f64 because wasm-bindgen
+    /// maps u64 to BigInt and every consumer wants a plain number.
+    pub fn sim_tick(&self) -> f64 {
+        self.tick_count as f64
+    }
+
     /// Coarse radiation field for the renderer's gas temperature tiers.
     pub fn radiation_field(&self) -> Vec<f32> {
         self.radiation.clone()

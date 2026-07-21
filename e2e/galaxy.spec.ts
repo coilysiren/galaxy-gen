@@ -40,7 +40,7 @@ test.describe("Galaxy Generator", () => {
   test("renders the UI shell with controls", async ({ page }) => {
     await expect(page.getByRole("heading", { name: "Galaxy Generator" })).toBeVisible();
     await expect(page.getByTestId("input-galaxy-size")).toHaveValue("250");
-    await expect(page.getByTestId("stat-ticks")).toHaveText("ticks: 0");
+    await expect(page.getByTestId("stat-ticks")).toHaveText("0");
     await expect(page.getByTestId("btn-init")).toBeVisible();
     await expect(page.getByTestId("btn-tick")).toBeVisible();
     // Seed mass is URL-param-only; it must not render an input.
@@ -73,7 +73,34 @@ test.describe("Galaxy Generator", () => {
 
     await page.getByTestId("btn-tick").click();
     await page.getByTestId("btn-tick").click();
-    await expect(page.getByTestId("stat-ticks")).toHaveText("ticks: 2");
+    await expect(page.getByTestId("stat-ticks")).toHaveText("2");
+    // Stepping stamps the tick into the URL - the moment's address.
+    expect(new URL(page.url()).searchParams.get("t")).toBe("2");
+  });
+
+  test("a seed + t permalink reconstructs the exact tick on load", async ({ page }) => {
+    await page.goto("/?seed=12345&size=50&t=25");
+    await waitForWasm(page);
+    // Auto-generates and warps - no clicks.
+    await expect(page.getByTestId("stat-ticks")).toHaveText("25", {
+      timeout: 20_000,
+    });
+    const mass = await page.evaluate(() => {
+      const fe: any = (window as any).__galaxyGen.frontend;
+      return Array.from(fe.massArray() as Uint16Array);
+    });
+
+    // The same address must reproduce the same universe.
+    await page.goto("/?seed=12345&size=50&t=25");
+    await waitForWasm(page);
+    await expect(page.getByTestId("stat-ticks")).toHaveText("25", {
+      timeout: 20_000,
+    });
+    const mass2 = await page.evaluate(() => {
+      const fe: any = (window as any).__galaxyGen.frontend;
+      return Array.from(fe.massArray() as Uint16Array);
+    });
+    expect(mass2).toEqual(mass);
   });
 
   test("ticks actually redistribute mass (sim is not frozen)", async ({ page }) => {
@@ -440,7 +467,7 @@ test.describe("Galaxy Generator", () => {
     await page.waitForTimeout(1500);
     // Sanity: the displayed tick count should have advanced as the
     // worker pushed snapshots to the main thread.
-    const tickText = await page.locator("text=/ticks: \\d+/").first().textContent();
+    const tickText = await page.getByTestId("stat-ticks").textContent();
     const advanced = parseInt(tickText?.replace(/\D/g, "") ?? "0", 10);
     expect(advanced, `tick count didn't advance (got ${tickText})`).toBeGreaterThan(0);
     await page.getByTestId("btn-run").click();
@@ -461,16 +488,12 @@ test.describe("Galaxy Generator", () => {
 
     // Step button must still bump the counter after pause/restore.
     const tickCountBefore = parseInt(
-      (
-        await page.locator("text=/ticks: \\d+/").first().textContent()
-      )?.replace(/\D/g, "") ?? "0",
+      (await page.getByTestId("stat-ticks").textContent())?.replace(/\D/g, "") ?? "0",
       10,
     );
     await page.getByTestId("btn-tick").click();
     const tickCountAfter = parseInt(
-      (
-        await page.locator("text=/ticks: \\d+/").first().textContent()
-      )?.replace(/\D/g, "") ?? "0",
+      (await page.getByTestId("stat-ticks").textContent())?.replace(/\D/g, "") ?? "0",
       10,
     );
     expect(tickCountAfter).toBe(tickCountBefore + 1);
