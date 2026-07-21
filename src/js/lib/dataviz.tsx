@@ -8,11 +8,6 @@ const MARGIN = 20;
 const MIN_ZOOM = 1;
 const MAX_ZOOM = 50;
 
-// Display-frame rotation: the whole world turns this many radians per sim
-// tick, so the steady-state arms visibly orbit. Driven by tick count (not
-// wall clock) - pausing the sim pauses the rotation. This is a render
-// layer, not physics; honest rotation of jammed structures is future work.
-const ROTATION_RAD_PER_TICK = (2 * Math.PI) / 2400;
 
 interface Camera {
   // Screen-space (CSS px) transform: screen = zoom * world + translate.
@@ -31,6 +26,7 @@ interface State {
   camera: Camera;
   simTick: number;
   lastMass: Uint16Array | null;
+  lastStars: Float32Array | null;
   cleanup: () => void;
 }
 
@@ -196,6 +192,7 @@ export function initViz(galaxyFrontend: galaxy.Frontend) {
     camera,
     simTick: 0,
     lastMass: null,
+    lastStars: null,
     cleanup,
   };
   publishCamera(state);
@@ -212,6 +209,7 @@ export function updateData(galaxyFrontend: galaxy.Frontend, simTick?: number) {
   // Copy so zoom/pan interactions after the sim stops still have data
   // to redraw from.
   state.lastMass = mass.slice();
+  state.lastStars = galaxyFrontend.starRenderArray().slice();
   drawFrame(state, state.lastMass);
 }
 
@@ -234,12 +232,7 @@ function drawFrame(s: State, mass: Uint16Array) {
   ctx.translate(camera.tx, camera.ty);
   ctx.scale(camera.zoom, camera.zoom);
 
-  // Display-frame rotation about the world center (see
-  // ROTATION_RAD_PER_TICK).
   const worldCenter = MARGIN + (size * scale) / 2;
-  ctx.translate(worldCenter, worldCenter);
-  ctx.rotate(s.simTick * ROTATION_RAD_PER_TICK);
-  ctx.translate(-worldCenter, -worldCenter);
 
   // Circular world boundary, matching the sim's confinement disk.
   ctx.beginPath();
@@ -279,7 +272,39 @@ function drawFrame(s: State, mass: Uint16Array) {
     ctx.fill();
   }
 
+  drawStars(s);
+
   ctx.restore();
+}
+
+// Stars: bright glowing points over the gas layer. Color runs cool
+// (light stars, warm cream) to hot (heavy stars, blue-white); size and
+// halo derive from luminosity. Render-only exaggeration is fine - none
+// of this flows back into the sim.
+function drawStars(s: State) {
+  const stars = s.lastStars;
+  if (!stars || stars.length === 0) return;
+  const { ctx, size, scale } = s;
+  const maxLum = 1200;
+  for (let i = 0; i < stars.length; i += 4) {
+    const px = MARGIN + (stars[i] + 0.5) * scale;
+    const py = MARGIN + (size - 1 - stars[i + 1] + 0.5) * scale;
+    const lum = Math.min(stars[i + 2], maxLum) / maxLum;
+    const heat = stars[i + 3];
+    const r = 1.2 + 2.6 * Math.sqrt(lum);
+    const cr = (255 - 60 * heat) | 0;
+    const cg = (235 - 20 * heat) | 0;
+    const cb = (200 + 55 * heat) | 0;
+    // Halo, then core.
+    ctx.fillStyle = `rgba(${cr},${cg},${cb},0.25)`;
+    ctx.beginPath();
+    ctx.arc(px, py, r * 2.2, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.fillStyle = `rgb(${cr},${cg},${cb})`;
+    ctx.beginPath();
+    ctx.arc(px, py, r, 0, Math.PI * 2);
+    ctx.fill();
+  }
 }
 
 export function resetView() {

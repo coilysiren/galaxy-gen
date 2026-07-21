@@ -13,6 +13,11 @@ interface InitMsg {
   velY: Float32Array;
   fracX: Float32Array;
   fracY: Float32Array;
+  // Opaque sim-state buffers (stars, coarse field, scheduler/event meta):
+  // restored verbatim, never interpreted here.
+  stars: Float32Array;
+  field: Float32Array;
+  meta: Uint32Array;
 }
 
 interface StartMsg {
@@ -63,14 +68,16 @@ function runOneTick() {
 
   // `galaxy.mass()` allocates a JS-heap Uint16Array; safe to transfer.
   const mass: Uint16Array = galaxy.mass();
+  const stars: Float32Array = galaxy.star_render_data();
   tickId += 1;
   const payload = {
     type: "snapshot" as const,
     mass,
     tickMs,
     tickId,
+    stars,
   };
-  (self as unknown as Worker).postMessage(payload, [mass.buffer]);
+  (self as unknown as Worker).postMessage(payload, [mass.buffer, stars.buffer]);
 
   scheduleLoop(Math.max(0, MIN_TICK_INTERVAL_MS - tickMs));
 }
@@ -89,6 +96,10 @@ function handleInit(msg: InitMsg) {
     msg.fracX,
     msg.fracY,
   );
+  // Restore order matters: stars, then field, then meta.
+  galaxy.restore_sim_state_stars(msg.stars);
+  galaxy.restore_sim_state_field(msg.field);
+  galaxy.restore_sim_state_meta(msg.meta);
   tickId = 0;
 }
 
@@ -115,6 +126,9 @@ function handleStop() {
   const velY: Float32Array = galaxy.vel_y();
   const fracX: Float32Array = galaxy.frac_x();
   const fracY: Float32Array = galaxy.frac_y();
+  const stars: Float32Array = galaxy.sim_state_stars();
+  const field: Float32Array = galaxy.sim_state_field();
+  const meta: Uint32Array = galaxy.sim_state_meta();
   const payload = {
     type: "stopped" as const,
     mass,
@@ -122,6 +136,9 @@ function handleStop() {
     velY,
     fracX,
     fracY,
+    stars,
+    field,
+    meta,
   };
   (self as unknown as Worker).postMessage(payload, [
     mass.buffer,
@@ -129,6 +146,9 @@ function handleStop() {
     velY.buffer,
     fracX.buffer,
     fracY.buffer,
+    stars.buffer,
+    field.buffer,
+    meta.buffer,
   ]);
 }
 

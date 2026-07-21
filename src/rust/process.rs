@@ -53,6 +53,17 @@ static REGISTRY: &[ProcessDescriptor] = &[
         run: Galaxy::process_gravity,
     },
     ProcessDescriptor {
+        // Offset 1 so the field exists from the first tick after seeding
+        // instead of three ticks of zero-field star drift.
+        name: "gravity_field",
+        reads: &[StateKey::GasMass, StateKey::StarKinematics],
+        writes: &[StateKey::GravityField],
+        requires_fresh: &[],
+        cadence: 4,
+        phase_offset: 1,
+        run: Galaxy::process_gravity_field,
+    },
+    ProcessDescriptor {
         name: "integrate_gas",
         reads: &[StateKey::GasMass, StateKey::GasKinematics, StateKey::GasAccel],
         writes: &[StateKey::GasMass, StateKey::GasKinematics],
@@ -60,6 +71,17 @@ static REGISTRY: &[ProcessDescriptor] = &[
         cadence: 1,
         phase_offset: 0,
         run: Galaxy::process_integrate_gas,
+    },
+    ProcessDescriptor {
+        // Reads a possibly stale field by design - fields update less
+        // often than motion. Hence no requires_fresh on GravityField.
+        name: "integrate_stars",
+        reads: &[StateKey::GravityField, StateKey::StarKinematics],
+        writes: &[StateKey::StarKinematics],
+        requires_fresh: &[],
+        cadence: 1,
+        phase_offset: 0,
+        run: Galaxy::process_integrate_stars,
     },
 ];
 
@@ -115,7 +137,10 @@ mod tests_graph {
         // The causal chain, spelled out. Extending the registry means
         // extending this list deliberately.
         let names: Vec<&str> = registry().iter().map(|p| p.name).collect();
-        assert_eq!(names, vec!["gravity", "integrate_gas"]);
+        assert_eq!(
+            names,
+            vec!["gravity", "gravity_field", "integrate_gas", "integrate_stars"]
+        );
     }
 
     #[test]

@@ -6,6 +6,7 @@ use wasm_bindgen::prelude::*;
 
 use crate::events::{Event, EventQueue};
 use crate::process;
+use crate::stars::{Stars, NO_CLUSTER};
 
 /// Initial-condition presets. See `seed_with_mode`. Every mode seeds a
 /// circular disk with orbital rotation baked in.
@@ -20,6 +21,7 @@ pub enum InitialCondition {
 }
 
 #[wasm_bindgen]
+#[derive(Clone)]
 pub struct Galaxy {
     size: u16,
     n: usize,
@@ -44,6 +46,16 @@ pub struct Galaxy {
     /// Master seed for the RNG service. 0 until seeded.
     master_seed: u64,
     events: EventQueue,
+
+    pub(crate) stars: Stars,
+    /// Central black hole point mass, set at seed time. Participates in
+    /// the coarse gravity field (stars feel it); the gas force kernels
+    /// predate it and stay untouched to preserve their tuning.
+    bh_mass: f32,
+    /// Coarse acceleration field (FIELD_RES x FIELD_RES over the world),
+    /// rebuilt by process_gravity_field, bilinear-sampled by stars.
+    field_ax: Vec<f32>,
+    field_ay: Vec<f32>,
 }
 
 impl Galaxy {
@@ -75,6 +87,17 @@ impl Galaxy {
     /// to overshoot, replacing hard square-wall behavior. The toroidal
     /// wrap stays as a backstop but is effectively unreachable.
     const CONFINE_STIFFNESS: f32 = 0.02;
+    /// Barnes-Hut opening angle, shared by the gas kernel and the coarse
+    /// field builder.
+    const THETA: f32 = 0.7;
+    /// Coarse gravity-field resolution (per axis).
+    const FIELD_RES: usize = 64;
+    /// Central black hole mass as a fraction of total seeded mass.
+    const BH_MASS_FRACTION: f32 = 0.05;
+    /// Star lifetime = coefficient / mass, in sim-time units. Heavy stars
+    /// die young, which is what closes the causal loop fast enough to
+    /// watch.
+    const STAR_LIFETIME_COEFF: f32 = 40_000.0;
 }
 
 #[wasm_bindgen]
@@ -124,6 +147,10 @@ impl Galaxy {
             tick_count: 0,
             master_seed: 0,
             events: EventQueue::new(),
+            stars: Stars::new(),
+            bh_mass: 0.0,
+            field_ax: vec![0.0; Galaxy::FIELD_RES * Galaxy::FIELD_RES],
+            field_ay: vec![0.0; Galaxy::FIELD_RES * Galaxy::FIELD_RES],
         }
     }
 
@@ -258,24 +285,24 @@ impl Galaxy {
             vel_y[i] += x / r * v;
         }
 
-        Galaxy {
-            size: self.size,
-            n: self.n,
-            mass,
-            acc_x: vec![0.0; self.n],
-            acc_y: vec![0.0; self.n],
-            vel_x,
-            vel_y,
-            frac_x: vec![0.0; self.n],
-            frac_y: vec![0.0; self.n],
-            xs_i: self.xs_i.clone(),
-            ys_i: self.ys_i.clone(),
-            inv_r3: self.inv_r3.clone(),
-            scratch_mass: vec![0; self.n],
-            tick_count: 0,
-            master_seed,
-            events: EventQueue::new(),
-        }
+        // Central black hole anchors the nucleus, scaled to seeded mass.
+        let total_mass: f64 = mass.iter().map(|&m| m as f64).sum();
+
+        let mut g = self.clone();
+        g.mass = mass;
+        g.vel_x = vel_x;
+        g.vel_y = vel_y;
+        g.acc_x = vec![0.0; self.n];
+        g.acc_y = vec![0.0; self.n];
+        g.frac_x = vec![0.0; self.n];
+        g.frac_y = vec![0.0; self.n];
+        g.scratch_mass = vec![0; self.n];
+        g.tick_count = 0;
+        g.master_seed = master_seed;
+        g.events = EventQueue::new();
+        g.stars = Stars::new();
+        g.bh_mass = total_mass as f32 * Galaxy::BH_MASS_FRACTION;
+        g
     }
 
     /// Reproducible [`seed`] variant. Same `(additional, seed)` gives
@@ -287,24 +314,8 @@ impl Galaxy {
     /// One simulation step: run every due process in registry order, then
     /// execute the events scheduled for this tick (emitted last tick).
     pub fn tick(&self, time: f32) -> Galaxy {
-        let mut next = Galaxy {
-            size: self.size,
-            n: self.n,
-            mass: self.mass.clone(),
-            acc_x: self.acc_x.clone(),
-            acc_y: self.acc_y.clone(),
-            vel_x: self.vel_x.clone(),
-            vel_y: self.vel_y.clone(),
-            frac_x: self.frac_x.clone(),
-            frac_y: self.frac_y.clone(),
-            xs_i: self.xs_i.clone(),
-            ys_i: self.ys_i.clone(),
-            inv_r3: self.inv_r3.clone(),
-            scratch_mass: vec![0; self.n],
-            tick_count: self.tick_count + 1,
-            master_seed: self.master_seed,
-            events: self.events.clone(),
-        };
+        let mut next = self.clone();
+        next.tick_count += 1;
         for p in process::registry() {
             if process::is_due(p, next.tick_count) {
                 (p.run)(&mut next, time);
@@ -319,31 +330,17 @@ impl Galaxy {
     /// Mismatched slice lengths default to zero-force.
     pub fn tick_with_accel(&self, time: f32, acc_x: &[f32], acc_y: &[f32]) -> Galaxy {
         let n = self.n;
-        let mut next = Galaxy {
-            size: self.size,
-            n,
-            mass: self.mass.clone(),
-            acc_x: if acc_x.len() == n {
-                acc_x.to_vec()
-            } else {
-                vec![0.0; n]
-            },
-            acc_y: if acc_y.len() == n {
-                acc_y.to_vec()
-            } else {
-                vec![0.0; n]
-            },
-            vel_x: self.vel_x.clone(),
-            vel_y: self.vel_y.clone(),
-            frac_x: self.frac_x.clone(),
-            frac_y: self.frac_y.clone(),
-            xs_i: self.xs_i.clone(),
-            ys_i: self.ys_i.clone(),
-            inv_r3: self.inv_r3.clone(),
-            scratch_mass: vec![0; n],
-            tick_count: self.tick_count + 1,
-            master_seed: self.master_seed,
-            events: self.events.clone(),
+        let mut next = self.clone();
+        next.tick_count += 1;
+        next.acc_x = if acc_x.len() == n {
+            acc_x.to_vec()
+        } else {
+            vec![0.0; n]
+        };
+        next.acc_y = if acc_y.len() == n {
+            acc_y.to_vec()
+        } else {
+            vec![0.0; n]
         };
         next.apply_acceleration(time);
         next
@@ -359,6 +356,91 @@ impl Galaxy {
     }
     pub fn repulse_r2() -> f32 {
         Galaxy::REPULSE_R2
+    }
+
+    // --- Star population surface -----------------------------------
+
+    pub fn star_count(&self) -> usize {
+        self.stars.len()
+    }
+
+    /// Renderer packing: [x, y, luminosity, color_index] per star.
+    pub fn star_render_data(&self) -> Vec<f32> {
+        self.stars.render_data()
+    }
+
+    /// Spawn one star directly. Debug/test path - production stars are
+    /// born from CloudCollapse -> StarBirth events. Derived attributes
+    /// (lifetime, luminosity, color) come from mass.
+    pub fn spawn_star(&mut self, x: f32, y: f32, vx: f32, vy: f32, mass: f32) -> usize {
+        let m = mass.max(1.0);
+        self.stars.spawn(
+            x,
+            y,
+            vx,
+            vy,
+            m,
+            Galaxy::STAR_LIFETIME_COEFF / m,
+            m.powf(1.5),
+            (m / 100.0).clamp(0.0, 1.0),
+            NO_CLUSTER,
+        )
+    }
+
+    // --- Worker state round-trip (opaque to JS) ---------------------
+
+    /// Full star state, STAR_FLOATS per star. Opaque to JS: hold it and
+    /// hand it back to `restore_sim_state_stars`.
+    pub fn sim_state_stars(&self) -> Vec<f32> {
+        self.stars.to_flat()
+    }
+
+    pub fn restore_sim_state_stars(&mut self, data: &[f32]) {
+        self.stars = Stars::from_flat(data);
+    }
+
+    /// Coarse-field state: [field_ax..., field_ay...]. The field is
+    /// mid-tick derived state - rebuilding it after restore would use
+    /// post-tick inputs and fork the trajectory. Opaque to JS.
+    pub fn sim_state_field(&self) -> Vec<f32> {
+        let mut out = self.field_ax.clone();
+        out.extend_from_slice(&self.field_ay);
+        out
+    }
+
+    pub fn restore_sim_state_field(&mut self, data: &[f32]) {
+        let res = Galaxy::FIELD_RES * Galaxy::FIELD_RES;
+        if data.len() != res * 2 {
+            return;
+        }
+        self.field_ax.copy_from_slice(&data[..res]);
+        self.field_ay.copy_from_slice(&data[res..]);
+    }
+
+    /// Versioned scheduler/event/RNG state: [version, tick lo, tick hi,
+    /// seed lo, seed hi, bh_mass bits, then the event-queue flat form].
+    /// Opaque to JS.
+    pub fn sim_state_meta(&self) -> Vec<u32> {
+        let mut out = vec![
+            1u32,
+            self.tick_count as u32,
+            (self.tick_count >> 32) as u32,
+            self.master_seed as u32,
+            (self.master_seed >> 32) as u32,
+            self.bh_mass.to_bits(),
+        ];
+        out.extend(self.events.to_flat());
+        out
+    }
+
+    pub fn restore_sim_state_meta(&mut self, data: &[u32]) {
+        if data.len() < 6 || data[0] != 1 {
+            return;
+        }
+        self.tick_count = data[1] as u64 | ((data[2] as u64) << 32);
+        self.master_seed = data[3] as u64 | ((data[4] as u64) << 32);
+        self.bh_mass = f32::from_bits(data[5]);
+        self.events = EventQueue::from_flat(&data[6..]);
     }
 
     /// Flat-buffer exposure for zero-copy JS reads via wasm.memory.
@@ -414,24 +496,13 @@ impl Galaxy {
         assert_eq!(vel_y.len(), n, "vel_y length mismatch");
         assert_eq!(frac_x.len(), n, "frac_x length mismatch");
         assert_eq!(frac_y.len(), n, "frac_y length mismatch");
-        Galaxy {
-            size,
-            n,
-            mass,
-            acc_x: vec![0.0; n],
-            acc_y: vec![0.0; n],
-            vel_x,
-            vel_y,
-            frac_x,
-            frac_y,
-            xs_i: base.xs_i,
-            ys_i: base.ys_i,
-            inv_r3: base.inv_r3,
-            scratch_mass: vec![0; n],
-            tick_count: 0,
-            master_seed: 0,
-            events: EventQueue::new(),
-        }
+        let mut g = base;
+        g.mass = mass;
+        g.vel_x = vel_x;
+        g.vel_y = vel_y;
+        g.frac_x = frac_x;
+        g.frac_y = frac_y;
+        g
     }
 }
 
@@ -444,6 +515,111 @@ impl Galaxy {
 
     pub(crate) fn process_integrate_gas(&mut self, time: f32) {
         self.apply_acceleration(time);
+    }
+
+    /// Rebuild the coarse acceleration field from gas + stars + the
+    /// central black hole. Stars read this field (never pairwise forces),
+    /// so the star population adds O(N), not O(N^2).
+    pub(crate) fn process_gravity_field(&mut self, _time: f32) {
+        let size_f = self.size as f32;
+        let active_est = self.stars.len() + 64;
+        let mut px: Vec<f32> = Vec::with_capacity(active_est);
+        let mut py: Vec<f32> = Vec::with_capacity(active_est);
+        let mut pm: Vec<f32> = Vec::with_capacity(active_est);
+        for i in 0..self.n {
+            if self.mass[i] != 0 {
+                px.push(self.xs_i[i] as f32);
+                py.push(self.ys_i[i] as f32);
+                pm.push(self.mass[i] as f32);
+            }
+        }
+        for i in 0..self.stars.len() {
+            px.push(self.stars.pos_x[i].clamp(0.0, size_f - 1e-3));
+            py.push(self.stars.pos_y[i].clamp(0.0, size_f - 1e-3));
+            pm.push(self.stars.mass[i]);
+        }
+        if self.bh_mass > 0.0 {
+            px.push(size_f * 0.5);
+            py.push(size_f * 0.5);
+            pm.push(self.bh_mass);
+        }
+        let tree = build_quadtree(&px, &py, &pm, 0.0, 0.0, size_f);
+        let res = Galaxy::FIELD_RES;
+        let cell = size_f / res as f32;
+        let theta_sq = Galaxy::THETA * Galaxy::THETA;
+        for fy in 0..res {
+            for fx in 0..res {
+                let wx = (fx as f32 + 0.5) * cell;
+                let wy = (fy as f32 + 0.5) * cell;
+                let (ax, ay) = tree.force(
+                    wx,
+                    wy,
+                    theta_sq,
+                    Galaxy::SOFTENING_SQ,
+                    Galaxy::GRAVATIONAL_CONSTANT,
+                );
+                self.field_ax[fy * res + fx] = ax;
+                self.field_ay[fy * res + fx] = ay;
+            }
+        }
+    }
+
+    /// Bilinear sample of the coarse acceleration field at world (x, y).
+    pub(crate) fn sample_field(&self, x: f32, y: f32) -> (f32, f32) {
+        let res = Galaxy::FIELD_RES;
+        let size_f = self.size as f32;
+        let cell = size_f / res as f32;
+        // Field values sit at cell centers; shift into field space.
+        let fx = (x / cell - 0.5).clamp(0.0, (res - 1) as f32);
+        let fy = (y / cell - 0.5).clamp(0.0, (res - 1) as f32);
+        let x0 = fx as usize;
+        let y0 = fy as usize;
+        let x1 = (x0 + 1).min(res - 1);
+        let y1 = (y0 + 1).min(res - 1);
+        let tx = fx - x0 as f32;
+        let ty = fy - y0 as f32;
+        let idx = |xx: usize, yy: usize| yy * res + xx;
+        let lerp = |a: f32, b: f32, t: f32| a + (b - a) * t;
+        let ax = lerp(
+            lerp(self.field_ax[idx(x0, y0)], self.field_ax[idx(x1, y0)], tx),
+            lerp(self.field_ax[idx(x0, y1)], self.field_ax[idx(x1, y1)], tx),
+            ty,
+        );
+        let ay = lerp(
+            lerp(self.field_ay[idx(x0, y0)], self.field_ay[idx(x1, y0)], tx),
+            lerp(self.field_ay[idx(x0, y1)], self.field_ay[idx(x1, y1)], tx),
+            ty,
+        );
+        (ax, ay)
+    }
+
+    /// Integrate the star population: field gravity + boundary spring,
+    /// semi-implicit Euler, no movement cap (stars cannot jam).
+    pub(crate) fn process_integrate_stars(&mut self, time: f32) {
+        let size_f = self.size as f32;
+        let center = size_f * 0.5;
+        let disk_r = self.disk_radius();
+        for i in 0..self.stars.len() {
+            let px = self.stars.pos_x[i];
+            let py = self.stars.pos_y[i];
+            let (mut ax, mut ay) = self.sample_field(px, py);
+            let dx = px - center;
+            let dy = py - center;
+            let r = (dx * dx + dy * dy).sqrt();
+            if r > disk_r && r > 1e-3 {
+                let k = Galaxy::CONFINE_STIFFNESS * (r - disk_r) / r;
+                ax -= k * dx;
+                ay -= k * dy;
+            }
+            let vx = self.stars.vel_x[i] + ax * time;
+            let vy = self.stars.vel_y[i] + ay * time;
+            self.stars.vel_x[i] = vx;
+            self.stars.vel_y[i] = vy;
+            // Clamp softly inside the grid so field sampling stays valid;
+            // the boundary spring makes real excursions transient.
+            self.stars.pos_x[i] = (px + vx * time).clamp(0.0, size_f - 1e-3);
+            self.stars.pos_y[i] = (py + vy * time).clamp(0.0, size_f - 1e-3);
+        }
     }
 
     /// Execute this tick's due events in stable order. Handlers may emit
@@ -1381,6 +1557,69 @@ mod tests_golden {
         let mut a_next = g2.rng_stream(1);
         let draws_next: Vec<u32> = (0..8).map(|_| a_next.random()).collect();
         assert_ne!(draws1, draws_next, "streams must advance across ticks");
+    }
+}
+
+#[cfg(test)]
+mod tests_stars_dynamics {
+    use super::*;
+
+    #[test]
+    fn test_star_at_rest_falls_toward_the_disk_center() {
+        let mut g = Galaxy::new(50, 0).seed_with_mode_seeded(25, InitialCondition::Uniform, 42);
+        g.spawn_star(35.0, 25.0, 0.0, 0.0, 10.0);
+        let r0 = (g.stars.pos_x[0] - 25.0).hypot(g.stars.pos_y[0] - 25.0);
+        for _ in 0..40 {
+            g = g.tick(0.5);
+        }
+        let r1 = (g.stars.pos_x[0] - 25.0).hypot(g.stars.pos_y[0] - 25.0);
+        assert!(
+            r1 < r0,
+            "field gravity must pull a resting star inward: r {r0:.2} -> {r1:.2}"
+        );
+    }
+
+    #[test]
+    fn test_star_render_data_shape() {
+        let mut g = Galaxy::new(20, 0).seed_with_mode_seeded(5, InitialCondition::Uniform, 1);
+        g.spawn_star(10.0, 10.0, 0.1, 0.0, 42.0);
+        g.spawn_star(5.0, 5.0, 0.0, 0.1, 7.0);
+        assert_eq!(g.star_count(), 2);
+        let rd = g.star_render_data();
+        assert_eq!(rd.len(), 2 * crate::stars::RENDER_FLOATS);
+        assert_eq!(rd[0], 10.0);
+        assert!(rd[2] > rd[6], "heavier star must be more luminous");
+    }
+
+    #[test]
+    fn test_sim_state_round_trip_preserves_star_evolution() {
+        // The worker boundary contract: exporting gas + star + meta state
+        // and rehydrating must continue the exact same trajectory.
+        let mut a = Galaxy::new(30, 0).seed_with_mode_seeded(10, InitialCondition::Uniform, 9);
+        a.spawn_star(20.0, 15.0, 0.0, 0.4, 30.0);
+        a.spawn_star(10.0, 15.0, 0.0, -0.4, 60.0);
+        for _ in 0..5 {
+            a = a.tick(0.5);
+        }
+        let mut b = Galaxy::from_state(
+            30,
+            a.mass(),
+            a.vel_x(),
+            a.vel_y(),
+            a.frac_x(),
+            a.frac_y(),
+        );
+        b.restore_sim_state_stars(&a.sim_state_stars());
+        b.restore_sim_state_field(&a.sim_state_field());
+        b.restore_sim_state_meta(&a.sim_state_meta());
+        for _ in 0..20 {
+            a = a.tick(0.5);
+            b = b.tick(0.5);
+        }
+        assert_eq!(a.stars.pos_x, b.stars.pos_x, "star x trajectories must match");
+        assert_eq!(a.stars.pos_y, b.stars.pos_y, "star y trajectories must match");
+        assert_eq!(a.mass, b.mass, "gas must match");
+        assert_eq!(a.tick_count, b.tick_count);
     }
 }
 

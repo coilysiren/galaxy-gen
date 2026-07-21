@@ -124,6 +124,7 @@ export function Interface() {
     mass: Uint16Array;
     tickMs: number;
     tickId: number;
+    stars: Float32Array;
   } | null>(null);
   const renderedTickIdRef = React.useRef<number>(-1);
 
@@ -185,6 +186,9 @@ export function Interface() {
           state.velY,
           state.fracX,
           state.fracY,
+          state.stars,
+          state.field,
+          state.meta,
         );
         dataviz.updateData(galaxyFrontendRef.current);
       }
@@ -263,6 +267,7 @@ export function Interface() {
     if (snap && snap.tickId !== renderedTickIdRef.current) {
       renderedTickIdRef.current = snap.tickId;
       galaxyFrontendRef.current.setOverrideMass(snap.mass);
+      galaxyFrontendRef.current.setOverrideStars(snap.stars);
       dataviz.updateData(galaxyFrontendRef.current, snap.tickId);
 
       fpsSamplesRef.current.push(performance.now());
@@ -299,8 +304,8 @@ export function Interface() {
         return;
       }
       workerRef.current = new galaxy.TickWorker(
-        (mass, tickMs, tickId) => {
-          latestSnapshotRef.current = { mass, tickMs, tickId };
+        (mass, tickMs, tickId, stars) => {
+          latestSnapshotRef.current = { mass, tickMs, tickId, stars };
         },
       );
     }

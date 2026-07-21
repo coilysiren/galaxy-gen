@@ -141,6 +141,68 @@ impl EventQueue {
     pub fn executed_total(&self) -> u64 {
         self.executed_counts.iter().sum()
     }
+
+    /// Flat u32 serialization for the worker state round-trip. Layout:
+    /// [next_id lo/hi, seq_tick lo/hi, seq_in_tick, n_pending, then 11
+    /// u32 per pending event]. The instrumentation ring and counters are
+    /// intentionally dropped - they are diagnostics, not sim state.
+    pub fn to_flat(&self) -> Vec<u32> {
+        let mut out = Vec::with_capacity(6 + self.pending.len() * 11);
+        out.push(self.next_id as u32);
+        out.push((self.next_id >> 32) as u32);
+        out.push(self.seq_tick as u32);
+        out.push((self.seq_tick >> 32) as u32);
+        out.push(self.seq_in_tick);
+        out.push(self.pending.len() as u32);
+        for ev in &self.pending {
+            out.push(ev.id as u32);
+            out.push((ev.id >> 32) as u32);
+            out.push(ev.tick as u32);
+            out.push((ev.tick >> 32) as u32);
+            out.push(ev.seq);
+            out.push(ev.kind as u32);
+            out.push(ev.source);
+            out.push(ev.target);
+            out.push(ev.payload.to_bits());
+            out.push(ev.parent as u32);
+            out.push((ev.parent >> 32) as u32);
+        }
+        out
+    }
+
+    pub fn from_flat(data: &[u32]) -> EventQueue {
+        let mut q = EventQueue::new();
+        if data.len() < 6 {
+            return q;
+        }
+        q.next_id = data[0] as u64 | ((data[1] as u64) << 32);
+        q.seq_tick = data[2] as u64 | ((data[3] as u64) << 32);
+        q.seq_in_tick = data[4];
+        let n = data[5] as usize;
+        for chunk in data[6..].chunks_exact(11).take(n) {
+            q.pending.push(Event {
+                id: chunk[0] as u64 | ((chunk[1] as u64) << 32),
+                tick: chunk[2] as u64 | ((chunk[3] as u64) << 32),
+                seq: chunk[4],
+                kind: kind_from_u32(chunk[5]),
+                source: chunk[6],
+                target: chunk[7],
+                payload: f32::from_bits(chunk[8]),
+                parent: chunk[9] as u64 | ((chunk[10] as u64) << 32),
+            });
+        }
+        q
+    }
+}
+
+fn kind_from_u32(v: u32) -> EventKind {
+    match v {
+        0 => EventKind::CloudCollapse,
+        1 => EventKind::StarBirth,
+        2 => EventKind::Supernova,
+        3 => EventKind::ShockWave,
+        _ => EventKind::CloudDissipate,
+    }
 }
 
 #[cfg(test)]
@@ -186,6 +248,23 @@ mod tests_event_queue {
         assert_eq!(due1[0].seq, 0);
         assert_eq!(due2[0].seq, 0, "seq must reset per emitting tick");
         assert!(b > a);
+    }
+
+    #[test]
+    fn test_flat_round_trip_preserves_pending_and_counters() {
+        let mut q = EventQueue::new();
+        q.emit(9, EventKind::Supernova, 5, NO_REF, 1.25, NO_PARENT);
+        q.emit(9, EventKind::ShockWave, 5, 77, -3.5, 1);
+        let flat = q.to_flat();
+        let mut back = EventQueue::from_flat(&flat);
+        let due = back.take_due(10);
+        assert_eq!(due.len(), 2);
+        assert_eq!(due[0].kind, EventKind::Supernova);
+        assert_eq!(due[1].payload, -3.5);
+        assert_eq!(due[1].parent, 1);
+        // Emission after restore continues the id sequence.
+        let id = back.emit(10, EventKind::CloudCollapse, 0, NO_REF, 0.0, NO_PARENT);
+        assert_eq!(id, 3);
     }
 
     #[test]

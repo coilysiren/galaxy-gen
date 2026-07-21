@@ -23,6 +23,7 @@ export class Frontend {
   public galaxySize: number;
   // Worker-driven mass snapshot, read by the renderer without re-entering WASM.
   private overrideMass: Uint16Array | null = null;
+  private overrideStars: Float32Array | null = null;
   // CPU uses `Galaxy.tick`; WebGPU uses `tick_with_accel` after WGSL forces.
   private backend: ComputeBackend = "cpu";
   private gpuBackend: WebGPUForceBackend | null = null;
@@ -82,6 +83,7 @@ export class Frontend {
 
   public tick(timeModifier: number): void {
     this.overrideMass = null;
+    this.overrideStars = null;
     const next = this.galaxy.tick(timeModifier);
     this.galaxy.free();
     this.galaxy = next;
@@ -112,6 +114,22 @@ export class Frontend {
     return this.overrideMass ?? this.galaxy.mass();
   }
 
+  public starCount(): number {
+    if (this.overrideStars) return this.overrideStars.length / 4;
+    return this.galaxy.star_count();
+  }
+
+  /** Renderer packing: [x, y, luminosity, colorIndex] per star. */
+  public starRenderArray(): Float32Array {
+    return this.overrideStars ?? this.galaxy.star_render_data();
+  }
+
+  /** Debug/test spawn; production stars come from StarBirth events. */
+  public spawnStar(x: number, y: number, vx: number, vy: number, mass: number): number {
+    this.overrideStars = null;
+    return this.galaxy.spawn_star(x, y, vx, vy, mass);
+  }
+
   /** Legacy API. Allocates a Cell[]; avoid on the hot path. */
   public cells(): Cell[] {
     const mass = this.massArray();
@@ -125,15 +143,9 @@ export class Frontend {
 
   // --- Worker integration -------------------------------------------------
 
-  /** Full sim-state snapshot to hydrate a worker-side Galaxy. */
-  public snapshotState(): {
-    size: number;
-    mass: Uint16Array;
-    velX: Float32Array;
-    velY: Float32Array;
-    fracX: Float32Array;
-    fracY: Float32Array;
-  } {
+  /** Full sim-state snapshot to hydrate a worker-side Galaxy. The stars /
+   *  field / meta buffers are opaque: JS holds them and hands them back. */
+  public snapshotState(): SimState {
     return {
       size: this.galaxySize,
       mass: this.galaxy.mass(),
@@ -141,16 +153,23 @@ export class Frontend {
       velY: this.galaxy.vel_y(),
       fracX: this.galaxy.frac_x(),
       fracY: this.galaxy.frac_y(),
+      stars: this.galaxy.sim_state_stars(),
+      field: this.galaxy.sim_state_field(),
+      meta: this.galaxy.sim_state_meta(),
     };
   }
 
-  /** Rehydrate main-thread Galaxy from worker state on pause. */
+  /** Rehydrate main-thread Galaxy from worker state on pause. Restore
+   *  order matters: stars, then field, then meta. */
   public restoreState(
     mass: Uint16Array,
     velX: Float32Array,
     velY: Float32Array,
     fracX: Float32Array,
     fracY: Float32Array,
+    stars?: Float32Array,
+    field?: Float32Array,
+    meta?: Uint32Array,
   ): void {
     const next = wasm.Galaxy.from_state(
       this.galaxySize,
@@ -160,25 +179,56 @@ export class Frontend {
       fracX,
       fracY,
     );
+    if (stars) next.restore_sim_state_stars(stars);
+    if (field) next.restore_sim_state_field(field);
+    if (meta) next.restore_sim_state_meta(meta);
     this.galaxy.free();
     this.galaxy = next;
     this.overrideMass = null;
+    this.overrideStars = null;
   }
 
   /** Point renderer at worker-produced mass buffer. Skips WASM round-trip. */
   public setOverrideMass(mass: Uint16Array): void {
     this.overrideMass = mass;
   }
+
+  /** Point renderer at worker-produced star render buffer. */
+  public setOverrideStars(stars: Float32Array): void {
+    this.overrideStars = stars;
+  }
+}
+
+export interface SimState {
+  size: number;
+  mass: Uint16Array;
+  velX: Float32Array;
+  velY: Float32Array;
+  fracX: Float32Array;
+  fracY: Float32Array;
+  stars: Float32Array;
+  field: Float32Array;
+  meta: Uint32Array;
 }
 
 /** Main-thread proxy over the physics Web Worker. */
 export class TickWorker {
   private worker: Worker;
-  private onSnapshot: (mass: Uint16Array, tickMs: number, tickId: number) => void;
+  private onSnapshot: (
+    mass: Uint16Array,
+    tickMs: number,
+    tickId: number,
+    stars: Float32Array,
+  ) => void;
   private stopResolver: ((state: StoppedState | null) => void) | null = null;
 
   constructor(
-    onSnapshot: (mass: Uint16Array, tickMs: number, tickId: number) => void,
+    onSnapshot: (
+      mass: Uint16Array,
+      tickMs: number,
+      tickId: number,
+      stars: Float32Array,
+    ) => void,
   ) {
     if (typeof Worker === "undefined") {
       throw new Error(
@@ -196,7 +246,7 @@ export class TickWorker {
     const msg = ev.data;
     if (!msg || typeof msg.type !== "string") return;
     if (msg.type === "snapshot") {
-      this.onSnapshot(msg.mass, msg.tickMs, msg.tickId);
+      this.onSnapshot(msg.mass, msg.tickMs, msg.tickId, msg.stars);
     } else if (msg.type === "stopped") {
       if (!this.stopResolver) return;
       const resolver = this.stopResolver;
@@ -209,6 +259,9 @@ export class TickWorker {
           velY: msg.velY,
           fracX: msg.fracX,
           fracY: msg.fracY,
+          stars: msg.stars,
+          field: msg.field,
+          meta: msg.meta,
         });
       } else {
         resolver(null);
@@ -217,14 +270,7 @@ export class TickWorker {
   }
 
   /** Hydrate worker-side Galaxy. Transfers buffers (zero-copy). */
-  public init(snapshot: {
-    size: number;
-    mass: Uint16Array;
-    velX: Float32Array;
-    velY: Float32Array;
-    fracX: Float32Array;
-    fracY: Float32Array;
-  }): void {
+  public init(snapshot: SimState): void {
     this.worker.postMessage(
       {
         type: "init",
@@ -234,6 +280,9 @@ export class TickWorker {
         velY: snapshot.velY,
         fracX: snapshot.fracX,
         fracY: snapshot.fracY,
+        stars: snapshot.stars,
+        field: snapshot.field,
+        meta: snapshot.meta,
       },
       [
         snapshot.mass.buffer,
@@ -241,6 +290,9 @@ export class TickWorker {
         snapshot.velY.buffer,
         snapshot.fracX.buffer,
         snapshot.fracY.buffer,
+        snapshot.stars.buffer,
+        snapshot.field.buffer,
+        snapshot.meta.buffer,
       ],
     );
   }
@@ -277,4 +329,7 @@ export interface StoppedState {
   velY: Float32Array;
   fracX: Float32Array;
   fracY: Float32Array;
+  stars: Float32Array;
+  field: Float32Array;
+  meta: Uint32Array;
 }

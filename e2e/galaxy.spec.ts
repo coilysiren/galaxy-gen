@@ -604,6 +604,36 @@ test.describe("Galaxy Generator", () => {
     expect(tickCountAfter).toBe(tickCountBefore + 1);
   });
 
+  test("stars render and survive the worker pause round-trip", async ({ page }) => {
+    await page.getByTestId("input-galaxy-size").fill("50");
+    await page.getByTestId("btn-init").click();
+
+    // Debug-spawn a few stars; production stars come from StarBirth events.
+    const spawned = await page.evaluate(() => {
+      const fe: any = (window as any).__galaxyGen.frontend;
+      fe.spawnStar(30, 25, 0, 0.5, 40);
+      fe.spawnStar(20, 25, 0, -0.5, 80);
+      return fe.starCount();
+    });
+    expect(spawned).toBe(2);
+
+    // Run through the worker briefly, then pause: stars must come back.
+    await page.getByTestId("btn-run").click();
+    await page.waitForTimeout(700);
+    await page.getByTestId("btn-run").click();
+    await expect(page.getByTestId("btn-run")).toHaveText("run");
+
+    const after = await page.evaluate(() => {
+      const fe: any = (window as any).__galaxyGen.frontend;
+      const stars = fe.starRenderArray() as Float32Array;
+      return { count: fe.starCount(), sample: Array.from(stars.slice(0, 4)) };
+    });
+    expect(after.count).toBe(2);
+    // Stars moved from their spawn points but stayed in-world.
+    expect(after.sample[0]).toBeGreaterThan(0);
+    expect(after.sample[0]).toBeLessThan(50);
+  });
+
   test("changing galaxy size changes cell count after re-init", async ({ page }) => {
     const sizeInput = page.getByTestId("input-galaxy-size");
     await sizeInput.fill("20");
