@@ -29,6 +29,7 @@ const LENS_THETA_E_FRAC = 0.035;
 // and the alpha accumulation makes dense regions glow on its own.
 const GAS_SPRITE_PX = 32;
 let gasSprites: HTMLCanvasElement[][] = [];
+let dustSprite: HTMLCanvasElement | null = null;
 
 // Gas hue follows temperature (the radiation field), not just
 // brightness: cold clouds sit blue-violet, warm gas shifts magenta, and
@@ -64,6 +65,15 @@ const GAS_TIERS: [number, number, number][][] = [
     [194, 78, 124],
     [218, 94, 142],
     [240, 116, 162],
+  ],
+  // Shocked: [OIII] teal - gas swept by a supernova front.
+  [
+    [40, 88, 92],
+    [48, 104, 108],
+    [58, 122, 126],
+    [68, 140, 144],
+    [80, 158, 162],
+    [94, 178, 182],
   ],
 ];
 
@@ -102,6 +112,22 @@ function buildGasSprites() {
     }
     gasSprites.push(sprites);
   }
+
+  // Dust: drawn with multiply compositing, so the gradient runs from a
+  // dark absorbing core (multiplying toward brown-black) out to white
+  // (multiply identity - no edge seam).
+  const d = document.createElement("canvas");
+  d.width = GAS_SPRITE_PX;
+  d.height = GAS_SPRITE_PX;
+  const dctx = d.getContext("2d")!;
+  const half = GAS_SPRITE_PX / 2;
+  const grad = dctx.createRadialGradient(half, half, 0, half, half, half);
+  grad.addColorStop(0, "rgb(96, 78, 70)");
+  grad.addColorStop(0.5, "rgb(170, 158, 150)");
+  grad.addColorStop(1, "rgb(255, 255, 255)");
+  dctx.fillStyle = grad;
+  dctx.fillRect(0, 0, GAS_SPRITE_PX, GAS_SPRITE_PX);
+  dustSprite = d;
 }
 
 
@@ -389,7 +415,11 @@ function drawFrame(s: State, mass: Uint16Array) {
   ctx.setTransform(1, 0, 0, 1, 0, 0);
   const dpr = Math.min(window.devicePixelRatio || 1, 2);
   ctx.scale(dpr, dpr);
-  ctx.clearRect(0, 0, s.cw, s.ch);
+  // Opaque space-black base (matches the page background). Without it,
+  // multiply-composited dust degenerates to plain painting wherever the
+  // canvas is transparent and stamps visible grey squares.
+  ctx.fillStyle = "#05060a";
+  ctx.fillRect(0, 0, s.cw, s.ch);
 
   // Apply the camera: screen = zoom * world + translate.
   ctx.translate(camera.tx, camera.ty);
@@ -408,49 +438,116 @@ function drawFrame(s: State, mass: Uint16Array) {
   const radRes = rad ? Math.round(Math.sqrt(rad.length)) : 0;
   const radScale = radRes / size;
 
-  // Screen blending: overlapping clouds glow into each other but
-  // saturate smoothly instead of clipping to white the way additive
-  // blending does - cores stay violet.
-  ctx.globalCompositeOperation = "screen";
-  for (let i = 0; i < mass.length; i++) {
-    const m = mass[i];
-    if (m === 0) continue;
-    const col = i % size;
-    const row = (i / size) | 0;
-    const rx = col - center;
-    const ry = row - center;
-    const radSq = rx * rx + ry * ry;
-    if (radSq > fadeEndSq) continue;
-    const t = Math.log(m + 1) * invLogMax;
-    const bi = Math.min(buckets - 1, Math.floor(t * buckets));
-    // Temperature tier from the radiation field, dithered per cell so
-    // the boundaries stay organic.
-    let tier = 0;
-    if (rad && radRes > 0) {
-      const fx = Math.min(radRes - 1, (col * radScale) | 0);
-      const fy = Math.min(radRes - 1, (row * radScale) | 0);
-      const heat = rad[fy * radRes + fx] + (cellJitter(i, 3) - 0.5) * 6;
-      if (heat > GAS_HOT_RAD) tier = 2;
-      else if (heat > GAS_WARM_RAD) tier = 1;
+  // Recent supernova shells, for the [OIII] teal tier: gas near an
+  // expanding front is shock-ionized and glows teal, lingering after
+  // the bright wave itself has faded.
+  const waves: { x: number; y: number; front: number; band: number }[] = [];
+  const tr = s.lastTransients;
+  if (tr) {
+    for (let k = 0; k < tr.length && waves.length < 16; k += 5) {
+      if (tr[k] !== 2) continue;
+      const front = blastRadius(tr[k + 4], tr[k + 3]);
+      waves.push({
+        x: tr[k + 1],
+        y: tr[k + 2],
+        front,
+        band: 2.2 + front * 0.12,
+      });
     }
-    // Fuzz overflows the cell on purpose, with per-cell size and
-    // brightness jitter so the field is cloudy rather than uniform.
-    const footprint =
-      Math.max(8, (0.5 + t * rMax * 1.4) * 10) * (0.75 + cellJitter(i, 1));
-    const brightness = 0.45 + 0.75 * cellJitter(i, 2);
-    ctx.globalAlpha = (radSq > softSq ? 0.3 : 1.0) * brightness;
-    ctx.drawImage(
-      gasSprites[tier][bi],
-      toCx(col) - footprint / 2,
-      toCy(row) - footprint / 2,
-      footprint,
-      footprint,
-    );
   }
-  ctx.globalAlpha = 1.0;
-  ctx.globalCompositeOperation = "source-over";
 
+  // Two gas passes split by a stable per-cell hash: most cells render
+  // beneath the stars, a foreground share renders over them so clusters
+  // sit INSIDE their clouds instead of on top. Dust comes separately.
+  const renderGas = (foreground: boolean) => {
+    // Screen blending: overlapping clouds glow into each other but
+    // saturate smoothly instead of clipping to white.
+    ctx.globalCompositeOperation = "screen";
+    for (let i = 0; i < mass.length; i++) {
+      const m = mass[i];
+      if (m === 0) continue;
+      if (cellJitter(i, 4) < 0.7 === foreground) continue;
+      const col = i % size;
+      const row = (i / size) | 0;
+      const rx = col - center;
+      const ry = row - center;
+      const radSq = rx * rx + ry * ry;
+      if (radSq > fadeEndSq) continue;
+      const t = Math.log(m + 1) * invLogMax;
+      const bi = Math.min(buckets - 1, Math.floor(t * buckets));
+      // Temperature tier from the radiation field, dithered per cell so
+      // the boundaries stay organic. A nearby shock front overrides to
+      // the [OIII] teal tier.
+      let tier = 0;
+      if (rad && radRes > 0) {
+        const fx = Math.min(radRes - 1, (col * radScale) | 0);
+        const fy = Math.min(radRes - 1, (row * radScale) | 0);
+        const heat = rad[fy * radRes + fx] + (cellJitter(i, 3) - 0.5) * 6;
+        if (heat > GAS_HOT_RAD) tier = 2;
+        else if (heat > GAS_WARM_RAD) tier = 1;
+      }
+      for (const w of waves) {
+        const d = Math.hypot(col - w.x, row - w.y);
+        if (Math.abs(d - w.front) < w.band) {
+          tier = 3;
+          break;
+        }
+      }
+      // Fuzz overflows the cell on purpose, with per-cell size and
+      // brightness jitter so the field is cloudy rather than uniform.
+      const footprint =
+        Math.max(8, (0.5 + t * rMax * 1.4) * 10) * (0.75 + cellJitter(i, 1));
+      const brightness = 0.45 + 0.75 * cellJitter(i, 2);
+      ctx.globalAlpha = (radSq > softSq ? 0.3 : 1.0) * brightness;
+      ctx.drawImage(
+        gasSprites[tier][bi],
+        toCx(col) - footprint / 2,
+        toCy(row) - footprint / 2,
+        footprint,
+        footprint,
+      );
+    }
+    ctx.globalAlpha = 1.0;
+    ctx.globalCompositeOperation = "source-over";
+  };
+
+  // Dust lanes: the densest cold, unirradiated cells absorb - a dark
+  // brown multiply layer over the stars, which glow blending can never
+  // do. A jittered subset so lanes are ragged, not walls.
+  const renderDust = () => {
+    ctx.globalCompositeOperation = "multiply";
+    for (let i = 0; i < mass.length; i++) {
+      const m = mass[i];
+      if (m < 78) continue;
+      if (cellJitter(i, 5) < 0.45) continue;
+      const col = i % size;
+      const row = (i / size) | 0;
+      const rx = col - center;
+      const ry = row - center;
+      if (rx * rx + ry * ry > softSq) continue;
+      if (rad && radRes > 0) {
+        const fx = Math.min(radRes - 1, (col * radScale) | 0);
+        const fy = Math.min(radRes - 1, (row * radScale) | 0);
+        if (rad[fy * radRes + fx] > GAS_WARM_RAD) continue;
+      }
+      const footprint = Math.max(6, rMax * 7) * (0.7 + 0.6 * cellJitter(i, 6));
+      ctx.globalAlpha = 0.5;
+      ctx.drawImage(
+        dustSprite!,
+        toCx(col) - footprint / 2,
+        toCy(row) - footprint / 2,
+        footprint,
+        footprint,
+      );
+    }
+    ctx.globalAlpha = 1.0;
+    ctx.globalCompositeOperation = "source-over";
+  };
+
+  renderGas(false);
   drawStars(s, toCx, toCy);
+  renderGas(true);
+  renderDust();
   drawTransients(s, toCx, toCy);
 
   ctx.restore();
