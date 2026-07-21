@@ -25,16 +25,26 @@ const VIEW_SPAN = 1.1;
 const GAS_SPRITE_PX = 32;
 let gasSprites: HTMLCanvasElement[] = [];
 
-// Cool blue-grey nebular ramp, dim to bright (the warm palette moved to
-// the stars, which render as sharp points - the fuzz/color inversion).
+// Blue-violet nebular ramp. Deliberately flat and mid-dark: brightness
+// comes from ACCUMULATION (screen blending of overlapping clouds), the
+// way real emission scales with integrated density - a bright ramp here
+// double-counts density and clips the cores to white.
 const GAS_COLORS: [number, number, number][] = [
-  [64, 76, 102],
-  [86, 102, 134],
-  [110, 130, 168],
-  [140, 162, 200],
-  [174, 194, 228],
-  [210, 226, 252],
+  [58, 52, 120],
+  [70, 62, 145],
+  [82, 72, 168],
+  [94, 84, 190],
+  [108, 98, 210],
+  [124, 112, 228],
 ];
+
+// Stable per-cell jitter so the gas field is cloudy, not uniform - a
+// hash of the cell index, constant across frames (no flicker).
+function cellJitter(i: number, salt: number): number {
+  let h = ((i + salt * 0x1003f) ^ 0x9e3779b9) * 2654435761;
+  h = (h ^ (h >>> 13)) >>> 0;
+  return (h % 1024) / 1024;
+}
 
 function buildGasSprites() {
   if (gasSprites.length > 0) return;
@@ -45,8 +55,10 @@ function buildGasSprites() {
     const cctx = c.getContext("2d")!;
     const half = GAS_SPRITE_PX / 2;
     const grad = cctx.createRadialGradient(half, half, 0, half, half, half);
-    grad.addColorStop(0, `rgba(${r},${g},${b},0.5)`);
-    grad.addColorStop(0.4, `rgba(${r},${g},${b},0.2)`);
+    // Low alpha on purpose: dense clumps stack dozens of overlaps.
+    grad.addColorStop(0, `rgba(${r},${g},${b},0.16)`);
+    grad.addColorStop(0.35, `rgba(${r},${g},${b},0.07)`);
+    grad.addColorStop(0.7, `rgba(${r},${g},${b},0.025)`);
     grad.addColorStop(1, `rgba(${r},${g},${b},0)`);
     cctx.fillStyle = grad;
     cctx.fillRect(0, 0, GAS_SPRITE_PX, GAS_SPRITE_PX);
@@ -293,6 +305,10 @@ function drawFrame(s: State, mass: Uint16Array) {
   const softSq = softR * softR;
   const buckets = GAS_COLORS.length;
 
+  // Screen blending: overlapping clouds glow into each other but
+  // saturate smoothly instead of clipping to white the way additive
+  // blending does - cores stay violet.
+  ctx.globalCompositeOperation = "screen";
   for (let i = 0; i < mass.length; i++) {
     const m = mass[i];
     if (m === 0) continue;
@@ -304,10 +320,12 @@ function drawFrame(s: State, mass: Uint16Array) {
     if (radSq > fadeEndSq) continue;
     const t = Math.log(m + 1) * invLogMax;
     const bi = Math.min(buckets - 1, Math.floor(t * buckets));
-    // Fuzz overflows the cell on purpose - a cell's cloud bleeds well
-    // into its neighborhood and the overlaps blend into nebulae.
-    const footprint = Math.max(5, (0.5 + t * rMax * 1.4) * 8);
-    ctx.globalAlpha = radSq > softSq ? 0.3 : 1.0;
+    // Fuzz overflows the cell on purpose, with per-cell size and
+    // brightness jitter so the field is cloudy rather than uniform.
+    const footprint =
+      Math.max(8, (0.5 + t * rMax * 1.4) * 10) * (0.75 + cellJitter(i, 1));
+    const brightness = 0.45 + 0.75 * cellJitter(i, 2);
+    ctx.globalAlpha = (radSq > softSq ? 0.3 : 1.0) * brightness;
     ctx.drawImage(
       gasSprites[bi],
       toCx(col) - footprint / 2,
@@ -317,6 +335,7 @@ function drawFrame(s: State, mass: Uint16Array) {
     );
   }
   ctx.globalAlpha = 1.0;
+  ctx.globalCompositeOperation = "source-over";
 
   drawStars(s, toCx, toCy);
   drawTransients(s, toCx, toCy);
@@ -374,10 +393,10 @@ function drawTransients(
 // (light stars, warm cream) to hot (heavy stars, blue-white); size and
 // halo derive from luminosity. Render-only exaggeration is fine - none
 // of this flows back into the sim.
-// Stars: sharp warm points - crisp at a distance, the way stars read in
-// a photograph. Light stars are cream, heavy ones blue-white. Only the
-// very brightest get a faint tight glow; there is no soft halo (the
-// fuzz belongs to the gas now).
+// Stars: cross-shaped points - a tight bright core with four
+// diffraction spikes, the way stars read in a telescope image. Light
+// stars are cream, heavy ones blue-white. Spike length scales with
+// luminosity; the fuzz belongs to the gas.
 function drawStars(
   s: State,
   toCx: (x: number) => number,
@@ -395,27 +414,31 @@ function drawStars(
     const fade =
       rad <= softR ? 1 : Math.max(0, 1 - (rad / softR - 1) / (FADE_END - 1));
     if (fade <= 0.02) continue;
-    ctx.globalAlpha = fade;
     const px = toCx(stars[i] - 0.5);
     const py = toCy(stars[i + 1] - 0.5);
     const lum = Math.min(stars[i + 2], maxLum) / maxLum;
     const heat = stars[i + 3];
-    const r = 0.9 + 1.6 * Math.sqrt(lum);
+    const core = 0.7 + 1.1 * Math.sqrt(lum);
+    const spike = core * (2.5 + 4.5 * lum);
     const cr = (255 - 45 * heat) | 0;
     const cg = (240 - 18 * heat) | 0;
     const cb = (208 + 47 * heat) | 0;
-    if (lum > 0.45) {
-      ctx.fillStyle = `rgba(${cr},${cg},${cb},0.18)`;
-      ctx.beginPath();
-      ctx.arc(px, py, r * 1.8, 0, Math.PI * 2);
-      ctx.fill();
-    }
+    // Diffraction spikes: thin tapering strokes, then the core on top.
+    ctx.strokeStyle = `rgba(${cr},${cg},${cb},${(0.55 * fade).toFixed(3)})`;
+    ctx.lineWidth = 0.7;
+    ctx.beginPath();
+    ctx.moveTo(px - spike, py);
+    ctx.lineTo(px + spike, py);
+    ctx.moveTo(px, py - spike);
+    ctx.lineTo(px, py + spike);
+    ctx.stroke();
+    ctx.globalAlpha = fade;
     ctx.fillStyle = `rgb(${cr},${cg},${cb})`;
     ctx.beginPath();
-    ctx.arc(px, py, r, 0, Math.PI * 2);
+    ctx.arc(px, py, core, 0, Math.PI * 2);
     ctx.fill();
+    ctx.globalAlpha = 1.0;
   }
-  ctx.globalAlpha = 1.0;
 }
 
 export function resetView() {
