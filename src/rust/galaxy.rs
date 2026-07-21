@@ -770,10 +770,21 @@ impl Galaxy {
             let vy = self.stars.vel_y[i] + ay * time;
             self.stars.vel_x[i] = vx;
             self.stars.vel_y[i] = vy;
-            // Clamp softly inside the grid so field sampling stays valid;
-            // the boundary spring makes real excursions transient.
-            self.stars.pos_x[i] = (px + vx * time).clamp(0.0, size_f - 1e-3);
-            self.stars.pos_y[i] = (py + vy * time).clamp(0.0, size_f - 1e-3);
+            let mut nx = px + vx * time;
+            let mut ny = py + vy * time;
+            // Hard stop just outside the disk (the spring handles the
+            // rest). A rectangular clamp pins escapees in the grid
+            // corners, outside the circular world.
+            let hx = nx - center;
+            let hy = ny - center;
+            let hr = (hx * hx + hy * hy).sqrt();
+            let max_r = disk_r + 3.0;
+            if hr > max_r {
+                nx = center + hx / hr * max_r;
+                ny = center + hy / hr * max_r;
+            }
+            self.stars.pos_x[i] = nx.clamp(0.0, size_f - 1e-3);
+            self.stars.pos_y[i] = ny.clamp(0.0, size_f - 1e-3);
         }
     }
 
