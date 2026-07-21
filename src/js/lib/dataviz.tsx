@@ -475,37 +475,50 @@ function drawFrame(s: State, mass: Uint16Array) {
       if (radSq > fadeEndSq) continue;
       const t = Math.log(m + 1) * invLogMax;
       const bi = Math.min(buckets - 1, Math.floor(t * buckets));
-      // Temperature tier from the radiation field, dithered per cell so
-      // the boundaries stay organic. A nearby shock front overrides to
-      // the [OIII] teal tier.
-      let tier = 0;
+      // Continuous temperature: smoothstep crossfades between adjacent
+      // tiers instead of hard flips - a cell in a transition zone draws
+      // both sprites at fractional weights.
+      const smooth = (a: number, b: number, x: number) => {
+        const u = Math.min(1, Math.max(0, (x - a) / (b - a)));
+        return u * u * (3 - 2 * u);
+      };
+      let heat = 0;
       if (rad && radRes > 0) {
         const fx = Math.min(radRes - 1, (col * radScale) | 0);
         const fy = Math.min(radRes - 1, (row * radScale) | 0);
-        const heat = rad[fy * radRes + fx] + (cellJitter(i, 3) - 0.5) * 6;
-        if (heat > GAS_HOT_RAD) tier = 2;
-        else if (heat > GAS_WARM_RAD) tier = 1;
+        heat = rad[fy * radRes + fx];
       }
+      const tierF =
+        smooth(GAS_WARM_RAD - 4, GAS_WARM_RAD + 4, heat) +
+        smooth(GAS_HOT_RAD - 8, GAS_HOT_RAD + 8, heat);
+      // Shock teal fades with distance from the front rather than
+      // switching inside a hard annulus.
+      let teal = 0;
       for (const w of waves) {
-        const d = Math.hypot(col - w.x, row - w.y);
-        if (Math.abs(d - w.front) < w.band) {
-          tier = 3;
-          break;
-        }
+        const d = Math.abs(Math.hypot(col - w.x, row - w.y) - w.front);
+        const wgt = 1 - d / w.band;
+        if (wgt > teal) teal = wgt;
       }
+      teal = teal > 0 ? teal * teal * (3 - 2 * teal) : 0;
       // Fuzz overflows the cell on purpose, with per-cell size and
       // brightness jitter so the field is cloudy rather than uniform.
       const footprint =
         Math.max(8, (0.5 + t * rMax * 1.4) * 10) * (0.75 + cellJitter(i, 1));
       const brightness = 0.45 + 0.75 * cellJitter(i, 2);
-      ctx.globalAlpha = (radSq > softSq ? 0.3 : 1.0) * brightness;
-      ctx.drawImage(
-        gasSprites[tier][bi],
-        toCx(col) - footprint / 2,
-        toCy(row) - footprint / 2,
-        footprint,
-        footprint,
-      );
+      const alpha = (radSq > softSq ? 0.3 : 1.0) * brightness;
+      const dx = toCx(col) - footprint / 2;
+      const dy = toCy(row) - footprint / 2;
+      const base = Math.min(2, Math.floor(tierF));
+      const frac = Math.min(1, tierF - base);
+      const temp = 1 - teal;
+      const draw = (tier: number, a: number) => {
+        if (a < 0.02) return;
+        ctx.globalAlpha = a;
+        ctx.drawImage(gasSprites[tier][bi], dx, dy, footprint, footprint);
+      };
+      draw(base, alpha * temp * (1 - frac));
+      draw(Math.min(2, base + 1), alpha * temp * frac);
+      draw(3, alpha * teal);
     }
     ctx.globalAlpha = 1.0;
     ctx.globalCompositeOperation = "source-over";
@@ -519,7 +532,7 @@ function drawFrame(s: State, mass: Uint16Array) {
     for (let i = 0; i < mass.length; i++) {
       const m = mass[i];
       if (m < 78) continue;
-      if (cellJitter(i, 5) < 0.45) continue;
+      if (cellJitter(i, 5) < 0.6) continue;
       const col = i % size;
       const row = (i / size) | 0;
       const rx = col - center;
@@ -531,7 +544,7 @@ function drawFrame(s: State, mass: Uint16Array) {
         if (rad[fy * radRes + fx] > GAS_WARM_RAD) continue;
       }
       const footprint = Math.max(6, rMax * 7) * (0.7 + 0.6 * cellJitter(i, 6));
-      ctx.globalAlpha = 0.5;
+      ctx.globalAlpha = 0.35;
       ctx.drawImage(
         dustSprite!,
         toCx(col) - footprint / 2,
@@ -546,8 +559,11 @@ function drawFrame(s: State, mass: Uint16Array) {
 
   renderGas(false);
   drawStars(s, toCx, toCy);
-  renderGas(true);
+  // Dust sits under the foreground gas: it still dims the star field,
+  // but the glow layer re-softens it so lanes read as embedded darkness
+  // rather than holes punched in the clouds.
   renderDust();
+  renderGas(true);
   drawTransients(s, toCx, toCy);
 
   ctx.restore();

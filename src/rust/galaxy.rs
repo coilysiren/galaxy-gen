@@ -2383,7 +2383,10 @@ mod tests_dynamics {
         // a disk lost >60% of its L_z inside 200 ticks and every initial
         // condition collapsed into the same central blob within ~30s of
         // wall-clock. Drag must stay weak enough that orbits persist.
-        let mut g = Galaxy::new(30, 0).seed_with_mode_seeded(10, InitialCondition::Uniform, 42);
+        // Size 50, not smaller: the smoke seeding reduces a tiny disk to
+        // a handful of blobs where the wrap-noisy global L_z metric
+        // degrades regardless of the physics.
+        let mut g = Galaxy::new(50, 0).seed_with_mode_seeded(10, InitialCondition::Uniform, 42);
         let l0 = angular_momentum(&g);
         assert!(l0 > 1.0, "rotation seed must start with positive L_z");
         for _ in 0..200 {
