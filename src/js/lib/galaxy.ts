@@ -145,6 +145,25 @@ export class Frontend {
     return Number(this.galaxy.events_executed(2));
   }
 
+  public birthCount(): number {
+    return Number(this.galaxy.events_executed(1));
+  }
+
+  public captureCount(): number {
+    return Number(this.galaxy.events_executed(5));
+  }
+
+  public bhMass(): number {
+    return this.galaxy.bh_mass_value();
+  }
+
+  public gasTotal(): number {
+    const mass = this.massArray();
+    let total = 0;
+    for (let i = 0; i < mass.length; i++) total += mass[i];
+    return total;
+  }
+
   /** Lens depth relative to the seeded black hole; 0 = evaporated. */
   public lensScale(): number {
     return this.overrideLensScale ?? this.galaxy.bh_lens_scale();
@@ -257,6 +276,10 @@ export class TickWorker {
     transients: Float32Array,
     radiation: Float32Array,
     snCount: number,
+    birthCount: number,
+    captureCount: number,
+    bhMass: number,
+    gasTotal: number,
     lensScale: number,
   ) => void;
   private stopResolver: ((state: StoppedState | null) => void) | null = null;
@@ -270,6 +293,10 @@ export class TickWorker {
       transients: Float32Array,
       radiation: Float32Array,
       snCount: number,
+      birthCount: number,
+      captureCount: number,
+      bhMass: number,
+      gasTotal: number,
       lensScale: number,
     ) => void,
   ) {
@@ -297,6 +324,10 @@ export class TickWorker {
         msg.transients,
         msg.radiation,
         msg.snCount,
+        msg.birthCount,
+        msg.captureCount,
+        msg.bhMass,
+        msg.gasTotal,
         msg.lensScale,
       );
     } else if (msg.type === "stopped") {

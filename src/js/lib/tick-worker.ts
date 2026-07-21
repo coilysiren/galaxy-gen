@@ -71,6 +71,8 @@ function runOneTick() {
   const stars: Float32Array = galaxy.star_render_data();
   const transients: Float32Array = galaxy.render_transients();
   const radiation: Float32Array = galaxy.radiation_field();
+  let gasTotal = 0;
+  for (let i = 0; i < mass.length; i++) gasTotal += mass[i];
   tickId += 1;
   const payload = {
     type: "snapshot" as const,
@@ -81,6 +83,10 @@ function runOneTick() {
     transients,
     radiation,
     snCount: Number(galaxy.events_executed(2)),
+    birthCount: Number(galaxy.events_executed(1)),
+    captureCount: Number(galaxy.events_executed(5)),
+    bhMass: galaxy.bh_mass_value(),
+    gasTotal,
     lensScale: galaxy.bh_lens_scale(),
   };
   (self as unknown as Worker).postMessage(payload, [

@@ -47,6 +47,8 @@ interface InitialParams {
   /// `?lock=1`: generate reuses the seed instead of cycling to a fresh
   /// one on every press.
   seedLocked: boolean;
+  /// `?debug=1`: dev surfaces - camera interaction plus perf stats.
+  debug: boolean;
 }
 
 function readInitialParams(): InitialParams {
@@ -54,6 +56,7 @@ function readInitialParams(): InitialParams {
     galaxySize: DEFAULT_GALAXY_SIZE,
     seed: "",
     seedLocked: false,
+    debug: false,
   };
   if (typeof window === "undefined") return defaults;
   const params = new URLSearchParams(window.location.search);
@@ -65,6 +68,7 @@ function readInitialParams(): InitialParams {
     galaxySize: Number.isFinite(sizeN) && sizeN > 0 ? sizeN : defaults.galaxySize,
     seed: seedRaw != null && parseSeed(seedRaw) != null ? seedRaw.trim() : "",
     seedLocked: lockRaw != null && lockRaw !== "0" && lockRaw !== "false",
+    debug: params.has("debug"),
   };
 }
 
@@ -93,6 +97,7 @@ export function Interface() {
   // is honored for the FIRST generate either way, so shared links
   // reproduce.
   const seedLocked = initial.seedLocked;
+  const debug = initial.debug;
   const hasGeneratedRef = React.useRef(false);
   const [initialCondition, setInitialCondition] = React.useState<galaxy.InitialCondition>(
     galaxy.InitialCondition.Uniform
@@ -105,6 +110,13 @@ export function Interface() {
   const [tickMs, setTickMs] = React.useState(0);
   const [starCount, setStarCount] = React.useState(0);
   const [snCount, setSnCount] = React.useState(0);
+  const [birthCount, setBirthCount] = React.useState(0);
+  const [captureCount, setCaptureCount] = React.useState(0);
+  const [bhFactor, setBhFactor] = React.useState(1);
+  const [gasPct, setGasPct] = React.useState(100);
+  // Seed-time baselines for the popsci ratios.
+  const initialGasRef = React.useRef(1);
+  const initialBhRef = React.useRef(1);
 
   const wasmModuleRef = React.useRef<any>(null);
   const galaxyFrontendRef = React.useRef<galaxy.Frontend | null>(null);
@@ -122,6 +134,10 @@ export function Interface() {
     transients: Float32Array;
     radiation: Float32Array;
     snCount: number;
+    birthCount: number;
+    captureCount: number;
+    bhMass: number;
+    gasTotal: number;
     lensScale: number;
   } | null>(null);
   const renderedTickIdRef = React.useRef<number>(-1);
@@ -238,6 +254,12 @@ export function Interface() {
     setTickCount(0);
     setStarCount(0);
     setSnCount(0);
+    setBirthCount(0);
+    setCaptureCount(0);
+    setBhFactor(1);
+    setGasPct(100);
+    initialGasRef.current = Math.max(1, next.gasTotal());
+    initialBhRef.current = Math.max(1, next.bhMass());
     writeUrlParams({
       galaxySize,
       seed: effectiveSeed,
@@ -261,8 +283,13 @@ export function Interface() {
       dataviz.updateData(galaxyFrontendRef.current!, next);
       return next;
     });
-    setStarCount(galaxyFrontendRef.current.starCount());
-    setSnCount(galaxyFrontendRef.current.supernovaCount());
+    const fe = galaxyFrontendRef.current;
+    setStarCount(fe.starCount());
+    setSnCount(fe.supernovaCount());
+    setBirthCount(fe.birthCount());
+    setCaptureCount(fe.captureCount());
+    setBhFactor(fe.bhMass() / initialBhRef.current);
+    setGasPct((100 * fe.gasTotal()) / initialGasRef.current);
     exposeForTests();
   };
 
@@ -280,6 +307,10 @@ export function Interface() {
       dataviz.updateData(galaxyFrontendRef.current, snap.tickId);
       setStarCount(snap.stars.length / 4);
       setSnCount(snap.snCount);
+      setBirthCount(snap.birthCount);
+      setCaptureCount(snap.captureCount);
+      setBhFactor(snap.bhMass / initialBhRef.current);
+      setGasPct((100 * snap.gasTotal) / initialGasRef.current);
 
       fpsSamplesRef.current.push(performance.now());
       const cutoff = performance.now() - 1000;
@@ -315,7 +346,20 @@ export function Interface() {
         return;
       }
       workerRef.current = new galaxy.TickWorker(
-        (mass, tickMs, tickId, stars, transients, radiation, snCount, lensScale) => {
+        (
+          mass,
+          tickMs,
+          tickId,
+          stars,
+          transients,
+          radiation,
+          snCount,
+          birthCount,
+          captureCount,
+          bhMass,
+          gasTotal,
+          lensScale,
+        ) => {
           latestSnapshotRef.current = {
             mass,
             tickMs,
@@ -324,6 +368,10 @@ export function Interface() {
             transients,
             radiation,
             snCount,
+            birthCount,
+            captureCount,
+            bhMass,
+            gasTotal,
             lensScale,
           };
         },
@@ -421,12 +469,47 @@ export function Interface() {
               </button>
             </div>
 
-            <div className="input-label mt-5 grid grid-cols-2 gap-x-4 gap-y-1">
-              <span data-testid="stat-ticks">ticks: {tickCount}</span>
-              <span>tick: {tickMs.toFixed(1)} ms</span>
-              <span>fps: {fps}</span>
-              <span data-testid="stat-stars">stars: {starCount}</span>
-              <span data-testid="stat-sn">sn: {snCount}</span>
+            <div className="input-label mt-5 space-y-1">
+              <div className="flex justify-between" data-testid="stat-ticks">
+                <span>ticks:</span>
+                <span> {tickCount}</span>
+              </div>
+              <div className="flex justify-between" data-testid="stat-stars">
+                <span>stars</span>
+                <span>{starCount.toLocaleString()}</span>
+              </div>
+              <div className="flex justify-between" data-testid="stat-sn">
+                <span>supernovae</span>
+                <span>{snCount.toLocaleString()}</span>
+              </div>
+              <div className="flex justify-between">
+                <span>star births</span>
+                <span>{birthCount.toLocaleString()}</span>
+              </div>
+              <div className="flex justify-between">
+                <span>eaten by black hole</span>
+                <span>{captureCount.toLocaleString()}</span>
+              </div>
+              <div className="flex justify-between">
+                <span>black hole</span>
+                <span>×{bhFactor.toFixed(2)}</span>
+              </div>
+              <div className="flex justify-between">
+                <span>gas reservoir</span>
+                <span>{gasPct.toFixed(0)}%</span>
+              </div>
+              {debug && (
+                <>
+                  <div className="flex justify-between">
+                    <span>tick</span>
+                    <span>{tickMs.toFixed(1)} ms</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span>fps</span>
+                    <span>{fps}</span>
+                  </div>
+                </>
+              )}
             </div>
 
             {!wasmReady && (
