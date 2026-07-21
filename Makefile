@@ -35,8 +35,9 @@ build-js-prod: build-wasm ## Production webpack build.
 # The trailing `touch` forces a webpack recompile: pkg/ lives under
 # node_modules (symlink) and webpack's watcher does not rebuild the module
 # graph on pkg-only changes, so without it the browser keeps running the
-# previous WASM.
-WASM_WATCH_CMD = wasm-pack build --dev && touch src/js/index.js
+# previous WASM. Release build, not --dev: the unoptimized profile runs
+# the 250-grid sim ~5x slower and reads as a phantom perf regression.
+WASM_WATCH_CMD = wasm-pack build && touch src/js/index.js
 
 dev: ## Run the rust/wasm watcher and webpack-dev-server concurrently with auto-reload.
 	@echo "Starting rust watcher + JS dev server (Ctrl-C stops both)"

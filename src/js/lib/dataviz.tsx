@@ -86,6 +86,12 @@ interface State {
   host: HTMLElement;
   canvas: HTMLCanvasElement;
   ctx: CanvasRenderingContext2D;
+  /// Small scratch canvas for the lens: pixel read-back happens here so
+  /// the main canvas never gets a willReadFrequently (CPU) context -
+  /// that flag silently software-renders ALL compositing, which tripled
+  /// frame times when the lens first landed.
+  lensCanvas: HTMLCanvasElement;
+  lensCtx: CanvasRenderingContext2D;
   dpr: number;
   size: number;
   scale: number;
@@ -148,8 +154,7 @@ export function initViz(galaxyFrontend: galaxy.Frontend) {
   canvas.style.touchAction = "none";
   canvas.setAttribute("data-testid", "dataviz-canvas");
 
-  // willReadFrequently: the lens post-process reads pixels every frame.
-  const ctx = canvas.getContext("2d", { willReadFrequently: true });
+  const ctx = canvas.getContext("2d");
   if (!ctx) return;
   ctx.scale(dpr, dpr);
 
@@ -253,10 +258,17 @@ export function initViz(galaxyFrontend: galaxy.Frontend) {
     canvas.removeEventListener("dblclick", onDblClick);
   };
 
+  const lensCanvas = document.createElement("canvas");
+  lensCanvas.width = 8;
+  lensCanvas.height = 8;
+  const lensCtx = lensCanvas.getContext("2d", { willReadFrequently: true })!;
+
   state = {
     host,
     canvas,
     ctx,
+    lensCanvas,
+    lensCtx,
     dpr,
     size,
     scale,
@@ -382,7 +394,16 @@ function applyBlackHoleLens(s: State) {
   if (x1 <= x0 || y1 <= y0) return;
   const w = x1 - x0;
   const h = y1 - y0;
-  const img = ctx.getImageData(x0, y0, w, h);
+  // Blit the lens region to the scratch canvas and read back from
+  // there - the small readback is cheap and the main canvas stays GPU.
+  const { lensCanvas, lensCtx } = s;
+  if (lensCanvas.width < w || lensCanvas.height < h) {
+    lensCanvas.width = w;
+    lensCanvas.height = h;
+  }
+  lensCtx.clearRect(0, 0, w, h);
+  lensCtx.drawImage(canvas, x0, y0, w, h, 0, 0, w, h);
+  const img = lensCtx.getImageData(0, 0, w, h);
   const data = img.data;
   const src = new Uint8ClampedArray(data);
   const te2 = te * te;
@@ -421,7 +442,11 @@ function applyBlackHoleLens(s: State) {
       data[o + 3] = src[so + 3];
     }
   }
-  ctx.putImageData(img, x0, y0);
+  lensCtx.putImageData(img, 0, 0);
+  ctx.save();
+  ctx.setTransform(1, 0, 0, 1, 0, 0);
+  ctx.drawImage(lensCanvas, 0, 0, w, h, x0, y0, w, h);
+  ctx.restore();
 
   // Photon ring hugging the shadow edge.
   const shadowCss = thetaCss * 0.3;

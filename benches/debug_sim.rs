@@ -79,7 +79,10 @@ fn main() {
         .nth(1)
         .and_then(|a| a.parse().ok())
         .unwrap_or(4000);
-    let size = 50u16;
+    let size: u16 = std::env::args()
+        .nth(2)
+        .and_then(|a| a.parse().ok())
+        .unwrap_or(50);
     let checkpoints = [0usize, 100, 500, 1000, 2000, 4000, 8000];
 
     for (mode, name) in [
