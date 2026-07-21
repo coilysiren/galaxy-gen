@@ -67,6 +67,14 @@
     box-shadow: 0 2px 12px rgba(62, 55, 93, 0.25);
   }
 
+  /* Panel without the purple accent bar - the viz container, where a
+     border above the galaxy reads as clutter. */
+  .panel-plain {
+    background: rgba(238, 238, 238, 0.04);
+    border-radius: 0.75em;
+    box-shadow: 0 2px 12px rgba(62, 55, 93, 0.25);
+  }
+
   .input-label {
     color: var(--color-plum-400);
     letter-spacing: 0.15em;
@@ -91,10 +99,6 @@
     box-shadow: 0 0 0 2px rgba(145, 146, 187, 0.3);
   }
 
-  .nav-strip {
-    background: var(--color-plum-700);
-    letter-spacing: 0.15em;
-  }
 }
 
 kbd {
@@ -112,15 +116,9 @@ kbd {
   line-height: 1.4;
 }
 
-#dataviz svg {
-  display: block;
+/* Keep the square canvas fully on-screen on desktop: never wider than the
+   panel, never taller than the viewport minus panel chrome. */
+#dataviz canvas {
+  max-width: min(100%, calc(100vh - 6rem));
   margin: 0 auto;
-  max-width: 100%;
-}
-
-#dataviz svg #data circle {
-  fill: #9192bb;
-  stroke: #eeeeee;
-  stroke-width: 0.25;
-  filter: drop-shadow(0 0 2px rgba(145, 146, 187, 0.6));
 }

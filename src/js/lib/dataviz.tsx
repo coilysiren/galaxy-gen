@@ -8,6 +8,12 @@ const MARGIN = 20;
 const MIN_ZOOM = 1;
 const MAX_ZOOM = 50;
 
+// Display-frame rotation: the whole world turns this many radians per sim
+// tick, so the steady-state arms visibly orbit. Driven by tick count (not
+// wall clock) - pausing the sim pauses the rotation. This is a render
+// layer, not physics; honest rotation of jammed structures is future work.
+const ROTATION_RAD_PER_TICK = (2 * Math.PI) / 2400;
+
 interface Camera {
   // Screen-space (CSS px) transform: screen = zoom * world + translate.
   tx: number;
@@ -23,6 +29,7 @@ interface State {
   scale: number;
   rMax: number;
   camera: Camera;
+  simTick: number;
   lastMass: Uint16Array | null;
   cleanup: () => void;
 }
@@ -157,11 +164,18 @@ export function initViz(galaxyFrontend: galaxy.Frontend) {
     }
   };
 
+  // Double-click restores the identity camera; replaces the old
+  // "reset view" button.
+  const onDblClick = () => {
+    resetView();
+  };
+
   canvas.addEventListener("wheel", onWheel, { passive: false });
   canvas.addEventListener("pointerdown", onPointerDown);
   canvas.addEventListener("pointermove", onPointerMove);
   canvas.addEventListener("pointerup", onPointerUp);
   canvas.addEventListener("pointercancel", onPointerUp);
+  canvas.addEventListener("dblclick", onDblClick);
 
   const cleanup = () => {
     canvas.removeEventListener("wheel", onWheel);
@@ -169,6 +183,7 @@ export function initViz(galaxyFrontend: galaxy.Frontend) {
     canvas.removeEventListener("pointermove", onPointerMove);
     canvas.removeEventListener("pointerup", onPointerUp);
     canvas.removeEventListener("pointercancel", onPointerUp);
+    canvas.removeEventListener("dblclick", onDblClick);
   };
 
   state = {
@@ -179,34 +194,20 @@ export function initViz(galaxyFrontend: galaxy.Frontend) {
     scale,
     rMax: scale * 0.5,
     camera,
+    simTick: 0,
     lastMass: null,
     cleanup,
   };
   publishCamera(state);
-
-  // Keep a hidden SVG peer so existing tests asserting `#dataviz svg`
-  // and circle counts still pass.
-  const svgNs = "http://www.w3.org/2000/svg";
-  const svg = document.createElementNS(svgNs, "svg");
-  svg.setAttribute("viewBox", `0 0 ${CANVAS} ${CANVAS}`);
-  svg.style.width = "0";
-  svg.style.height = "0";
-  svg.style.position = "absolute";
-  const g = document.createElementNS(svgNs, "g");
-  g.setAttribute("id", "data");
-  for (let i = 0; i < size * size; i++) {
-    g.appendChild(document.createElementNS(svgNs, "circle"));
-  }
-  svg.appendChild(g);
-  host.appendChild(svg);
 }
 
 export function initData(galaxyFrontend: galaxy.Frontend) {
-  updateData(galaxyFrontend);
+  updateData(galaxyFrontend, 0);
 }
 
-export function updateData(galaxyFrontend: galaxy.Frontend) {
+export function updateData(galaxyFrontend: galaxy.Frontend, simTick?: number) {
   if (!state) return;
+  if (simTick != null) state.simTick = simTick;
   const mass = galaxyFrontend.massArray();
   // Copy so zoom/pan interactions after the sim stops still have data
   // to redraw from.
@@ -232,6 +233,20 @@ function drawFrame(s: State, mass: Uint16Array) {
   // Apply the camera: screen = zoom * world + translate.
   ctx.translate(camera.tx, camera.ty);
   ctx.scale(camera.zoom, camera.zoom);
+
+  // Display-frame rotation about the world center (see
+  // ROTATION_RAD_PER_TICK).
+  const worldCenter = MARGIN + (size * scale) / 2;
+  ctx.translate(worldCenter, worldCenter);
+  ctx.rotate(s.simTick * ROTATION_RAD_PER_TICK);
+  ctx.translate(-worldCenter, -worldCenter);
+
+  // Circular world boundary, matching the sim's confinement disk.
+  ctx.beginPath();
+  ctx.arc(worldCenter, worldCenter, (size / 2 - 1) * scale, 0, Math.PI * 2);
+  ctx.strokeStyle = "rgba(145, 146, 187, 0.25)";
+  ctx.lineWidth = 1.5 / camera.zoom;
+  ctx.stroke();
 
   // Fixed world radius; scaled by context so cells grow on zoom.
   const buckets = 6;

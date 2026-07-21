@@ -17,9 +17,17 @@ Struct-of-arrays (parallel `Vec<f32>` / `Vec<u16>`) so the physics inner loop is
 
 ## Constants
 
-- `GRAVATIONAL_CONSTANT` is 5.0e-2. Newton's G of 6.67e-11 is numerically invisible at this grid scale.
+- `GRAVATIONAL_CONSTANT` is 5.0e-4. Newton's G of 6.67e-11 is numerically invisible at this grid scale. Tuned so circular-orbit speeds fit under `MAX_SUBGRID_STEP` at default dt - the old 5.0e-2 demanded orbital speeds ~10x the movement cap, so every initial condition free-fell to the center at terminal speed.
 - `SOFTENING_SQ` is 1.0. Avoids division by ~0 when cells share a grid cell.
 - `MAX_SUBGRID_STEP` is 0.5. Caps per-tick position delta so we don't teleport across the grid on a tight mass concentration.
+- `DRAG_COEFF` is 0.001, applied as `v *= exp(-DRAG_COEFF * dt)` per tick. Keeps the grid-quantized sim from overheating at large dt while staying weak enough that rotation holds for minutes of wall-clock. The old flat `0.995`/tick damping halved velocity every second.
+- `REPULSE_R2` is 2.0. Gravity flips repulsive at integer r-squared at or below it - a crude contact-pressure proxy, mirrored in the WGSL kernel via a params field. Placeholder until a real equation of state.
+- `CELL_MASS_CAP` is 128. Transfers into a cell never pack it past this (incompressibility floor). A full destination rejects the mover, which parks at its cell edge with velocity intact (`BLOCKED_FRICTION` = 1.0, traffic-jam model - reflecting or damping thermalizes disk rotation). Cells above the cap shed the excess to their four neighbors each tick (pressure overflow), so capped cores breathe instead of gridlocking.
+- `CONFINE_STIFFNESS` is 0.02. The world is a disk of radius size/2 - 1: past it, cells feel a spring pull back toward the center. The toroidal wrap remains as a backstop only.
+
+## Seeding
+
+Every mode seeds inside the disk radius and then adds circular-orbit support on top: v += sqrt(G * M_enc / r) tangentially, with M_enc prefix-summed over cells sorted by radius. `seed_with_mode_seeded` gives byte-identical output for the same `(additional, mode, seed)` - the `?seed=` URL invariant covers every mode.
 
 ## Buffers
 

@@ -10,9 +10,7 @@ export interface Cell {
 /** Mirror of Rust `InitialCondition`. Kept in sync manually. */
 export enum InitialCondition {
   Uniform = 0,
-  Rotation = 1,
-  Bang = 2,
-  Collision = 3,
+  Bang = 1,
 }
 
 export type ComputeBackend = "cpu" | "webgpu";
@@ -66,10 +64,18 @@ export class Frontend {
     this.galaxy = next;
   }
 
-  /** Reproducible seed. BigInt so u64 seeds round-trip cleanly. */
-  public seedWith(additionalMass: number, seed: bigint): void {
+  /** Reproducible seed for any mode. BigInt so u64 seeds round-trip cleanly. */
+  public seedWith(
+    additionalMass: number,
+    seed: bigint,
+    mode: InitialCondition = InitialCondition.Uniform
+  ): void {
     this.overrideMass = null;
-    const next = this.galaxy.seed_with(additionalMass, seed);
+    const next = this.galaxy.seed_with_mode_seeded(
+      additionalMass,
+      mode as unknown as wasm.InitialCondition,
+      seed
+    );
     this.galaxy.free();
     this.galaxy = next;
   }

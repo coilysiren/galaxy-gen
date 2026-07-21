@@ -39,11 +39,16 @@ let running = false;
 let tickId = 0;
 let scheduled = false;
 
-function scheduleLoop() {
+// Tick-rate ceiling. Uncapped, small grids run thousands of ticks/sec and
+// the sim evolves faster than anyone can watch.
+const MAX_TICKS_PER_SEC = 30;
+const MIN_TICK_INTERVAL_MS = 1000 / MAX_TICKS_PER_SEC;
+
+function scheduleLoop(delayMs = 0) {
   if (scheduled) return;
   scheduled = true;
   // Yield between ticks so stop / setTimeModifier aren't starved.
-  setTimeout(runOneTick, 0);
+  setTimeout(runOneTick, delayMs);
 }
 
 function runOneTick() {
@@ -67,7 +72,7 @@ function runOneTick() {
   };
   (self as unknown as Worker).postMessage(payload, [mass.buffer]);
 
-  scheduleLoop();
+  scheduleLoop(Math.max(0, MIN_TICK_INTERVAL_MS - tickMs));
 }
 
 function handleInit(msg: InitMsg) {

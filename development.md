@@ -19,7 +19,7 @@ The Galaxy is immutable-style — methods like `seed()`, `tick()` return new Gal
 - `index.html` — Bootstrap 5 dark theme shell
 - `index.js` — React entry point
 - `lib/galaxy.ts` — `Frontend` class wrapping the WASM Galaxy, exposes `seed()`, `tick()`, `cells()`
-- `lib/application.tsx` — React UI with inputs (galaxy size, seed mass, time modifier) and buttons (init, seed, advance time)
+- `lib/application.tsx` — React UI: desktop sidebar with inputs (galaxy size, initial condition) and buttons (generate, run/pause, advance time)
 - `lib/dataviz.tsx` — D3 scatter plot visualization of cells, circle radius = log(mass)
 - `lib/styles.css` — custom styles
 

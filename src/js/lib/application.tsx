@@ -10,7 +10,7 @@ const DT_STEP = 1.25;
 const DT_MIN = 0.01;
 const DT_MAX = 10;
 
-const DEFAULT_GALAXY_SIZE = 50;
+const DEFAULT_GALAXY_SIZE = 250;
 const DEFAULT_SEED_MASS = 25;
 
 const U64_MAX = (1n << 64n) - 1n;
@@ -92,7 +92,8 @@ export function Interface() {
   const initial = React.useMemo(() => readInitialParams(), []);
 
   const [galaxySize, setGalaxySize] = React.useState(initial.galaxySize);
-  const [galaxySeedMass, setGalaxySeedMass] = React.useState(initial.seedMass);
+  // Seed mass has no UI input; it flows from the `?mass=` URL param only.
+  const [galaxySeedMass] = React.useState(initial.seedMass);
   const [timeModifier, setTimeModifier] = React.useState(initial.timeModifier);
   // Seed stays a string; parse at Init/Seed time. Empty means fresh random.
   const [seed, setSeed] = React.useState<string>(initial.seed);
@@ -217,9 +218,9 @@ export function Interface() {
     }
     const parsed = parseSeed(effectiveSeed);
     const next = new galaxy.Frontend(galaxySize);
-    // Reproducible path covers Uniform only; other modes use rand::rng().
-    if (parsed != null && initialCondition === galaxy.InitialCondition.Uniform) {
-      next.seedWith(galaxySeedMass, parsed);
+    // Reproducible path covers every initial condition.
+    if (parsed != null) {
+      next.seedWith(galaxySeedMass, parsed, initialCondition);
     } else {
       next.seed(galaxySeedMass, initialCondition);
     }
@@ -247,23 +248,22 @@ export function Interface() {
     await galaxyFrontendRef.current.tickAsync(timeModifier);
     const elapsed = performance.now() - t0;
     setTickMs(elapsed);
-    dataviz.updateData(galaxyFrontendRef.current);
-    setTickCount((n) => n + 1);
+    setTickCount((n) => {
+      const next = n + 1;
+      dataviz.updateData(galaxyFrontendRef.current!, next);
+      return next;
+    });
     exposeForTests();
   };
 
-  const handleResetView = () => {
-    dataviz.resetView();
-  };
-
   // RAF render loop; physics is in the worker. Skip redraw if no new snapshot.
-  const renderLoop = React.useCallback(() => {
+  const renderLoop = React.useCallback(function loop() {
     if (!runningRef.current || !galaxyFrontendRef.current) return;
     const snap = latestSnapshotRef.current;
     if (snap && snap.tickId !== renderedTickIdRef.current) {
       renderedTickIdRef.current = snap.tickId;
       galaxyFrontendRef.current.setOverrideMass(snap.mass);
-      dataviz.updateData(galaxyFrontendRef.current);
+      dataviz.updateData(galaxyFrontendRef.current, snap.tickId);
 
       fpsSamplesRef.current.push(performance.now());
       const cutoff = performance.now() - 1000;
@@ -277,7 +277,7 @@ export function Interface() {
       setTickMs(snap.tickMs);
       setTickCount(snap.tickId);
     }
-    rafRef.current = requestAnimationFrame(renderLoop);
+    rafRef.current = requestAnimationFrame(loop);
   }, []);
 
   const handleRunToggle = async () => {
@@ -389,144 +389,113 @@ export function Interface() {
 
   return (
     <div data-testid="app" data-wasm-ready={wasmReady ? "true" : "false"} className="min-h-screen">
-      <nav className="nav-strip flex items-center justify-between px-6 py-3 text-xs font-bold uppercase text-[#eeeeee]">
-        <span>./galaxy-gen</span>
-        <span className="text-[color:var(--color-plum-400)]">rust → wasm → js</span>
-      </nav>
+      <main className="mx-auto max-w-[1400px] px-4 py-6 sm:px-6 lg:grid lg:grid-cols-[300px_minmax(0,1fr)] lg:items-start lg:gap-6">
+        <aside className="mb-6 lg:sticky lg:top-6 lg:mb-0">
+          <header className="mb-6">
+            <h1 className="text-3xl tracking-[0.1em]">Galaxy Generator</h1>
+            <p className="mt-2 text-sm tracking-[0.08em] text-[color:var(--color-plum-400)]">
+              Gravitational sim computed in Rust, rendered in the browser.
+            </p>
+          </header>
 
-      <main className="mx-auto max-w-6xl px-4 py-10 sm:px-6">
-        <header className="mb-8">
-          <h1 className="text-4xl tracking-[0.1em] md:text-5xl">Galaxy Generator</h1>
-          <p className="mt-3 tracking-[0.08em] text-[color:var(--color-plum-400)]">
-            Gravitational sim computed in Rust, rendered with D3 in the browser.
-          </p>
-        </header>
+          <section className="panel p-5">
+            <div className="grid gap-4">
+              <label className="block">
+                <span className="input-label mb-1 block">Galaxy Size</span>
+                <input
+                  type="text"
+                  className="input-field"
+                  name="galaxySize"
+                  data-testid="input-galaxy-size"
+                  value={galaxySize.toString()}
+                  onChange={handleIntChange(setGalaxySize)}
+                />
+              </label>
+              <label className="block">
+                <span className="input-label mb-1 block">Initial Condition</span>
+                <select
+                  className="input-field"
+                  name="initialCondition"
+                  data-testid="select-initial-condition"
+                  value={initialCondition}
+                  onChange={(event) =>
+                    setInitialCondition(parseInt(event.target.value, 10) as galaxy.InitialCondition)
+                  }
+                >
+                  <option value={galaxy.InitialCondition.Uniform}>
+                    uniform (rotating disk)
+                  </option>
+                  <option value={galaxy.InitialCondition.Bang}>bang (central explosion)</option>
+                </select>
+              </label>
+            </div>
 
-        <section className="panel mb-8 p-6 md:p-8">
-          <div className="grid gap-4 md:grid-cols-2">
-            <label className="block">
-              <span className="input-label mb-1 block">Galaxy Size</span>
-              <input
-                type="text"
-                className="input-field"
-                name="galaxySize"
-                data-testid="input-galaxy-size"
-                value={galaxySize.toString()}
-                onChange={handleIntChange(setGalaxySize)}
-              />
-            </label>
-            <label className="block">
-              <span className="input-label mb-1 block">Seed Mass</span>
-              <input
-                type="text"
-                className="input-field"
-                name="galaxySeedMass"
-                data-testid="input-seed-mass"
-                value={galaxySeedMass.toString()}
-                onChange={handleIntChange(setGalaxySeedMass)}
-              />
-            </label>
-            <label className="block md:col-span-2">
-              <span className="input-label mb-1 block">Initial Condition</span>
-              <select
-                className="input-field"
-                name="initialCondition"
-                data-testid="select-initial-condition"
-                value={initialCondition}
-                onChange={(event) =>
-                  setInitialCondition(parseInt(event.target.value, 10) as galaxy.InitialCondition)
+            <div className="mt-5 flex flex-wrap gap-3">
+              <button
+                type="button"
+                className="btn-plum"
+                data-testid="btn-init"
+                onClick={handleInitClick}
+                disabled={!wasmReady}
+              >
+                generate galaxy
+              </button>
+              <button
+                type="button"
+                className="btn-plum"
+                data-testid="btn-run"
+                onClick={handleRunToggle}
+                disabled={!initialized}
+                style={
+                  running
+                    ? {
+                        background: "var(--color-plum-900)",
+                        borderColor: "var(--color-plum-400)",
+                      }
+                    : undefined
                 }
               >
-                <option value={galaxy.InitialCondition.Uniform}>
-                  uniform (random mass, no velocity)
-                </option>
-                <option value={galaxy.InitialCondition.Rotation}>
-                  rotation (disk with angular velocity)
-                </option>
-                <option value={galaxy.InitialCondition.Bang}>bang (central explosion)</option>
-                <option value={galaxy.InitialCondition.Collision}>
-                  collision (two clusters on intercept)
-                </option>
-              </select>
-            </label>
-          </div>
+                {running ? "pause" : "run"}
+              </button>
+              <button
+                type="button"
+                className="btn-plum"
+                data-testid="btn-tick"
+                onClick={handleTickClick}
+                disabled={!initialized || running}
+              >
+                advance time
+              </button>
+            </div>
 
-          <div className="mt-6 flex flex-wrap items-center gap-3">
-            <button
-              type="button"
-              className="btn-plum"
-              data-testid="btn-init"
-              onClick={handleInitClick}
-              disabled={!wasmReady}
-            >
-              generate galaxy
-            </button>
-            <button
-              type="button"
-              className="btn-plum"
-              data-testid="btn-tick"
-              onClick={handleTickClick}
-              disabled={!initialized || running}
-            >
-              advance time
-            </button>
-            <button
-              type="button"
-              className="btn-plum"
-              data-testid="btn-run"
-              onClick={handleRunToggle}
-              disabled={!initialized}
-              style={
-                running
-                  ? {
-                      background: "var(--color-plum-900)",
-                      borderColor: "var(--color-plum-400)",
-                    }
-                  : undefined
-              }
-            >
-              {running ? "pause" : "run"}
-            </button>
-            <button
-              type="button"
-              className="btn-plum"
-              data-testid="btn-reset-view"
-              onClick={handleResetView}
-              disabled={!initialized}
-              title="Reset pan/zoom of the viewport"
-            >
-              reset view
-            </button>
-            <div className="input-label ml-auto flex items-center gap-4 self-center">
+            <div className="input-label mt-5 grid grid-cols-2 gap-x-4 gap-y-1">
               <span data-testid="stat-dt">dt: {timeModifier.toFixed(3)}</span>
               <span data-testid="stat-ticks">ticks: {tickCount}</span>
               <span>tick: {tickMs.toFixed(1)} ms</span>
               <span>fps: {fps}</span>
             </div>
-          </div>
 
-          <p
-            className="mt-4 text-[0.7rem] tracking-widest uppercase text-[color:var(--color-plum-400)]"
-            data-testid="keyboard-hints"
-          >
-            keys: <kbd>space</kbd> play/pause · <kbd>↑</kbd>/<kbd>↓</kbd> dt ×{DT_STEP}/÷{DT_STEP} ·{" "}
-            <kbd>r</kbd> reset dt
-          </p>
-
-          {!wasmReady && (
-            <p className="mt-4 text-xs tracking-widest uppercase text-[color:var(--color-plum-400)]">
-              loading wasm…
+            <p
+              className="mt-5 text-[0.7rem] leading-relaxed tracking-widest uppercase text-[color:var(--color-plum-400)]"
+              data-testid="keyboard-hints"
+            >
+              keys: <kbd>space</kbd> play/pause · <kbd>↑</kbd>/<kbd>↓</kbd> dt ×{DT_STEP}/÷
+              {DT_STEP} · <kbd>r</kbd> reset dt
+              <br />
+              mouse: drag pan · wheel zoom · double-click reset view
             </p>
-          )}
-        </section>
 
-        <section className="panel p-4 md:p-6">
+            {!wasmReady && (
+              <p className="mt-4 text-xs tracking-widest uppercase text-[color:var(--color-plum-400)]">
+                loading wasm…
+              </p>
+            )}
+          </section>
+        </aside>
+
+        <section className="panel-plain p-3 md:p-4">
           <div id="dataviz" />
         </section>
-
-        <footer className="mt-10 text-center text-xs tracking-[0.15em] uppercase text-[color:var(--color-plum-400)]">
-          galaxy-gen
-        </footer>
       </main>
     </div>
   );

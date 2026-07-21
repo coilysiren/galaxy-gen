@@ -1,5 +1,7 @@
 /** WebGPU O(N^2) N-body force kernel. Hands acc to `tick_with_accel`. */
 
+import * as wasm from "galaxy_gen_backend/galaxy_gen_backend";
+
 export const WGSL_NBODY_FORCE = /* wgsl */ `
 // Per-body input: packed as (x, y, mass, _pad) for 16-byte alignment.
 struct Body {
@@ -12,7 +14,7 @@ struct Params {
   n: u32,
   g: f32,
   soft_sq: f32,
-  _pad: f32,
+  repulse_r2: f32,
 };
 
 @group(0) @binding(0) var<storage, read> bodies : array<Body>;
@@ -40,10 +42,13 @@ fn main(@builtin(global_invocation_id) gid : vec3<u32>) {
     if (other.mass == 0.0) { continue; }
     let dx = other.pos.x - me.pos.x;
     let dy = other.pos.y - me.pos.y;
-    let r2 = dx * dx + dy * dy + params.soft_sq;
+    let d2 = dx * dx + dy * dy;
+    let r2 = d2 + params.soft_sq;
     let inv_r = inverseSqrt(r2);
     let inv_r3 = inv_r * inv_r * inv_r;
-    let k = params.g * inv_r3 * other.mass;
+    var k = params.g * inv_r3 * other.mass;
+    // Contact repulsion, matching the CPU integrator (see galaxy.rs).
+    if (d2 <= params.repulse_r2) { k = -k; }
     ax = ax + k * dx;
     ay = ay + k * dy;
   }
@@ -52,10 +57,11 @@ fn main(@builtin(global_invocation_id) gid : vec3<u32>) {
 }
 `;
 
-// Gravitational constants must match the Rust side (see
-// `Galaxy::GRAVATIONAL_CONSTANT` / `SOFTENING_SQ` in galaxy.rs).
-const G: number = 5.0e-2;
-const SOFTENING_SQ: number = 1.0;
+// Physics constants come from the Rust side so the WGSL kernel can never
+// drift from the CPU integrator.
+const G: number = wasm.Galaxy.gravitational_constant();
+const SOFTENING_SQ: number = wasm.Galaxy.softening_sq();
+const REPULSE_R2: number = wasm.Galaxy.repulse_r2();
 
 export function isWebGPUAvailable(): boolean {
   if (typeof navigator === "undefined") return false;
@@ -192,7 +198,7 @@ export class WebGPUForceBackend {
     new Uint32Array(params.buffer)[0] = n;
     params[1] = G;
     params[2] = SOFTENING_SQ;
-    params[3] = 0;
+    params[3] = REPULSE_R2;
     this.device.queue.writeBuffer(this.paramsBuf, 0, params.buffer);
 
     // Dispatch.

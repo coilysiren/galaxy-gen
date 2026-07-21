@@ -25,7 +25,7 @@ Baseline of what ships. Pairs with `README.md` (pitch) and `development.md` (arc
 
 ## Web Worker tick loop (`src/js/lib/tick-worker.ts`)
 
-Physics off the main thread; worker owns its own `Galaxy` WASM instance. Zero-copy state transfer in/out. Live `dt` updates mid-run. Graceful degradation when `Worker` is unavailable.
+Physics off the main thread; worker owns its own `Galaxy` WASM instance. Zero-copy state transfer in/out. Live `dt` updates mid-run. Tick rate capped at 30/s. Graceful degradation when `Worker` is unavailable.
 
 ## WebGPU backend (`src/js/lib/webgpu.ts`)
 
@@ -33,11 +33,11 @@ WGSL compute shader for direct-sum O(N²) N-body force kernel. Bodies as `(pos.x
 
 ## React UI (`src/js/lib/application.tsx`)
 
-Plain `useState`. Controls: galaxy size, seed mass, init-condition dropdown, init / tick / run-pause / reset-view. Live stats: dt, tick count, tick ms, FPS. Keyboard: `space` play/pause, `↑/↓` scale dt by 1.25×, `r` reset dt. URL param round-trip (`?seed=&size=&mass=&dt=`) via `history.replaceState`. u64 seed: `crypto.getRandomValues` for fresh, `BigInt` for paste/validate. `data-wasm-ready` gate. Every E2E-touched element has `data-testid` (load-bearing).
+Plain `useState`. Sidebar layout on desktop (sticky controls left, viz right), stacked on mobile. Controls: galaxy size (default 250), init-condition dropdown (uniform rotating disk / bang), generate / run-pause / advance-time. Seed mass is `?mass=` URL-param-only (no input). Live stats: dt, tick count, tick ms, FPS. Keyboard: `space` play/pause, `↑/↓` scale dt by 1.25×, `r` reset dt. URL param round-trip (`?seed=&size=&mass=&dt=`) via `history.replaceState`. u64 seed: `crypto.getRandomValues` for fresh, `BigInt` for paste/validate. `data-wasm-ready` gate. Every E2E-touched element has `data-testid` (load-bearing).
 
 ## Visualization (`src/js/lib/dataviz.tsx`)
 
-Canvas (not SVG) renderer: single `<canvas>` per frame; SVG `setAttribute` was a bottleneck. DPR-aware (clamped 2× for HiDPI). Pan + zoom camera: pointer-drag pan, wheel zoom (with ctrl-wheel pinch), zoom clamp `[1, 50]`, pan clamp so world rect intersects viewport. Camera state observable via `data-cam-{tx,ty,zoom}` for E2E. Reset-view button.
+Canvas (not SVG) renderer: single `<canvas>` per frame; SVG `setAttribute` was a bottleneck. DPR-aware (clamped 2× for HiDPI). Pan + zoom camera: pointer-drag pan, wheel zoom (with ctrl-wheel pinch), zoom clamp `[1, 50]`, pan clamp so world rect intersects viewport. Camera state observable via `data-cam-{tx,ty,zoom}` for E2E. Double-click resets the camera. Display-frame rotation driven by sim tick count turns the whole world slowly (render layer, not physics). Circular world boundary ring drawn to match the sim's confinement disk.
 
 ## Build, test, deploy
 

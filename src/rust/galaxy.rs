@@ -1,21 +1,19 @@
 //! Galaxy simulation. See docs/galaxy-rust.md.
 
 use rand::rngs::StdRng;
-use rand::{Rng, RngExt, SeedableRng};
+use rand::{RngExt, SeedableRng};
 use wasm_bindgen::prelude::*;
 
-/// Initial-condition presets. See `seed_with_mode`.
+/// Initial-condition presets. See `seed_with_mode`. Every mode seeds a
+/// circular disk with orbital rotation baked in.
 #[wasm_bindgen]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum InitialCondition {
-    /// Current behavior: uniform random mass across the grid, zero initial velocity.
+    /// Uniform random mass across the disk, circular-orbit velocity.
     Uniform = 0,
-    /// Rotating disk: tangential velocity scaled by distance from center.
-    Rotation = 1,
-    /// Central explosion: mass concentrated, outward radial velocity.
-    Bang = 2,
-    /// Two distinct mass clusters on intercept trajectory.
-    Collision = 3,
+    /// Central explosion: mass concentrated, outward radial velocity plus
+    /// the shared disk rotation.
+    Bang = 1,
 }
 
 #[wasm_bindgen]
@@ -40,9 +38,33 @@ pub struct Galaxy {
 
 impl Galaxy {
     // See docs/galaxy-rust.md for constant rationale.
-    pub const GRAVATIONAL_CONSTANT: f32 = 5.0e-2;
+    pub const GRAVATIONAL_CONSTANT: f32 = 5.0e-4;
     const SOFTENING_SQ: f32 = 1.0;
     const MAX_SUBGRID_STEP: f32 = 0.5;
+    const DRAG_COEFF: f32 = 0.001;
+    /// Integer r² at or below which gravity flips repulsive - a crude
+    /// contact-pressure proxy. Without it every same-cell contact is a
+    /// perfectly inelastic merge and any bound system ratchets down to a
+    /// single max-mass cell. Placeholder until a real equation of state.
+    const REPULSE_R2: f32 = 2.0;
+    /// Max mass a transfer may pack into one cell (incompressibility
+    /// floor). A full destination bounces the mover instead of fusing, so
+    /// a bound core saturates into a cluster of full cells rather than a
+    /// point. ~10x the default uniform cell fill. Placeholder EOS, same
+    /// bucket as REPULSE_R2.
+    const CELL_MASS_CAP: u32 = 128;
+    /// Velocity retained when a mover is rejected by a full cell. No sign
+    /// flip: in a co-rotating region a blocked cell is in traffic, not a
+    /// head-on hit, and reflecting it thermalizes the disk's rotation
+    /// within a few hundred ticks. 1.0 - a jammed core is blocked nearly
+    /// every tick, so any per-block bleed spins it down fast. DRAG_COEFF
+    /// is the energy sink instead.
+    const BLOCKED_FRICTION: f32 = 1.0;
+    /// Spring stiffness of the circular world boundary. Beyond the disk
+    /// radius (size/2 - 1) cells feel a gentle inward pull proportional
+    /// to overshoot, replacing hard square-wall behavior. The toroidal
+    /// wrap stays as a backstop but is effectively unreachable.
+    const CONFINE_STIFFNESS: f32 = 0.02;
 }
 
 #[wasm_bindgen]
@@ -67,7 +89,12 @@ impl Galaxy {
         for r2_int in 0..=max_r2 {
             let r2 = r2_int as f32 + Galaxy::SOFTENING_SQ;
             let inv_r = 1.0 / r2.sqrt();
-            inv_r3.push(Galaxy::GRAVATIONAL_CONSTANT * inv_r * inv_r * inv_r);
+            let mut k = Galaxy::GRAVATIONAL_CONSTANT * inv_r * inv_r * inv_r;
+            // Contact repulsion: see REPULSE_R2.
+            if (r2_int as f32) <= Galaxy::REPULSE_R2 {
+                k = -k;
+            }
+            inv_r3.push(k);
         }
 
         Galaxy {
@@ -87,16 +114,40 @@ impl Galaxy {
         }
     }
 
-    /// Uniform random mass, zero initial velocity. Preserved for
-    /// backwards-compatibility with the JS `Frontend.seed(mass)` call.
+    /// Uniform-mode seed. Preserved for backwards-compatibility with the
+    /// JS `Frontend.seed(mass)` call.
     pub fn seed(&self, additional: u16) -> Galaxy {
         self.seed_with_mode(additional, InitialCondition::Uniform)
     }
 
     /// Seed with a named initial condition. Tuning constants assume
-    /// default UI params (size=50, seed_mass=25).
+    /// default UI params (size=250, seed_mass=25).
     pub fn seed_with_mode(&self, additional: u16, mode: InitialCondition) -> Galaxy {
         let mut rng = rand::rng();
+        self.seed_mode_kernel(additional, mode, &mut rng)
+    }
+
+    /// Reproducible [`seed_with_mode`]: same `(additional, mode, seed)`
+    /// gives byte-identical state, enabling `?seed=...` URL sharing for
+    /// every initial condition, not just Uniform.
+    pub fn seed_with_mode_seeded(
+        &self,
+        additional: u16,
+        mode: InitialCondition,
+        seed: u64,
+    ) -> Galaxy {
+        let mut rng = StdRng::seed_from_u64(seed);
+        self.seed_mode_kernel(additional, mode, &mut rng)
+    }
+
+    // Private, so wasm-bindgen skips it; `dyn` because bindgen impls
+    // cannot hold generics.
+    fn seed_mode_kernel(
+        &self,
+        additional: u16,
+        mode: InitialCondition,
+        rng: &mut dyn rand::Rng,
+    ) -> Galaxy {
         let mut mass = self.mass.clone();
         let mut vel_x = vec![0.0f32; self.n];
         let mut vel_y = vec![0.0f32; self.n];
@@ -105,31 +156,22 @@ impl Galaxy {
         let cx = size * 0.5;
         let cy = size * 0.5;
 
+        // The world is a disk: mass seeds only within this radius, and the
+        // boundary spring (CONFINE_STIFFNESS) takes over past it.
+        let disk_r = self.disk_radius();
+        let disk_r2 = disk_r * disk_r;
+
         match mode {
             InitialCondition::Uniform => {
                 if additional > 0 {
-                    for m in mass.iter_mut() {
-                        *m = m.saturating_add(rng.random_range(0..=additional));
+                    for i in 0..self.n {
+                        let x = self.xs_i[i] as f32 - cx;
+                        let y = self.ys_i[i] as f32 - cy;
+                        if x * x + y * y > disk_r2 {
+                            continue;
+                        }
+                        mass[i] = mass[i].saturating_add(rng.random_range(0..=additional));
                     }
-                }
-            }
-            InitialCondition::Rotation => {
-                let base = additional.max(1);
-                // V_SCALE tuned so 50-grid takes ~hundreds of ticks per rev at dt=0.5.
-                const V_SCALE: f32 = 0.6;
-                let max_r = (size * 0.5).max(1.0);
-                for i in 0..self.n {
-                    mass[i] = mass[i].saturating_add(rng.random_range(0..=base));
-                    let x = self.xs_i[i] as f32 - cx;
-                    let y = self.ys_i[i] as f32 - cy;
-                    let r = (x * x + y * y).sqrt();
-                    if r < 1e-3 {
-                        continue;
-                    }
-                    // Tangential unit vector: (-y, x) / r; scale by r/max_r.
-                    let s = V_SCALE * (r / max_r);
-                    vel_x[i] = -y / r * s;
-                    vel_y[i] = x / r * s;
                 }
             }
             InitialCondition::Bang => {
@@ -138,61 +180,68 @@ impl Galaxy {
                 }
                 let core_radius = (size * 0.15).max(2.0);
                 let core_r2 = core_radius * core_radius;
-                // `additional` acts as the intensity knob (seed-mass slider).
-                let core_fill = additional.max(1000);
-                const V_SCALE: f32 = 1.5;
+                // `additional` is the intensity knob (`?mass=` URL param).
+                let core_fill = additional.saturating_mul(6).max(150);
                 for i in 0..self.n {
                     let x = self.xs_i[i] as f32 - cx;
                     let y = self.ys_i[i] as f32 - cy;
-                    let r2 = x * x + y * y;
-                    if r2 > core_r2 {
+                    if x * x + y * y > core_r2 {
                         continue;
                     }
                     mass[i] = core_fill.saturating_add(rng.random_range(0..=core_fill / 2));
-                    let r = r2.sqrt().max(1e-3);
+                }
+                // Ejection speed keyed to the seeded core's own escape
+                // velocity - a fixed speed stops scaling once core mass
+                // grows with size² and the "explosion" jams into a ball.
+                let m_core: f64 = mass.iter().map(|&m| m as f64).sum();
+                let v_esc = (2.0 * Galaxy::GRAVATIONAL_CONSTANT * m_core as f32 / core_radius)
+                    .sqrt();
+                let v_eject = 1.15 * v_esc;
+                for i in 0..self.n {
+                    if mass[i] == 0 {
+                        continue;
+                    }
+                    let x = self.xs_i[i] as f32 - cx;
+                    let y = self.ys_i[i] as f32 - cy;
+                    let r = (x * x + y * y).sqrt().max(1e-3);
                     // Radial outward unit vector; slight jitter so the
                     // shell doesn't stay perfectly symmetric.
                     let jitter = rng.random_range(-0.1f32..=0.1f32);
-                    vel_x[i] = (x / r) * (V_SCALE + jitter);
-                    vel_y[i] = (y / r) * (V_SCALE + jitter);
+                    vel_x[i] = (x / r) * (v_eject * (1.0 + jitter));
+                    vel_y[i] = (y / r) * (v_eject * (1.0 + jitter));
                 }
             }
-            InitialCondition::Collision => {
-                // Vertical offset makes them graze rather than perfectly head-on.
-                for m in mass.iter_mut() {
-                    *m = 0;
-                }
-                let cluster_radius = (size * 0.12).max(2.0);
-                let cr2 = cluster_radius * cluster_radius;
-                let offset = size * 0.25;
-                let left_x = cx - offset;
-                let left_y = cy - size * 0.05;
-                let right_x = cx + offset;
-                let right_y = cy + size * 0.05;
-                let cluster_fill = additional.max(800);
-                const V_APPROACH: f32 = 0.8;
-                for i in 0..self.n {
-                    let fx = self.xs_i[i] as f32;
-                    let fy = self.ys_i[i] as f32;
-                    let dxl = fx - left_x;
-                    let dyl = fy - left_y;
-                    let dxr = fx - right_x;
-                    let dyr = fy - right_y;
-                    if dxl * dxl + dyl * dyl <= cr2 {
-                        mass[i] =
-                            cluster_fill.saturating_add(rng.random_range(0..=cluster_fill / 2));
-                        // Move right, slight downward drift.
-                        vel_x[i] = V_APPROACH;
-                        vel_y[i] = 0.1;
-                    } else if dxr * dxr + dyr * dyr <= cr2 {
-                        mass[i] =
-                            cluster_fill.saturating_add(rng.random_range(0..=cluster_fill / 2));
-                        // Move left, slight upward drift.
-                        vel_x[i] = -V_APPROACH;
-                        vel_y[i] = -0.1;
-                    }
-                }
+        }
+
+        // Every mode gets orbital support on top of its mode-specific
+        // velocities: v += sqrt(G·M_enc/r) tangentially, with M_enc
+        // prefix-summed over cells sorted by radius. A hand-tuned linear
+        // ramp under-spins the disk and it free-falls to the center
+        // within a few hundred ticks.
+        let mut order: Vec<usize> = (0..self.n).collect();
+        let r2_of = |i: usize, xs: &[i16], ys: &[i16]| {
+            let x = xs[i] as f32 - cx;
+            let y = ys[i] as f32 - cy;
+            x * x + y * y
+        };
+        order.sort_by(|&a, &b| {
+            r2_of(a, &self.xs_i, &self.ys_i).total_cmp(&r2_of(b, &self.xs_i, &self.ys_i))
+        });
+        let mut m_enc: f64 = 0.0;
+        for &i in &order {
+            m_enc += mass[i] as f64;
+            if mass[i] == 0 {
+                continue;
             }
+            let x = self.xs_i[i] as f32 - cx;
+            let y = self.ys_i[i] as f32 - cy;
+            let r = (x * x + y * y).sqrt();
+            if r < 1e-3 {
+                continue;
+            }
+            let v = (Galaxy::GRAVATIONAL_CONSTANT * m_enc as f32 / r).sqrt();
+            vel_x[i] += -y / r * v;
+            vel_y[i] += x / r * v;
         }
 
         Galaxy {
@@ -215,8 +264,7 @@ impl Galaxy {
     /// Reproducible [`seed`] variant. Same `(additional, seed)` gives
     /// byte-identical state, enabling `?seed=...` URL sharing.
     pub fn seed_with(&self, additional: u16, seed: u64) -> Galaxy {
-        let mut rng = StdRng::seed_from_u64(seed);
-        self.seed_with_rng(additional, &mut rng)
+        self.seed_with_mode_seeded(additional, InitialCondition::Uniform, seed)
     }
 
     pub fn tick(&self, time: f32) -> Galaxy {
@@ -269,6 +317,18 @@ impl Galaxy {
         };
         next.apply_acceleration(time);
         next
+    }
+
+    /// Physics constants for JS-side force backends (WGSL kernel params).
+    /// Rust is the single source; never hardcode these in JS.
+    pub fn gravitational_constant() -> f32 {
+        Galaxy::GRAVATIONAL_CONSTANT
+    }
+    pub fn softening_sq() -> f32 {
+        Galaxy::SOFTENING_SQ
+    }
+    pub fn repulse_r2() -> f32 {
+        Galaxy::REPULSE_R2
     }
 
     /// Flat-buffer exposure for zero-copy JS reads via wasm.memory.
@@ -343,29 +403,10 @@ impl Galaxy {
 }
 
 impl Galaxy {
-    /// Shared seeding kernel. wasm-bindgen can't take generics, hence the split.
-    fn seed_with_rng<R: Rng + ?Sized>(&self, additional: u16, rng: &mut R) -> Galaxy {
-        let mut mass = self.mass.clone();
-        if additional > 0 {
-            for m in mass.iter_mut() {
-                *m = m.saturating_add(rng.random_range(0..=additional));
-            }
-        }
-        Galaxy {
-            size: self.size,
-            n: self.n,
-            mass,
-            acc_x: vec![0.0; self.n],
-            acc_y: vec![0.0; self.n],
-            vel_x: vec![0.0; self.n],
-            vel_y: vec![0.0; self.n],
-            frac_x: vec![0.0; self.n],
-            frac_y: vec![0.0; self.n],
-            xs_i: self.xs_i.clone(),
-            ys_i: self.ys_i.clone(),
-            inv_r3: self.inv_r3.clone(),
-            scratch_mass: vec![0; self.n],
-        }
+    /// World-disk radius: seeding stays inside it, the boundary spring
+    /// engages past it.
+    fn disk_radius(&self) -> f32 {
+        (self.size as f32 * 0.5 - 1.0).max(1.0)
     }
 
     // (col, row) — x is column, y is row. Matches the pre-rewrite convention.
@@ -476,6 +517,27 @@ impl Galaxy {
     fn apply_acceleration(&mut self, time: f32) {
         let size = self.size as i32;
         let max_step = Galaxy::MAX_SUBGRID_STEP;
+        // dt-scaled drag; one exp per tick, not per cell.
+        let drag = (-Galaxy::DRAG_COEFF * time).exp();
+        // Circular-boundary spring (see CONFINE_STIFFNESS). Applied here,
+        // not in the force kernels, so the CPU, Barnes-Hut, and WebGPU
+        // paths all get it for free.
+        let center = self.size as f32 * 0.5;
+        let disk_r = self.disk_radius();
+        for i in 0..self.n {
+            if self.mass[i] == 0 {
+                continue;
+            }
+            let x = self.xs_i[i] as f32 + self.frac_x[i] - center;
+            let y = self.ys_i[i] as f32 + self.frac_y[i] - center;
+            let r = (x * x + y * y).sqrt();
+            if r <= disk_r || r < 1e-3 {
+                continue;
+            }
+            let k = Galaxy::CONFINE_STIFFNESS * (r - disk_r) / r;
+            self.acc_x[i] -= k * x;
+            self.acc_y[i] -= k * y;
+        }
 
         // Zero scratch; momentum accumulators are local per-tick.
         for m in self.scratch_mass.iter_mut() {
@@ -501,9 +563,11 @@ impl Galaxy {
             let mut vx = self.vel_x[i] + self.acc_x[i] * time;
             let mut vy = self.vel_y[i] + self.acc_y[i] * time;
 
-            // Damping: grid-quantized sim overheats at large dt without it.
-            vx *= 0.995;
-            vy *= 0.995;
+            // Drag: grid-quantized sim overheats at large dt without it.
+            // Must stay weak enough that rotation disks keep their angular
+            // momentum for minutes of wall-clock, not seconds.
+            vx *= drag;
+            vy *= drag;
 
             // Sub-grid position update
             let mut fx = self.frac_x[i] + (vx * time).clamp(-max_step, max_step);
@@ -515,24 +579,57 @@ impl Galaxy {
             // ±0.5 (half-cell).
             let mut new_col = col;
             let mut new_row = row;
+            let mut step_dx = 0i32;
+            let mut step_dy = 0i32;
             if fx >= 0.5 {
                 new_col += 1;
                 fx -= 1.0;
+                step_dx = 1;
             } else if fx <= -0.5 {
                 new_col -= 1;
                 fx += 1.0;
+                step_dx = -1;
             }
             if fy >= 0.5 {
                 new_row += 1;
                 fy -= 1.0;
+                step_dy = 1;
             } else if fy <= -0.5 {
                 new_row -= 1;
                 fy += 1.0;
+                step_dy = -1;
             }
 
             let new_col = wrap(new_col, size) as u16;
             let new_row = wrap(new_row, size) as u16;
-            let ni = self.col_row_to_index(new_col, new_row) as usize;
+            let mut ni = self.col_row_to_index(new_col, new_row) as usize;
+
+            // Incompressibility: a full destination rejects the transfer.
+            // The mover parks at its cell edge with velocity intact (minus
+            // friction) and flows through when a gap opens. Occupancy =
+            // this tick's arrivals so far, plus the resident mass when the
+            // resident (ni > i, row-major order) has not yet been
+            // re-deposited into scratch. Slightly strict when the resident
+            // is about to vacate - acceptable for a visual sim.
+            let dest_occ = if ni > i {
+                self.scratch_mass[ni].saturating_add(self.mass[ni] as u32)
+            } else {
+                self.scratch_mass[ni]
+            };
+            if ni != i
+                && dest_occ > 0
+                && dest_occ.saturating_add(m as u32) > Galaxy::CELL_MASS_CAP
+            {
+                ni = i;
+                vx *= Galaxy::BLOCKED_FRICTION;
+                vy *= Galaxy::BLOCKED_FRICTION;
+                if step_dx != 0 {
+                    fx = 0.49 * step_dx as f32;
+                }
+                if step_dy != 0 {
+                    fy = 0.49 * step_dy as f32;
+                }
+            }
 
             // Merge: sum mass, accumulate momentum, keep the fraction of
             // the *arriving* cell (approx — good enough for visuals).
@@ -561,6 +658,42 @@ impl Galaxy {
             }
             self.acc_x[i] = 0.0;
             self.acc_y[i] = 0.0;
+        }
+
+        // Pressure overflow: cells above the cap shed the excess to their
+        // four neighbors, carrying momentum with the shed mass. Without
+        // this a capped region gridlocks permanently (transfer rejection
+        // alone freezes rms_radius within ~500 ticks). Sequential in-place
+        // sweep - a shed can cascade within the same tick, which just
+        // propagates the pressure wave faster.
+        let cap = Galaxy::CELL_MASS_CAP as u16;
+        for i in 0..self.n {
+            let m = self.mass[i];
+            if m <= cap {
+                continue;
+            }
+            let share = (m - cap) / 4;
+            if share == 0 {
+                continue;
+            }
+            let (col, row) = (i as i32 % size, i as i32 / size);
+            let (svx, svy) = (self.vel_x[i], self.vel_y[i]);
+            for (dc, dr) in [(1, 0), (-1, 0), (0, 1), (0, -1)] {
+                let nc = wrap(col + dc, size) as u16;
+                let nr = wrap(row + dr, size) as u16;
+                let ni = self.col_row_to_index(nc, nr) as usize;
+                let nm = self.mass[ni];
+                let new_m = nm.saturating_add(share);
+                let moved = new_m - nm;
+                if moved == 0 {
+                    continue;
+                }
+                let mf = new_m as f32;
+                self.vel_x[ni] = (self.vel_x[ni] * nm as f32 + svx * moved as f32) / mf;
+                self.vel_y[ni] = (self.vel_y[ni] * nm as f32 + svy * moved as f32) / mf;
+                self.mass[ni] = new_m;
+                self.mass[i] -= moved;
+            }
         }
     }
 
@@ -773,7 +906,11 @@ impl Tree {
                 let r2 = d2 + soft;
                 let inv_r = 1.0 / r2.sqrt();
                 let inv_r3 = inv_r * inv_r * inv_r;
-                let k = g * inv_r3 * n.mass;
+                let mut k = g * inv_r3 * n.mass;
+                // Contact repulsion, matching the direct-sum lookup table.
+                if d2 <= Galaxy::REPULSE_R2 {
+                    k = -k;
+                }
                 ax += k * dx;
                 ay += k * dy;
             } else {
@@ -841,6 +978,20 @@ mod tests_intial_generation {
     }
 
     #[test]
+    fn test_seed_with_mode_seeded_is_reproducible_for_all_modes() {
+        // Invariant for `?seed=...` URL sharing across initial conditions.
+        for mode in [InitialCondition::Uniform, InitialCondition::Bang] {
+            let a = Galaxy::new(20, 0).seed_with_mode_seeded(25, mode, 7);
+            let b = Galaxy::new(20, 0).seed_with_mode_seeded(25, mode, 7);
+            assert_eq!(a.mass, b.mass, "mass must be reproducible for {mode:?}");
+            assert_eq!(a.vel_x, b.vel_x, "vel_x must be reproducible for {mode:?}");
+            assert_eq!(a.vel_y, b.vel_y, "vel_y must be reproducible for {mode:?}");
+            let c = Galaxy::new(20, 0).seed_with_mode_seeded(25, mode, 8);
+            assert_ne!(a.mass, c.mass, "different seeds must differ for {mode:?}");
+        }
+    }
+
+    #[test]
     fn test_seed_with_mode_uniform_matches_default_seed() {
         // Uniform mode should match the plain `seed()` behaviour (random mass
         // fill, zero velocity).
@@ -850,8 +1001,9 @@ mod tests_intial_generation {
     }
 
     #[test]
-    fn test_seed_rotation_produces_tangential_velocity() {
-        let g = Galaxy::new(20, 0).seed_with_mode(5, InitialCondition::Rotation);
+    fn test_seed_uniform_produces_tangential_velocity() {
+        // Orbital rotation is baked into every mode, uniform included.
+        let g = Galaxy::new(20, 0).seed_with_mode(5, InitialCondition::Uniform);
         // At least some cells should have nonzero velocity.
         let nonzero_v = g
             .vel_x
@@ -932,10 +1084,10 @@ mod tests_intial_generation {
     }
 
     #[test]
-    fn test_seed_rotation_has_positive_total_angular_momentum() {
+    fn test_seed_uniform_has_positive_total_angular_momentum() {
         // Net L_z = Σ m_i (x_i v_{y,i} - y_i v_{x,i}) around the grid center
-        // must be strongly positive — that's the whole point of the mode.
-        let g = Galaxy::new(30, 0).seed_with_mode(10, InitialCondition::Rotation);
+        // must be strongly positive — every mode carries disk rotation.
+        let g = Galaxy::new(30, 0).seed_with_mode(10, InitialCondition::Uniform);
         let size = g.size as f32;
         let cx = size * 0.5;
         let cy = size * 0.5;
@@ -956,71 +1108,6 @@ mod tests_intial_generation {
             "rotation mode must have strongly positive total angular momentum, got {}",
             lz
         );
-    }
-
-    #[test]
-    fn test_seed_collision_produces_two_distinct_mass_clusters() {
-        let g = Galaxy::new(40, 0).seed_with_mode(800, InitialCondition::Collision);
-        let size = g.size as f32;
-        let cx = size * 0.5;
-        // Expect populated centroids on opposite sides, separated by ~size/2.
-        let mut left_mass: u64 = 0;
-        let mut right_mass: u64 = 0;
-        let mut left_cx: f64 = 0.0;
-        let mut right_cx: f64 = 0.0;
-        for i in 0..g.n {
-            if g.mass[i] == 0 {
-                continue;
-            }
-            let x = g.xs_i[i] as f32;
-            let m = g.mass[i] as u64;
-            if x < cx {
-                left_mass += m;
-                left_cx += (x as f64) * (m as f64);
-            } else {
-                right_mass += m;
-                right_cx += (x as f64) * (m as f64);
-            }
-        }
-        assert!(left_mass > 0, "collision: left cluster has no mass");
-        assert!(right_mass > 0, "collision: right cluster has no mass");
-        let lcx = left_cx / left_mass as f64;
-        let rcx = right_cx / right_mass as f64;
-        assert!(
-            lcx < cx as f64,
-            "left centroid should be left of grid center"
-        );
-        assert!(
-            rcx > cx as f64,
-            "right centroid should be right of grid center"
-        );
-        // Clusters seeded at cx ± size*0.25 — centroids should be separated
-        // by at least size * 0.3 (slack for the jittered-radius seed).
-        assert!(
-            (rcx - lcx) > (size as f64) * 0.3,
-            "collision centroids too close: left={} right={}",
-            lcx,
-            rcx
-        );
-
-        // Velocities in the left cluster should point right (vx > 0) and
-        // vice versa — i.e. the clusters are on intercept.
-        let mut left_right_moving = 0;
-        let mut right_left_moving = 0;
-        for i in 0..g.n {
-            if g.mass[i] == 0 {
-                continue;
-            }
-            let x = g.xs_i[i] as f32;
-            if x < cx && g.vel_x[i] > 0.0 {
-                left_right_moving += 1;
-            }
-            if x >= cx && g.vel_x[i] < 0.0 {
-                right_left_moving += 1;
-            }
-        }
-        assert!(left_right_moving > 0);
-        assert!(right_left_moving > 0);
     }
 
     #[test]
@@ -1125,6 +1212,47 @@ mod tests_intial_generation {
         let no_force = g.tick_with_accel(0.5, &zeros, &zeros);
 
         assert_eq!(no_force.mass, g.mass);
+    }
+}
+
+#[cfg(test)]
+mod tests_dynamics {
+    use super::*;
+
+    fn angular_momentum(g: &Galaxy) -> f64 {
+        let size = g.size as f32;
+        let cx = size * 0.5;
+        let cy = size * 0.5;
+        let mut lz: f64 = 0.0;
+        for i in 0..g.n {
+            let m = g.mass[i] as f64;
+            if m == 0.0 {
+                continue;
+            }
+            let x = (g.xs_i[i] as f32 - cx) as f64;
+            let y = (g.ys_i[i] as f32 - cy) as f64;
+            lz += m * (x * g.vel_y[i] as f64 - y * g.vel_x[i] as f64);
+        }
+        lz
+    }
+
+    #[test]
+    fn test_rotation_disk_retains_angular_momentum_over_long_run() {
+        // Guards the drag coefficient: with the old flat 0.995/tick damping
+        // a disk lost >60% of its L_z inside 200 ticks and every initial
+        // condition collapsed into the same central blob within ~30s of
+        // wall-clock. Drag must stay weak enough that orbits persist.
+        let mut g = Galaxy::new(30, 0).seed_with_mode_seeded(10, InitialCondition::Uniform, 42);
+        let l0 = angular_momentum(&g);
+        assert!(l0 > 1.0, "rotation seed must start with positive L_z");
+        for _ in 0..200 {
+            g = g.tick(0.5);
+        }
+        let l1 = angular_momentum(&g);
+        assert!(
+            l1 > l0 * 0.5,
+            "disk lost too much angular momentum: L_z {l0:.1} -> {l1:.1}"
+        );
     }
 }
 

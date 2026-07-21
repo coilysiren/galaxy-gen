@@ -10,8 +10,7 @@ async function waitForWasm(page: Page) {
 function isDevServerNoise(msg: string): boolean {
   return (
     msg.includes("webpack-dev-server") ||
-    msg.includes("ws://127.0.0.1:8080/ws") ||
-    msg.includes("ws://localhost:8080/ws") ||
+    /ws:\/\/(127\.0\.0\.1|localhost):\d+\/ws/.test(msg) ||
     /Failed to load resource.*\b404\b/.test(msg)
   );
 }
@@ -40,11 +39,12 @@ test.describe("Galaxy Generator", () => {
 
   test("renders the UI shell with controls", async ({ page }) => {
     await expect(page.getByRole("heading", { name: "Galaxy Generator" })).toBeVisible();
-    await expect(page.getByTestId("input-galaxy-size")).toHaveValue("50");
-    await expect(page.getByTestId("input-seed-mass")).toHaveValue("25");
+    await expect(page.getByTestId("input-galaxy-size")).toHaveValue("250");
     await expect(page.getByTestId("stat-dt")).toHaveText("dt: 0.500");
     await expect(page.getByTestId("btn-init")).toBeVisible();
     await expect(page.getByTestId("btn-tick")).toBeVisible();
+    // Seed mass is URL-param-only; it must not render an input.
+    await expect(page.getByTestId("input-seed-mass")).toHaveCount(0);
   });
 
   test("init creates a canvas inside the dataviz container", async ({ page }) => {
@@ -52,31 +52,28 @@ test.describe("Galaxy Generator", () => {
     await expect(page.locator("#dataviz canvas")).toBeVisible();
   });
 
-  test("seed populates cells and draws circles", async ({ page }) => {
+  test("seed populates cells with nonzero mass", async ({ page }) => {
     await page.getByTestId("btn-init").click();
 
-    const circles = page.locator("#dataviz svg #data circle");
-    await expect(circles.first()).toBeAttached();
-    const count = await circles.count();
-    expect(count).toBeGreaterThan(0);
-
-    const cellCount = await page.evaluate(() => {
+    const stats = await page.evaluate(() => {
       const frontend = (window as any).__galaxyGen?.frontend;
-      return frontend ? frontend.cells().length : 0;
+      if (!frontend) return null;
+      const mass = frontend.massArray() as Uint16Array;
+      let nonzero = 0;
+      for (const m of mass) if (m > 0) nonzero++;
+      return { cells: frontend.cells().length, nonzero };
     });
-    expect(cellCount).toBe(50 * 50);
+    expect(stats).not.toBeNull();
+    expect(stats!.cells).toBe(250 * 250);
+    expect(stats!.nonzero).toBeGreaterThan(0);
   });
 
   test("tick advances the simulation without errors", async ({ page }) => {
     await page.getByTestId("btn-init").click();
 
-    const before = await page.locator("#dataviz svg #data circle").count();
     await page.getByTestId("btn-tick").click();
     await page.getByTestId("btn-tick").click();
-    const after = await page.locator("#dataviz svg #data circle").count();
-
-    expect(after).toBe(before);
-    expect(after).toBeGreaterThan(0);
+    await expect(page.getByTestId("stat-ticks")).toHaveText("ticks: 2");
   });
 
   test("ticks actually redistribute mass (sim is not frozen)", async ({ page }) => {
@@ -112,6 +109,9 @@ test.describe("Galaxy Generator", () => {
     const hasGpu = await page.evaluate(() => Boolean((navigator as any).gpu));
     test.skip(!hasGpu, "navigator.gpu not available in this Chromium");
 
+    // Small grid: the WGSL kernel is O(N²) per tick and 60 ticks at the
+    // 250 default blows the test timeout.
+    await page.getByTestId("input-galaxy-size").fill("50");
     await page.getByTestId("btn-init").click();
 
     // Enable WebGPU directly; UI selector was removed.
@@ -338,15 +338,11 @@ test.describe("Galaxy Generator", () => {
     await expect(hints).toContainText("reset");
   });
 
-  test("camera pan+zoom: wheel zooms, reset-view restores", async ({ page }) => {
+  test("camera pan+zoom: wheel zooms, double-click restores", async ({ page }) => {
     await page.getByTestId("btn-init").click();
 
     const canvas = page.locator("#dataviz canvas");
     await expect(canvas).toBeVisible();
-
-    const resetBtn = page.getByTestId("btn-reset-view");
-    await expect(resetBtn).toBeVisible();
-    await expect(resetBtn).toBeEnabled();
 
     const getCam = () =>
       page.evaluate(() => {
@@ -381,8 +377,8 @@ test.describe("Galaxy Generator", () => {
     expect(zoomed).not.toBeNull();
     expect(zoomed!.zoom).toBeGreaterThan(1.1);
 
-    // Reset view button restores identity transform.
-    await resetBtn.click();
+    // Double-click on the canvas restores the identity transform.
+    await canvas.dblclick();
     const after = await getCam();
     expect(after).toEqual({ tx: 0, ty: 0, zoom: 1 });
   });
@@ -458,8 +454,8 @@ test.describe("Galaxy Generator", () => {
     const moved = afterPan.tx !== afterZoom.tx || afterPan.ty !== afterZoom.ty;
     expect(moved).toBe(true);
 
-    // Reset view clears tx/ty/zoom back to identity.
-    await page.getByTestId("btn-reset-view").click();
+    // Double-click clears tx/ty/zoom back to identity.
+    await page.locator("#dataviz canvas").dblclick();
     await expect(host).toHaveAttribute("data-cam-tx", "0.00");
     await expect(host).toHaveAttribute("data-cam-ty", "0.00");
     await expect(host).toHaveAttribute("data-cam-zoom", "1.0000");
@@ -471,10 +467,9 @@ test.describe("Galaxy Generator", () => {
     await page.goto("/?seed=42&size=30&mass=10&dt=0.25");
     await waitForWasm(page);
 
-    // size/mass are still UI-visible; verify those. seed/dt are URL-only
-    // now and flow through state without a dedicated input.
+    // size is still UI-visible; seed/mass/dt are URL-only and flow
+    // through state without a dedicated input.
     await expect(page.getByTestId("input-galaxy-size")).toHaveValue("30");
-    await expect(page.getByTestId("input-seed-mass")).toHaveValue("10");
     await expect(page.getByTestId("stat-dt")).toHaveText("dt: 0.250");
 
     // After Init, the URL should carry all four params (shareable state).
@@ -509,17 +504,17 @@ test.describe("Galaxy Generator", () => {
   });
 
   test("switching initial condition produces mode-specific seed + ticks", async ({ page }) => {
-    // Sanity: the dropdown has the four modes we expect.
+    // Sanity: the dropdown has the two modes we expect.
     const select = page.getByTestId("select-initial-condition");
     await expect(select).toBeVisible();
     const optionValues = await select.locator("option").evaluateAll((opts) =>
       (opts as HTMLOptionElement[]).map((o) => o.value)
     );
-    expect(optionValues).toEqual(["0", "1", "2", "3"]);
+    expect(optionValues).toEqual(["0", "1"]);
 
-    // Each non-uniform mode must produce a different mass field than Uniform.
+    // Bang must produce a different mass field than Uniform.
     const snapshots: Record<string, number[]> = {};
-    for (const mode of ["0", "1", "2", "3"]) {
+    for (const mode of ["0", "1"]) {
       await select.selectOption(mode);
       await page.getByTestId("btn-init").click();
       // Advance a few ticks to let the mode-specific velocities take effect.
@@ -528,7 +523,7 @@ test.describe("Galaxy Generator", () => {
         const fe: any = (window as any).__galaxyGen.frontend;
         return Array.from(fe.massArray() as Uint16Array);
       });
-      expect(snapshots[mode].length).toBe(50 * 50);
+      expect(snapshots[mode].length).toBe(250 * 250);
     }
 
     // Compare by diff count; nonzero-cell ordering is too strict.
@@ -539,16 +534,13 @@ test.describe("Galaxy Generator", () => {
       return n;
     };
     const uniform = snapshots["0"];
+    // Bang concentrates mass centrally; most uniform-filled cells differ.
     const minDistinctCells = Math.floor(uniform.length * 0.1);
-    for (const mode of ["1", "2", "3"]) {
-      expect(
-        diffCount(uniform, snapshots[mode]),
-        `mode ${mode} snapshot should differ from uniform`,
-      ).toBeGreaterThan(minDistinctCells);
-    }
-    // Bang + collision should each have SOME mass left after 5 ticks.
-    expect(nonzero(snapshots["2"])).toBeGreaterThan(0);
-    expect(nonzero(snapshots["3"])).toBeGreaterThan(0);
+    expect(
+      diffCount(uniform, snapshots["1"]),
+      "bang snapshot should differ from uniform",
+    ).toBeGreaterThan(minDistinctCells);
+    expect(nonzero(snapshots["1"])).toBeGreaterThan(0);
   });
 
   test("run button ticks via the worker and pause resumes state cleanly", async ({ page }) => {
