@@ -117,12 +117,19 @@ impl Galaxy {
     /// Velocity drag applied to stars only while in the halo band. The
     /// halo spring is conservative - without dissipation ejecta would
     /// oscillate through the halo forever instead of rejoining the disk.
-    const STAR_HALO_DRAG: f32 = 0.01;
+    const STAR_HALO_DRAG: f32 = 0.04;
     /// Barnes-Hut opening angle, shared by the gas kernel and the coarse
     /// field builder.
     const THETA: f32 = 0.7;
     /// Coarse gravity-field resolution (per axis).
     const FIELD_RES: usize = 64;
+    /// Softening for the coarse field build (separate from the gas
+    /// kernel's SOFTENING_SQ). Large on purpose: the star field is a
+    /// mean field. With point-scale softening, stars dive through steep
+    /// cluster wells sampled from a 4-tick-stale field and the
+    /// integration error pumps orbital energy until the disk evaporates
+    /// into the halo.
+    const FIELD_SOFTENING_SQ: f32 = 25.0;
     /// Central black hole mass as a fraction of total seeded mass.
     const BH_MASS_FRACTION: f32 = 0.05;
     /// Star lifetime = coefficient / mass, in sim-time units. Heavy stars
@@ -145,6 +152,17 @@ impl Galaxy {
     const COLLAPSE_CONSUME_FRACTION: f32 = 0.55;
     /// Minimum birth budget - collapses thinner than this fizzle.
     const BIRTH_MIN_BUDGET: f32 = 20.0;
+    /// Cap on the gas velocity a newborn star inherits. Jammed cells
+    /// accumulate unbounded STORED velocity while barely moving (the
+    /// movement cap bounds real motion to ~1 cell per time unit) -
+    /// inheriting the raw value launches newborns straight into the
+    /// halo and empties the visible disk.
+    const BIRTH_GAS_VEL_CAP: f32 = 1.0;
+    /// Cap on the orbital-support speed given to newborns. In a clumpy
+    /// field the local sample points at the nearest cluster, not the
+    /// center - sqrt(|a| r) from a mis-aimed sample slingshots newborns
+    /// outward.
+    const BIRTH_VCIRC_CAP: f32 = 1.5;
 
     // Radiation tuning. Deposits scale luminosity into the coarse field
     // with a 3x3 splat; the field decays every rebuild.
@@ -726,7 +744,7 @@ impl Galaxy {
                     wx,
                     wy,
                     theta_sq,
-                    Galaxy::SOFTENING_SQ,
+                    Galaxy::FIELD_SOFTENING_SQ,
                     Galaxy::GRAVATIONAL_CONSTANT,
                 );
                 self.field_ax[fy * res + fx] = ax;
@@ -1126,8 +1144,14 @@ impl Galaxy {
         let cx = self.xs_i[i] as f32;
         let cy = self.ys_i[i] as f32;
         let center = self.size as f32 * 0.5;
-        let gas_vx = self.vel_x[i];
-        let gas_vy = self.vel_y[i];
+        let mut gas_vx = self.vel_x[i];
+        let mut gas_vy = self.vel_y[i];
+        let gas_speed = (gas_vx * gas_vx + gas_vy * gas_vy).sqrt();
+        if gas_speed > Galaxy::BIRTH_GAS_VEL_CAP {
+            let scale = Galaxy::BIRTH_GAS_VEL_CAP / gas_speed;
+            gas_vx *= scale;
+            gas_vy *= scale;
+        }
 
         let mut remaining = budget;
         for k in 0..n_stars {
@@ -1141,13 +1165,15 @@ impl Galaxy {
             remaining -= mass;
             let px = (cx + rng.random_range(-1.2f32..1.2)).clamp(0.0, self.size as f32 - 1e-3);
             let py = (cy + rng.random_range(-1.2f32..1.2)).clamp(0.0, self.size as f32 - 1e-3);
-            // Prograde circular support: v_circ = sqrt(|a| r) tangential.
+            // Prograde circular support from the INWARD RADIAL component
+            // of the field only - the raw magnitude is dominated by
+            // whatever clump is nearest and mis-aims newborns.
             let rx = px - center;
             let ry = py - center;
             let r = (rx * rx + ry * ry).sqrt().max(1e-3);
             let (ax, ay) = self.sample_field(px, py);
-            let a_mag = (ax * ax + ay * ay).sqrt();
-            let v_circ = (a_mag * r).sqrt();
+            let a_rad = (-(ax * rx + ay * ry) / r).max(0.0);
+            let v_circ = (a_rad * r).sqrt().min(Galaxy::BIRTH_VCIRC_CAP);
             let vx = gas_vx + (-ry / r) * v_circ;
             let vy = gas_vy + (rx / r) * v_circ;
             let star_id = self.next_star_id;
