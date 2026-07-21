@@ -45,6 +45,9 @@ interface InitialParams {
   seedMass: number;
   timeModifier: number;
   seed: string;
+  /// `?lock=1`: generate reuses the seed instead of cycling to a fresh
+  /// one on every press.
+  seedLocked: boolean;
 }
 
 function readInitialParams(): InitialParams {
@@ -53,6 +56,7 @@ function readInitialParams(): InitialParams {
     seedMass: DEFAULT_SEED_MASS,
     timeModifier: DEFAULT_DT,
     seed: "",
+    seedLocked: false,
   };
   if (typeof window === "undefined") return defaults;
   const params = new URLSearchParams(window.location.search);
@@ -63,11 +67,13 @@ function readInitialParams(): InitialParams {
   const sizeN = sizeRaw != null ? parseInt(sizeRaw, 10) : NaN;
   const massN = massRaw != null ? parseInt(massRaw, 10) : NaN;
   const dtN = dtRaw != null ? parseFloat(dtRaw) : NaN;
+  const lockRaw = params.get("lock");
   return {
     galaxySize: Number.isFinite(sizeN) && sizeN > 0 ? sizeN : defaults.galaxySize,
     seedMass: Number.isFinite(massN) && massN >= 0 ? massN : defaults.seedMass,
     timeModifier: Number.isFinite(dtN) && dtN > 0 ? dtN : defaults.timeModifier,
     seed: seedRaw != null && parseSeed(seedRaw) != null ? seedRaw.trim() : "",
+    seedLocked: lockRaw != null && lockRaw !== "0" && lockRaw !== "false",
   };
 }
 
@@ -77,6 +83,7 @@ function writeUrlParams(p: {
   seedMass: number;
   timeModifier: number;
   seed: string;
+  seedLocked: boolean;
 }): void {
   if (typeof window === "undefined") return;
   const params = new URLSearchParams();
@@ -84,6 +91,7 @@ function writeUrlParams(p: {
   params.set("size", p.galaxySize.toString());
   params.set("mass", p.seedMass.toString());
   params.set("dt", p.timeModifier.toString());
+  if (p.seedLocked) params.set("lock", "1");
   const next = `${window.location.pathname}?${params.toString()}${window.location.hash}`;
   window.history.replaceState(null, "", next);
 }
@@ -97,6 +105,11 @@ export function Interface() {
   const [timeModifier, setTimeModifier] = React.useState(initial.timeModifier);
   // Seed stays a string; parse at Init/Seed time. Empty means fresh random.
   const [seed, setSeed] = React.useState<string>(initial.seed);
+  // Generate cycles the seed unless ?lock=1 pins it. A URL-provided seed
+  // is honored for the FIRST generate either way, so shared links
+  // reproduce.
+  const seedLocked = initial.seedLocked;
+  const hasGeneratedRef = React.useRef(false);
   const [initialCondition, setInitialCondition] = React.useState<galaxy.InitialCondition>(
     galaxy.InitialCondition.Uniform
   );
@@ -219,12 +232,17 @@ export function Interface() {
     }
     latestSnapshotRef.current = null;
     renderedTickIdRef.current = -1;
-    // Always have a shareable seed on the URL after init.
+    // Always have a shareable seed on the URL after init. Reuse the
+    // current seed only when locked or on the first generate of a
+    // seed-bearing URL; otherwise every press rolls a fresh galaxy.
     let effectiveSeed = seed;
-    if (parseSeed(effectiveSeed) == null) {
+    const reuse =
+      parseSeed(effectiveSeed) != null && (seedLocked || !hasGeneratedRef.current);
+    if (!reuse) {
       effectiveSeed = randomU64Seed().toString();
       setSeed(effectiveSeed);
     }
+    hasGeneratedRef.current = true;
     const parsed = parseSeed(effectiveSeed);
     const next = new galaxy.Frontend(galaxySize);
     // Reproducible path covers every initial condition.
@@ -245,6 +263,7 @@ export function Interface() {
       seedMass: galaxySeedMass,
       timeModifier,
       seed: effectiveSeed,
+      seedLocked,
     });
     exposeForTests();
   };

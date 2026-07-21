@@ -604,6 +604,28 @@ test.describe("Galaxy Generator", () => {
     expect(tickCountAfter).toBe(tickCountBefore + 1);
   });
 
+  test("generate cycles the seed unless locked", async ({ page }) => {
+    // Unlocked: consecutive generates roll fresh galaxies.
+    await page.goto("/?size=50");
+    await waitForWasm(page);
+    await page.getByTestId("btn-init").click();
+    const firstSeed = new URL(page.url()).searchParams.get("seed");
+    await page.getByTestId("btn-init").click();
+    const secondSeed = new URL(page.url()).searchParams.get("seed");
+    expect(firstSeed).not.toBeNull();
+    expect(secondSeed).not.toEqual(firstSeed);
+
+    // Locked: the seed pins across generates and lock survives the URL
+    // round-trip.
+    await page.goto("/?seed=12345&size=50&lock=1");
+    await waitForWasm(page);
+    await page.getByTestId("btn-init").click();
+    await page.getByTestId("btn-init").click();
+    const locked = new URL(page.url());
+    expect(locked.searchParams.get("seed")).toBe("12345");
+    expect(locked.searchParams.get("lock")).toBe("1");
+  });
+
   test("stars render and survive the worker pause round-trip", async ({ page }) => {
     await page.getByTestId("input-galaxy-size").fill("50");
     await page.getByTestId("btn-init").click();
