@@ -452,19 +452,19 @@ export function Interface() {
               </label>
             </div>
 
-            <div className="mt-5 flex flex-wrap gap-3">
+            <div className="mt-5 space-y-2">
               <button
                 type="button"
-                className="btn-plum"
+                className="btn-plum w-full"
                 data-testid="btn-init"
                 onClick={handleInitClick}
                 disabled={!wasmReady}
               >
-                generate galaxy
+                generate
               </button>
               <button
                 type="button"
-                className="btn-plum"
+                className="btn-plum w-full"
                 data-testid="btn-run"
                 onClick={handleRunToggle}
                 disabled={!initialized}
@@ -477,16 +477,16 @@ export function Interface() {
                     : undefined
                 }
               >
-                {running ? "pause" : "run"}
+                {running ? "pause" : "play"}
               </button>
               <button
                 type="button"
-                className="btn-plum"
+                className="btn-plum w-full"
                 data-testid="btn-tick"
                 onClick={handleTickClick}
                 disabled={!initialized || running}
               >
-                advance time
+                step
               </button>
             </div>
 

@@ -210,13 +210,13 @@ test.describe("Galaxy Generator", () => {
   test("keyboard shortcut: Space toggles run/pause", async ({ page }) => {
     await page.getByTestId("btn-init").click();
     const runBtn = page.getByTestId("btn-run");
-    await expect(runBtn).toHaveText("run");
+    await expect(runBtn).toHaveText("play");
 
     await page.locator("body").press("Space");
     await expect(runBtn).toHaveText("pause");
 
     await page.locator("body").press("Space");
-    await expect(runBtn).toHaveText("run");
+    await expect(runBtn).toHaveText("play");
   });
 
   test("keyboard shortcut: Space does nothing before galaxy is initialised", async ({ page }) => {
@@ -572,7 +572,7 @@ test.describe("Galaxy Generator", () => {
     const advanced = parseInt(tickText?.replace(/\D/g, "") ?? "0", 10);
     expect(advanced, `tick count didn't advance (got ${tickText})`).toBeGreaterThan(0);
     await page.getByTestId("btn-run").click();
-    await expect(page.getByTestId("btn-run")).toHaveText("run");
+    await expect(page.getByTestId("btn-run")).toHaveText("play");
 
     // After pause, the Frontend should have been rehydrated from the
     // worker — mass should be meaningfully different from before.
@@ -621,7 +621,7 @@ test.describe("Galaxy Generator", () => {
     await page.getByTestId("btn-run").click();
     await page.waitForTimeout(700);
     await page.getByTestId("btn-run").click();
-    await expect(page.getByTestId("btn-run")).toHaveText("run");
+    await expect(page.getByTestId("btn-run")).toHaveText("play");
 
     const after = await page.evaluate(() => {
       const fe: any = (window as any).__galaxyGen.frontend;
