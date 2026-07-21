@@ -368,7 +368,56 @@ function drawFrame(s: State, mass: Uint16Array) {
 
   ctx.restore();
 
+  applyShockShimmer(s);
   applyBlackHoleLens(s);
+}
+
+// Refractive shimmer at each young blast front: an annulus-clipped
+// self-blit of the canvas, scaled slightly outward about the blast
+// center. Pure GPU compositing - no pixel read-back - so it stays cheap
+// no matter how busy the supernova epoch gets (capped anyway).
+const MAX_SHIMMER_WAVES = 8;
+
+function applyShockShimmer(s: State) {
+  const t = s.lastTransients;
+  if (!t || t.length === 0) return;
+  const { ctx, canvas, size, scale, camera, dpr } = s;
+  const center = size / 2;
+  const half = CANVAS / 2;
+  let drawn = 0;
+  ctx.save();
+  ctx.setTransform(1, 0, 0, 1, 0, 0);
+  for (let i = 0; i < t.length && drawn < MAX_SHIMMER_WAVES; i += 5) {
+    if (t[i] !== 2) continue;
+    const age = t[i + 3];
+    const life = 1 - age / 55;
+    if (life <= 0) continue;
+    // World -> canvas -> screen css -> device.
+    const cx = half + (t[i + 1] + 0.5 - center) * scale;
+    const cy = half + (center - t[i + 2] - 0.5) * scale;
+    const sx = (camera.zoom * cx + camera.tx) * dpr;
+    const sy = (camera.zoom * cy + camera.ty) * dpr;
+    const front = blastRadius(t[i + 4], age) * scale * camera.zoom * dpr;
+    if (front < 6) continue;
+    if (sx + front < 0 || sy + front < 0 || sx - front > canvas.width || sy - front > canvas.height) {
+      continue;
+    }
+    const thickness = Math.max(3, front * 0.16);
+    // Displacement shrinks as the wave ages - the medium relaxes.
+    const k = 1 + (2.2 * life * dpr) / front;
+    ctx.save();
+    ctx.beginPath();
+    ctx.arc(sx, sy, front, 0, Math.PI * 2);
+    ctx.arc(sx, sy, Math.max(1, front - thickness), 0, Math.PI * 2, true);
+    ctx.clip();
+    ctx.translate(sx, sy);
+    ctx.scale(k, k);
+    ctx.translate(-sx, -sy);
+    ctx.drawImage(canvas, 0, 0);
+    ctx.restore();
+    drawn++;
+  }
+  ctx.restore();
 }
 
 // Post-process: warp the finished frame around the central black hole
@@ -470,9 +519,16 @@ function applyBlackHoleLens(s: State) {
   ctx.restore();
 }
 
-// Event flashes: an expanding, fading ring for each recent supernova and
-// a brief glint for each star birth. Duration and brightness are render
-// exaggerations of instantaneous events - nothing here is sim state.
+// Sedov-Taylor-flavored blast front: radius grows as E^0.2 t^0.4 with
+// the progenitor mass standing in for energy, so a 120-mass giant's
+// remnant dwarfs a 30-mass star's, and the shock visibly decelerates.
+function blastRadius(mass: number, age: number): number {
+  return 1.2 + 2.1 * Math.pow(Math.max(mass, 30) / 30, 0.2) * Math.pow(age + 1, 0.4);
+}
+
+// Event flashes: supernova blast waves and star-birth glints. Duration
+// and brightness are render exaggerations of instantaneous events -
+// nothing here is sim state.
 function drawTransients(
   s: State,
   toCx: (x: number) => number,
@@ -481,28 +537,43 @@ function drawTransients(
   const t = s.lastTransients;
   if (!t || t.length === 0) return;
   const { ctx, scale } = s;
-  for (let i = 0; i < t.length; i += 4) {
+  for (let i = 0; i < t.length; i += 5) {
     const kind = t[i];
     const px = toCx(t[i + 1]);
     const py = toCy(t[i + 2]);
     const age = t[i + 3];
+    const mag = t[i + 4];
     if (kind === 2) {
-      // Supernova: bright core flash then an expanding shell. Kept faint
-      // and short-lived - on a space-black field a busy epoch otherwise
-      // drowns the galaxy in rings.
+      // Supernova: a shell with a bright leading edge and a fading wake
+      // - a wave, not a stroked circle. Size and brightness follow the
+      // progenitor's stellar class.
       const life = 1 - age / 55;
       if (life <= 0) continue;
-      const ringR = (1.5 + age * 0.35) * scale;
-      ctx.strokeStyle = `rgba(255,240,210,${(0.32 * life).toFixed(3)})`;
-      ctx.lineWidth = 1.6 * life;
+      const heft = Math.min(mag / 120, 1);
+      const front = blastRadius(mag, age) * scale;
+      const inner = Math.max(front * 0.55, front - (2.5 + 3 * heft) * scale);
+      const peak = (0.26 + 0.3 * heft) * life;
+      const g = ctx.createRadialGradient(px, py, inner, px, py, front);
+      g.addColorStop(0, "rgba(255,236,200,0)");
+      g.addColorStop(0.55, `rgba(255,228,185,${(peak * 0.35).toFixed(3)})`);
+      g.addColorStop(0.92, `rgba(255,244,222,${peak.toFixed(3)})`);
+      g.addColorStop(1, "rgba(255,250,240,0)");
+      ctx.fillStyle = g;
       ctx.beginPath();
-      ctx.arc(px, py, ringR, 0, Math.PI * 2);
+      ctx.arc(px, py, front, 0, Math.PI * 2);
+      ctx.fill();
+      // Crisp leading edge.
+      ctx.strokeStyle = `rgba(255,246,226,${(peak * 0.8).toFixed(3)})`;
+      ctx.lineWidth = 0.9;
+      ctx.beginPath();
+      ctx.arc(px, py, front * 0.985, 0, Math.PI * 2);
       ctx.stroke();
       if (age < 12) {
         const coreLife = 1 - age / 12;
-        ctx.fillStyle = `rgba(255,255,245,${(0.9 * coreLife).toFixed(3)})`;
+        const coreAlpha = 0.6 + 0.35 * heft;
+        ctx.fillStyle = `rgba(255,255,245,${(coreAlpha * coreLife).toFixed(3)})`;
         ctx.beginPath();
-        ctx.arc(px, py, (2.5 + age * 0.2) * scale * 0.6, 0, Math.PI * 2);
+        ctx.arc(px, py, (1.5 + heft * 2 + age * 0.2) * scale * 0.6, 0, Math.PI * 2);
         ctx.fill();
       }
     } else if (kind === 1 && age < 30) {

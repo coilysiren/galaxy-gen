@@ -524,9 +524,11 @@ impl Galaxy {
             .spawn(x, y, vx, vy, m, lifetime, luminosity, class_index, NO_CLUSTER, id)
     }
 
-    /// Renderer transients: [kind, x, y, ticks_ago] per recent executed
-    /// event within the transient window (Supernova and StarBirth).
-    /// Render-only - the flash is the renderer's reading of the event.
+    /// Renderer transients: [kind, x, y, ticks_ago, magnitude] per recent
+    /// executed event within the transient window (Supernova and
+    /// StarBirth). Magnitude is the event payload - progenitor mass for
+    /// a supernova, birth budget for a star birth - so blasts scale with
+    /// stellar class. Render-only.
     pub fn render_transients(&self) -> Vec<f32> {
         let size = self.size as i32;
         let mut out = Vec::new();
@@ -548,6 +550,7 @@ impl Galaxy {
             out.push((cell % size) as f32);
             out.push((cell / size) as f32);
             out.push(age as f32);
+            out.push(ev.payload);
         }
         out
     }
