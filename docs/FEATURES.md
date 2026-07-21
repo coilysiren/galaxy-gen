@@ -17,9 +17,9 @@ Baseline of what ships. Pairs with `README.md` (pitch) and `development.md` (arc
 - Zero-copy typed-array exports (`mass_ptr` / `mass_len` plus `mass` / `x` / `y` / `vel_x` / `vel_y` / `frac_x` / `frac_y`).
 - Rust unit tests in-file under `mod tests_*`. Benches at `benches/{tick_bench,debug_sim}.rs`.
 
-## Process graph + events (`src/rust/process.rs`, `src/rust/events.rs`)
+## Living-galaxy loop (`src/rust/process.rs`, `src/rust/events.rs`, `src/rust/stars.rs`)
 
-Static process registry with declared reads/writes, freshness requirements, and per-process cadence; `tick` runs due processes in registry order then executes the tick's due events. Deterministic event queue (emit at N, execute at N+1, stable ordering, causal parent ids) with a bounded instrumentation ring. Stateless per-(process, tick) RNG streams derived from the `?seed=` master. Walkthrough: [processes-events.md](processes-events.md).
+Static process registry with declared reads/writes, freshness requirements, and per-process cadence; `tick` runs due processes in registry order then executes the tick's due events. Deterministic event queue (emit at N, execute at N+1, stable ordering, causal parent ids) with a bounded instrumentation ring. Stateless per-(process, tick) RNG streams derived from the `?seed=` master. On top: a sparse collisionless star population reading a coarse Barnes-Hut gravity field (with a central black hole), and the full causal loop - cloud collapse -> star birth -> radiation feedback -> stellar aging -> supernova -> shock-induced collapse - running unattended with a closed baryonic mass ledger. Walkthrough: [processes-events.md](processes-events.md).
 
 ## JS / WASM boundary (`src/js/lib/galaxy.ts`)
 
@@ -41,7 +41,7 @@ Plain `useState`. Sidebar layout on desktop (sticky controls left, viz right), s
 
 ## Visualization (`src/js/lib/dataviz.tsx`)
 
-Canvas (not SVG) renderer: single `<canvas>` per frame; SVG `setAttribute` was a bottleneck. DPR-aware (clamped 2× for HiDPI). Pan + zoom camera: pointer-drag pan, wheel zoom (with ctrl-wheel pinch), zoom clamp `[1, 50]`, pan clamp so world rect intersects viewport. Camera state observable via `data-cam-{tx,ty,zoom}` for E2E. Double-click resets the camera. Display-frame rotation driven by sim tick count turns the whole world slowly (render layer, not physics). Circular world boundary ring drawn to match the sim's confinement disk.
+Canvas (not SVG) renderer: single `<canvas>` per frame; SVG `setAttribute` was a bottleneck. DPR-aware (clamped 2× for HiDPI). Pan + zoom camera: pointer-drag pan, wheel zoom (with ctrl-wheel pinch), zoom clamp `[1, 50]`, pan clamp so world rect intersects viewport. Camera state observable via `data-cam-{tx,ty,zoom}` for E2E. Double-click resets the camera. Layers: gas dots, glowing stars (halo + core, color by mass heat), and event transients (expanding supernova rings, birth glints) derived from the executed-event ring. Circular world boundary ring drawn to match the sim's confinement disk.
 
 ## Build, test, deploy
 

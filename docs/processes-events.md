@@ -31,6 +31,14 @@ One u64 master seed (the `?seed=` URL value). Streams are derived statelessly pe
 
 Same seed + same tick count + same dt sequence -> identical state. Guarded by golden-hash tests in `mod tests_golden` (galaxy.rs) that pin the mass field after 100 ticks for both initial conditions. A deliberate physics change recaptures the goldens and says so in the commit.
 
+## The causal loop
+
+Registry order (also the golden-ordering test): gravity, gravity_field, integrate_gas, integrate_stars, radiation_field, collapse_watch, stellar_aging, gas_dissipation. Motion runs every tick; fields every 4; lifecycle rules every 8-16.
+
+The loop, end to end: gas clumps under gravity -> cells that stay dense and cool accumulate collapse heat -> CloudCollapse consumes gas into a birth budget -> StarBirth spawns 1-5 stars (masses sum exactly to the budget, shared cluster id, prograde orbital velocity from the field) -> stars deposit radiation, which resists further collapse and dissipates gas -> stellar_aging retires light stars to remnants and detonates heavy ones -> Supernova returns ~80% of the star's mass to nearby gas with an outward kick, keeps a dim remnant, and emits ShockWave -> the shock boosts collapse heat around the blast, recording the shock's event id as the cells' heat parent -> induced CloudCollapse events carry that parent, so a supernova-triggered star birth has a complete verifiable ancestry (asserted by the integration test).
+
+Conservation: the baryonic ledger (gas + stars + in-flight birth budgets + the explicit dissipated sink) stays constant to sub-1.0 through formation and supernovae - a per-tick assertion in the ledger test.
+
 ## See also
 
 * [galaxy-rust.md](galaxy-rust.md) - constants, buffers, hot path

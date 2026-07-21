@@ -24,6 +24,7 @@ export class Frontend {
   // Worker-driven mass snapshot, read by the renderer without re-entering WASM.
   private overrideMass: Uint16Array | null = null;
   private overrideStars: Float32Array | null = null;
+  private overrideTransients: Float32Array | null = null;
   // CPU uses `Galaxy.tick`; WebGPU uses `tick_with_accel` after WGSL forces.
   private backend: ComputeBackend = "cpu";
   private gpuBackend: WebGPUForceBackend | null = null;
@@ -124,6 +125,11 @@ export class Frontend {
     return this.overrideStars ?? this.galaxy.star_render_data();
   }
 
+  /** Renderer transients: [kind, x, y, ticksAgo] per recent event. */
+  public transientsArray(): Float32Array {
+    return this.overrideTransients ?? this.galaxy.render_transients();
+  }
+
   /** Debug/test spawn; production stars come from StarBirth events. */
   public spawnStar(x: number, y: number, vx: number, vy: number, mass: number): number {
     this.overrideStars = null;
@@ -197,6 +203,11 @@ export class Frontend {
   public setOverrideStars(stars: Float32Array): void {
     this.overrideStars = stars;
   }
+
+  /** Point renderer at worker-produced transient buffer. */
+  public setOverrideTransients(transients: Float32Array): void {
+    this.overrideTransients = transients;
+  }
 }
 
 export interface SimState {
@@ -219,6 +230,7 @@ export class TickWorker {
     tickMs: number,
     tickId: number,
     stars: Float32Array,
+    transients: Float32Array,
   ) => void;
   private stopResolver: ((state: StoppedState | null) => void) | null = null;
 
@@ -228,6 +240,7 @@ export class TickWorker {
       tickMs: number,
       tickId: number,
       stars: Float32Array,
+      transients: Float32Array,
     ) => void,
   ) {
     if (typeof Worker === "undefined") {
@@ -246,7 +259,7 @@ export class TickWorker {
     const msg = ev.data;
     if (!msg || typeof msg.type !== "string") return;
     if (msg.type === "snapshot") {
-      this.onSnapshot(msg.mass, msg.tickMs, msg.tickId, msg.stars);
+      this.onSnapshot(msg.mass, msg.tickMs, msg.tickId, msg.stars, msg.transients);
     } else if (msg.type === "stopped") {
       if (!this.stopResolver) return;
       const resolver = this.stopResolver;

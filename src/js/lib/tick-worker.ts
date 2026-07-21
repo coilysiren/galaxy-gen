@@ -69,6 +69,7 @@ function runOneTick() {
   // `galaxy.mass()` allocates a JS-heap Uint16Array; safe to transfer.
   const mass: Uint16Array = galaxy.mass();
   const stars: Float32Array = galaxy.star_render_data();
+  const transients: Float32Array = galaxy.render_transients();
   tickId += 1;
   const payload = {
     type: "snapshot" as const,
@@ -76,8 +77,13 @@ function runOneTick() {
     tickMs,
     tickId,
     stars,
+    transients,
   };
-  (self as unknown as Worker).postMessage(payload, [mass.buffer, stars.buffer]);
+  (self as unknown as Worker).postMessage(payload, [
+    mass.buffer,
+    stars.buffer,
+    transients.buffer,
+  ]);
 
   scheduleLoop(Math.max(0, MIN_TICK_INTERVAL_MS - tickMs));
 }

@@ -24,7 +24,7 @@ impl Stage {
 pub const NO_CLUSTER: u32 = u32::MAX;
 
 /// Floats per star in the flat serialization (see `to_flat`).
-pub const STAR_FLOATS: usize = 11;
+pub const STAR_FLOATS: usize = 12;
 
 /// Floats per star in the render packing (see `render_data`).
 pub const RENDER_FLOATS: usize = 4;
@@ -44,6 +44,9 @@ pub struct Stars {
     pub luminosity: Vec<f32>,
     pub color_index: Vec<f32>,
     pub cluster_id: Vec<u32>,
+    /// Stable identity for event targeting - indices reorder on
+    /// swap_remove. Fits f32 exactly below 2^24 spawns.
+    pub id: Vec<u32>,
 }
 
 impl Stars {
@@ -71,6 +74,7 @@ impl Stars {
         luminosity: f32,
         color_index: f32,
         cluster_id: u32,
+        id: u32,
     ) -> usize {
         self.pos_x.push(pos_x);
         self.pos_y.push(pos_y);
@@ -83,6 +87,7 @@ impl Stars {
         self.luminosity.push(luminosity);
         self.color_index.push(color_index);
         self.cluster_id.push(cluster_id);
+        self.id.push(id);
         self.len() - 1
     }
 
@@ -98,6 +103,11 @@ impl Stars {
         self.luminosity.swap_remove(i);
         self.color_index.swap_remove(i);
         self.cluster_id.swap_remove(i);
+        self.id.swap_remove(i);
+    }
+
+    pub fn index_of_id(&self, id: u32) -> Option<usize> {
+        self.id.iter().position(|&x| x == id)
     }
 
     /// Renderer packing: [x, y, luminosity, color_index] per star. The
@@ -133,6 +143,7 @@ impl Stars {
             out.push(self.luminosity[i]);
             out.push(self.color_index[i]);
             out.push(self.cluster_id[i] as f32);
+            out.push(self.id[i] as f32);
         }
         out
     }
@@ -151,6 +162,7 @@ impl Stars {
             s.luminosity.push(chunk[8]);
             s.color_index.push(chunk[9]);
             s.cluster_id.push(chunk[10] as u32);
+            s.id.push(chunk[11] as u32);
         }
         s
     }
@@ -163,8 +175,8 @@ mod tests_stars {
     #[test]
     fn test_flat_round_trip_is_exact() {
         let mut s = Stars::new();
-        s.spawn(1.5, 2.5, -0.1, 0.2, 40.0, 1000.0, 250.0, 0.7, 3);
-        s.spawn(9.0, 8.0, 0.3, -0.4, 12.0, 4000.0, 40.0, 0.2, NO_CLUSTER);
+        s.spawn(1.5, 2.5, -0.1, 0.2, 40.0, 1000.0, 250.0, 0.7, 3, 101);
+        s.spawn(9.0, 8.0, 0.3, -0.4, 12.0, 4000.0, 40.0, 0.2, NO_CLUSTER, 102);
         s.age[1] = 123.5;
         s.stage[0] = Stage::Remnant as u8;
         let flat = s.to_flat();
@@ -176,18 +188,21 @@ mod tests_stars {
         assert_eq!(back.age, s.age);
         assert_eq!(back.stage, s.stage);
         assert_eq!(back.cluster_id, s.cluster_id);
+        assert_eq!(back.id, s.id);
     }
 
     #[test]
     fn test_swap_remove_keeps_arrays_parallel() {
         let mut s = Stars::new();
-        s.spawn(0.0, 0.0, 0.0, 0.0, 1.0, 1.0, 1.0, 0.0, 0);
-        s.spawn(1.0, 1.0, 0.0, 0.0, 2.0, 1.0, 1.0, 0.0, 1);
-        s.spawn(2.0, 2.0, 0.0, 0.0, 3.0, 1.0, 1.0, 0.0, 2);
+        s.spawn(0.0, 0.0, 0.0, 0.0, 1.0, 1.0, 1.0, 0.0, 0, 10);
+        s.spawn(1.0, 1.0, 0.0, 0.0, 2.0, 1.0, 1.0, 0.0, 1, 11);
+        s.spawn(2.0, 2.0, 0.0, 0.0, 3.0, 1.0, 1.0, 0.0, 2, 12);
         s.swap_remove(0);
         assert_eq!(s.len(), 2);
         assert_eq!(s.pos_x[0], 2.0);
         assert_eq!(s.mass[0], 3.0);
         assert_eq!(s.cluster_id[0], 2);
+        assert_eq!(s.index_of_id(11), Some(1));
+        assert_eq!(s.index_of_id(10), None);
     }
 }

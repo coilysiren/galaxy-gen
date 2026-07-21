@@ -106,6 +106,7 @@ export function Interface() {
   const [running, setRunning] = React.useState(false);
   const [fps, setFps] = React.useState(0);
   const [tickMs, setTickMs] = React.useState(0);
+  const [starCount, setStarCount] = React.useState(0);
 
   const wasmModuleRef = React.useRef<any>(null);
   const galaxyFrontendRef = React.useRef<galaxy.Frontend | null>(null);
@@ -125,6 +126,7 @@ export function Interface() {
     tickMs: number;
     tickId: number;
     stars: Float32Array;
+    transients: Float32Array;
   } | null>(null);
   const renderedTickIdRef = React.useRef<number>(-1);
 
@@ -233,6 +235,7 @@ export function Interface() {
     dataviz.initData(next);
     setInitialized(true);
     setTickCount(0);
+    setStarCount(0);
     writeUrlParams({
       galaxySize,
       seedMass: galaxySeedMass,
@@ -257,6 +260,7 @@ export function Interface() {
       dataviz.updateData(galaxyFrontendRef.current!, next);
       return next;
     });
+    setStarCount(galaxyFrontendRef.current.starCount());
     exposeForTests();
   };
 
@@ -268,7 +272,9 @@ export function Interface() {
       renderedTickIdRef.current = snap.tickId;
       galaxyFrontendRef.current.setOverrideMass(snap.mass);
       galaxyFrontendRef.current.setOverrideStars(snap.stars);
+      galaxyFrontendRef.current.setOverrideTransients(snap.transients);
       dataviz.updateData(galaxyFrontendRef.current, snap.tickId);
+      setStarCount(snap.stars.length / 4);
 
       fpsSamplesRef.current.push(performance.now());
       const cutoff = performance.now() - 1000;
@@ -304,8 +310,8 @@ export function Interface() {
         return;
       }
       workerRef.current = new galaxy.TickWorker(
-        (mass, tickMs, tickId, stars) => {
-          latestSnapshotRef.current = { mass, tickMs, tickId, stars };
+        (mass, tickMs, tickId, stars, transients) => {
+          latestSnapshotRef.current = { mass, tickMs, tickId, stars, transients };
         },
       );
     }
@@ -478,6 +484,7 @@ export function Interface() {
               <span data-testid="stat-ticks">ticks: {tickCount}</span>
               <span>tick: {tickMs.toFixed(1)} ms</span>
               <span>fps: {fps}</span>
+              <span data-testid="stat-stars">stars: {starCount}</span>
             </div>
 
             <p

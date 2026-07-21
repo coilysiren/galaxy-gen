@@ -27,6 +27,7 @@ interface State {
   simTick: number;
   lastMass: Uint16Array | null;
   lastStars: Float32Array | null;
+  lastTransients: Float32Array | null;
   cleanup: () => void;
 }
 
@@ -193,6 +194,7 @@ export function initViz(galaxyFrontend: galaxy.Frontend) {
     simTick: 0,
     lastMass: null,
     lastStars: null,
+    lastTransients: null,
     cleanup,
   };
   publishCamera(state);
@@ -210,6 +212,7 @@ export function updateData(galaxyFrontend: galaxy.Frontend, simTick?: number) {
   // to redraw from.
   state.lastMass = mass.slice();
   state.lastStars = galaxyFrontend.starRenderArray().slice();
+  state.lastTransients = galaxyFrontend.transientsArray().slice();
   drawFrame(state, state.lastMass);
 }
 
@@ -273,8 +276,49 @@ function drawFrame(s: State, mass: Uint16Array) {
   }
 
   drawStars(s);
+  drawTransients(s);
 
   ctx.restore();
+}
+
+// Event flashes: an expanding, fading ring for each recent supernova and
+// a brief glint for each star birth. Duration and brightness are render
+// exaggerations of instantaneous events - nothing here is sim state.
+function drawTransients(s: State) {
+  const t = s.lastTransients;
+  if (!t || t.length === 0) return;
+  const { ctx, size, scale } = s;
+  for (let i = 0; i < t.length; i += 4) {
+    const kind = t[i];
+    const px = MARGIN + (t[i + 1] + 0.5) * scale;
+    const py = MARGIN + (size - 1 - t[i + 2] + 0.5) * scale;
+    const age = t[i + 3];
+    if (kind === 2) {
+      // Supernova: bright core flash then an expanding shell.
+      const life = 1 - age / 90;
+      if (life <= 0) continue;
+      const ringR = (1.5 + age * 0.35) * scale;
+      ctx.strokeStyle = `rgba(255,240,210,${(0.7 * life).toFixed(3)})`;
+      ctx.lineWidth = 2.5 * life;
+      ctx.beginPath();
+      ctx.arc(px, py, ringR, 0, Math.PI * 2);
+      ctx.stroke();
+      if (age < 12) {
+        const coreLife = 1 - age / 12;
+        ctx.fillStyle = `rgba(255,255,245,${(0.9 * coreLife).toFixed(3)})`;
+        ctx.beginPath();
+        ctx.arc(px, py, (2.5 + age * 0.2) * scale * 0.6, 0, Math.PI * 2);
+        ctx.fill();
+      }
+    } else if (kind === 1 && age < 30) {
+      // Star birth: soft glint.
+      const life = 1 - age / 30;
+      ctx.fillStyle = `rgba(200,220,255,${(0.35 * life).toFixed(3)})`;
+      ctx.beginPath();
+      ctx.arc(px, py, (1.2 + age * 0.05) * scale, 0, Math.PI * 2);
+      ctx.fill();
+    }
+  }
 }
 
 // Stars: bright glowing points over the gas layer. Color runs cool

@@ -25,6 +25,10 @@ Struct-of-arrays (parallel `Vec<f32>` / `Vec<u16>`) so the physics inner loop is
 - `CELL_MASS_CAP` is 128. Transfers into a cell never pack it past this (incompressibility floor). A full destination rejects the mover, which parks at its cell edge with velocity intact (`BLOCKED_FRICTION` = 1.0, traffic-jam model - reflecting or damping thermalizes disk rotation). Cells above the cap shed the excess to their four neighbors each tick (pressure overflow), so capped cores breathe instead of gridlocking.
 - `CONFINE_STIFFNESS` is 0.02. The world is a disk of radius size/2 - 1: past it, cells feel a spring pull back toward the center. The toroidal wrap remains as a backstop only.
 
+## Stars and the causal loop
+
+Stars live in `src/rust/stars.rs`: struct-of-arrays, continuous f32 positions, stable u32 ids (indices reorder on swap-remove). They are collisionless - they bilinear-sample a coarse 64x64 acceleration field rebuilt every 4 ticks from gas + stars + a central black hole (5% of seeded mass), so they never jam and the star population costs O(N). Lifecycle: lifetime = 40000/mass; heavy stars (mass >= 60) supernova, returning 80% of their mass to nearby gas with an outward kick and leaving a dim remnant; light stars fade to remnants. Collapse, birth, radiation, and shock tuning constants are documented inline in galaxy.rs; the loop walkthrough lives in [processes-events.md](processes-events.md).
+
 ## Seeding
 
 Every mode seeds inside the disk radius and then adds circular-orbit support on top: v += sqrt(G * M_enc / r) tangentially, with M_enc prefix-summed over cells sorted by radius. `seed_with_mode_seeded` gives byte-identical output for the same `(additional, mode, seed)` - the `?seed=` URL invariant covers every mode.

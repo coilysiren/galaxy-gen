@@ -66,6 +66,11 @@ pub struct Galaxy {
     /// in the baryonic ledger (gas + stars + pending births + this).
     dissipated_total: u64,
     next_cluster_id: u32,
+    next_star_id: u32,
+    /// Causal attribution for shock-boosted collapse heat: the ShockWave
+    /// event id that last boosted each cell, 0 = organic. Lets an induced
+    /// CloudCollapse carry its true parent.
+    heat_parent: Vec<u64>,
 }
 
 impl Galaxy {
@@ -133,6 +138,21 @@ impl Galaxy {
     /// ledger), emitting CloudDissipate when a cell empties.
     const RAD_DISSIPATE_THRESHOLD: f32 = 60.0;
 
+    // Supernova tuning. Main-sequence stars past their lifetime and at
+    // or above the mass threshold detonate; lighter ones fade to
+    // remnants. A supernova returns most of the star's mass to nearby
+    // gas with an outward kick and leaves a dim compact remnant.
+    const SN_MASS_THRESHOLD: f32 = 60.0;
+    const SN_GAS_RETURN: f32 = 0.8;
+    const SN_KICK: f32 = 1.2;
+    const SN_RADIUS: i32 = 2;
+    /// ShockWave heat boost applied to cells within SHOCK_RADIUS - the
+    /// induced-collapse coupling that closes the loop.
+    const SHOCK_HEAT_BOOST: u8 = 3;
+    const SHOCK_RADIUS: i32 = 3;
+    /// Renderer transient window (ticks) for executed-event flashes.
+    const TRANSIENT_WINDOW: u64 = 90;
+
     // RNG stream ids (see rng_stream).
     const RNG_COLLAPSE_WATCH: u64 = 1;
     const RNG_STAR_BIRTH: u64 = 2;
@@ -193,6 +213,8 @@ impl Galaxy {
             collapse_heat: vec![0; n],
             dissipated_total: 0,
             next_cluster_id: 0,
+            next_star_id: 1,
+            heat_parent: vec![0; n],
         }
     }
 
@@ -348,6 +370,8 @@ impl Galaxy {
         g.collapse_heat = vec![0; self.n];
         g.dissipated_total = 0;
         g.next_cluster_id = 0;
+        g.next_star_id = 1;
+        g.heat_parent = vec![0; self.n];
         g
     }
 
@@ -420,6 +444,8 @@ impl Galaxy {
     /// (lifetime, luminosity, color) come from mass.
     pub fn spawn_star(&mut self, x: f32, y: f32, vx: f32, vy: f32, mass: f32) -> usize {
         let m = mass.max(1.0);
+        let id = self.next_star_id;
+        self.next_star_id += 1;
         self.stars.spawn(
             x,
             y,
@@ -430,7 +456,36 @@ impl Galaxy {
             m.powf(1.5),
             (m / 100.0).clamp(0.0, 1.0),
             NO_CLUSTER,
+            id,
         )
+    }
+
+    /// Renderer transients: [kind, x, y, ticks_ago] per recent executed
+    /// event within the transient window (Supernova and StarBirth).
+    /// Render-only - the flash is the renderer's reading of the event.
+    pub fn render_transients(&self) -> Vec<f32> {
+        let size = self.size as i32;
+        let mut out = Vec::new();
+        for ev in self.events.recent() {
+            let age = self.tick_count.saturating_sub(ev.tick);
+            if age > Galaxy::TRANSIENT_WINDOW {
+                continue;
+            }
+            let (kind, cell) = match ev.kind {
+                crate::events::EventKind::Supernova => (2.0f32, ev.target),
+                crate::events::EventKind::StarBirth => (1.0f32, ev.target),
+                _ => continue,
+            };
+            let cell = cell as i32;
+            if cell < 0 || cell >= size * size {
+                continue;
+            }
+            out.push(kind);
+            out.push((cell % size) as f32);
+            out.push((cell / size) as f32);
+            out.push(age as f32);
+        }
+        out
     }
 
     /// Executed-event count by kind index (EventKind discriminant).
@@ -479,14 +534,14 @@ impl Galaxy {
         self.radiation.copy_from_slice(&data[res * 2..]);
     }
 
-    /// Versioned scheduler/event/RNG state: [version=2, tick lo/hi, seed
-    /// lo/hi, bh_mass bits, dissipated lo/hi, next_cluster, n_heat, heat
-    /// bytes packed 4-per-u32, then the event-queue flat form]. Opaque
-    /// to JS.
+    /// Versioned scheduler/event/RNG state: [version=3, tick lo/hi, seed
+    /// lo/hi, bh_mass bits, dissipated lo/hi, next_cluster, next_star,
+    /// n_cells, heat bytes packed 4-per-u32, heat_parent lo/hi per cell,
+    /// then the event-queue flat form]. Opaque to JS.
     pub fn sim_state_meta(&self) -> Vec<u32> {
-        let heat_words = self.collapse_heat.len().div_ceil(4);
-        let mut out = Vec::with_capacity(10 + heat_words + 6);
-        out.push(2u32);
+        let heat_words = self.n.div_ceil(4);
+        let mut out = Vec::with_capacity(11 + heat_words + self.n * 2 + 6);
+        out.push(3u32);
         out.push(self.tick_count as u32);
         out.push((self.tick_count >> 32) as u32);
         out.push(self.master_seed as u32);
@@ -495,7 +550,8 @@ impl Galaxy {
         out.push(self.dissipated_total as u32);
         out.push((self.dissipated_total >> 32) as u32);
         out.push(self.next_cluster_id);
-        out.push(self.collapse_heat.len() as u32);
+        out.push(self.next_star_id);
+        out.push(self.n as u32);
         for chunk in self.collapse_heat.chunks(4) {
             let mut w = 0u32;
             for (k, &b) in chunk.iter().enumerate() {
@@ -503,12 +559,16 @@ impl Galaxy {
             }
             out.push(w);
         }
+        for &hp in &self.heat_parent {
+            out.push(hp as u32);
+            out.push((hp >> 32) as u32);
+        }
         out.extend(self.events.to_flat());
         out
     }
 
     pub fn restore_sim_state_meta(&mut self, data: &[u32]) {
-        if data.len() < 10 || data[0] != 2 {
+        if data.len() < 11 || data[0] != 3 {
             return;
         }
         self.tick_count = data[1] as u64 | ((data[2] as u64) << 32);
@@ -516,19 +576,26 @@ impl Galaxy {
         self.bh_mass = f32::from_bits(data[5]);
         self.dissipated_total = data[6] as u64 | ((data[7] as u64) << 32);
         self.next_cluster_id = data[8];
-        let n_heat = data[9] as usize;
-        if n_heat != self.n {
+        self.next_star_id = data[9];
+        let n_cells = data[10] as usize;
+        if n_cells != self.n {
             return;
         }
-        let heat_words = n_heat.div_ceil(4);
-        if data.len() < 10 + heat_words {
+        let heat_words = n_cells.div_ceil(4);
+        let parents_at = 11 + heat_words;
+        let events_at = parents_at + n_cells * 2;
+        if data.len() < events_at {
             return;
         }
-        for i in 0..n_heat {
-            let w = data[10 + i / 4];
+        for i in 0..n_cells {
+            let w = data[11 + i / 4];
             self.collapse_heat[i] = ((w >> (8 * (i % 4))) & 0xFF) as u8;
         }
-        self.events = EventQueue::from_flat(&data[10 + heat_words..]);
+        for i in 0..n_cells {
+            self.heat_parent[i] =
+                data[parents_at + i * 2] as u64 | ((data[parents_at + i * 2 + 1] as u64) << 32);
+        }
+        self.events = EventQueue::from_flat(&data[events_at..]);
     }
 
     /// Flat-buffer exposure for zero-copy JS reads via wasm.memory.
@@ -762,6 +829,7 @@ impl Galaxy {
                 && self.radiation_at_cell(i) < Galaxy::COLLAPSE_RADIATION_RESIST;
             if !qualifies {
                 self.collapse_heat[i] = 0;
+                self.heat_parent[i] = 0;
                 continue;
             }
             self.collapse_heat[i] = self.collapse_heat[i].saturating_add(1);
@@ -769,13 +837,15 @@ impl Galaxy {
                 && rng.random_range(0.0f32..1.0) < Galaxy::COLLAPSE_CHANCE
             {
                 self.collapse_heat[i] = 0;
+                let parent = self.heat_parent[i];
+                self.heat_parent[i] = 0;
                 self.events.emit(
                     tick,
                     crate::events::EventKind::CloudCollapse,
                     i as u32,
                     i as u32,
                     0.0,
-                    crate::events::NO_PARENT,
+                    parent,
                 );
             }
         }
@@ -810,6 +880,144 @@ impl Galaxy {
         }
     }
 
+    /// Advance stellar ages by the sim time elapsed since the last run
+    /// (dt x cadence, assuming dt is stable between runs - dt changes
+    /// mid-run smear ages slightly, which is acceptable). Deaths: heavy
+    /// main-sequence stars past their lifetime emit Supernova; light ones
+    /// quietly fade to remnants.
+    pub(crate) fn process_stellar_aging(&mut self, time: f32) {
+        let elapsed = time * 8.0;
+        let tick = self.tick_count;
+        for i in 0..self.stars.len() {
+            if self.stars.stage[i] != crate::stars::Stage::MainSequence as u8 {
+                continue;
+            }
+            self.stars.age[i] += elapsed;
+            if self.stars.age[i] < self.stars.lifetime[i] {
+                continue;
+            }
+            if self.stars.mass[i] >= Galaxy::SN_MASS_THRESHOLD {
+                // Target carries the nearest cell index so renderer
+                // transients and the shock handler know where it happened
+                // even after the star is gone.
+                let cell = self.cell_index_at(self.stars.pos_x[i], self.stars.pos_y[i]);
+                self.events.emit(
+                    tick,
+                    crate::events::EventKind::Supernova,
+                    self.stars.id[i],
+                    cell as u32,
+                    self.stars.mass[i],
+                    crate::events::NO_PARENT,
+                );
+                // Mark so it cannot re-emit while the event is in flight.
+                self.stars.stage[i] = crate::stars::Stage::Remnant as u8;
+            } else {
+                self.stars.stage[i] = crate::stars::Stage::Remnant as u8;
+                self.stars.luminosity[i] *= 0.05;
+            }
+        }
+    }
+
+    fn cell_index_at(&self, x: f32, y: f32) -> usize {
+        let size = self.size as i32;
+        let col = (x as i32).clamp(0, size - 1);
+        let row = (y as i32).clamp(0, size - 1);
+        (row * size + col) as usize
+    }
+
+    /// Supernova: return most of the star's mass to nearby gas with an
+    /// outward kick, keep a dim compact remnant, and emit ShockWave.
+    fn handle_supernova(&mut self, ev: &Event) {
+        let Some(i) = self.stars.index_of_id(ev.source) else {
+            return;
+        };
+        let cell = ev.target as usize;
+        if cell >= self.n {
+            return;
+        }
+        let star_mass = self.stars.mass[i];
+        let ejected = star_mass * Galaxy::SN_GAS_RETURN;
+        // Distribute ejecta over the disc around the cell with an
+        // outward momentum kick, mass-weighted into cell velocity.
+        let size = self.size as i32;
+        let (c_col, c_row) = (cell as i32 % size, cell as i32 / size);
+        let mut targets: Vec<usize> = Vec::new();
+        for dr in -Galaxy::SN_RADIUS..=Galaxy::SN_RADIUS {
+            for dc in -Galaxy::SN_RADIUS..=Galaxy::SN_RADIUS {
+                if dc * dc + dr * dr > Galaxy::SN_RADIUS * Galaxy::SN_RADIUS {
+                    continue;
+                }
+                let nc = wrap(c_col + dc, size) as u16;
+                let nr = wrap(c_row + dr, size) as u16;
+                targets.push(self.col_row_to_index(nc, nr) as usize);
+            }
+        }
+        let share = (ejected / targets.len() as f32).max(0.0);
+        let mut distributed = 0.0f32;
+        for &t in &targets {
+            let add = share as u16;
+            if add == 0 {
+                continue;
+            }
+            let old_m = self.mass[t] as f32;
+            let (t_col, t_row) = (t as i32 % size, t as i32 / size);
+            let mut dx = (t_col - c_col) as f32;
+            let mut dy = (t_row - c_row) as f32;
+            let r = (dx * dx + dy * dy).sqrt();
+            if r < 1e-3 {
+                dx = 0.0;
+                dy = 0.0;
+            } else {
+                dx /= r;
+                dy /= r;
+            }
+            let new_m = old_m + add as f32;
+            self.vel_x[t] = (self.vel_x[t] * old_m + Galaxy::SN_KICK * dx * add as f32) / new_m;
+            self.vel_y[t] = (self.vel_y[t] * old_m + Galaxy::SN_KICK * dy * add as f32) / new_m;
+            self.mass[t] = self.mass[t].saturating_add(add);
+            distributed += add as f32;
+        }
+        // Remnant keeps whatever the integer distribution left behind, so
+        // the baryonic ledger stays closed exactly.
+        self.stars.mass[i] = star_mass - distributed;
+        self.stars.stage[i] = crate::stars::Stage::Remnant as u8;
+        self.stars.luminosity[i] = (star_mass.powf(1.5)) * 0.02;
+        let tick = self.tick_count;
+        self.events.emit(
+            tick,
+            crate::events::EventKind::ShockWave,
+            ev.source,
+            ev.target,
+            Galaxy::SN_KICK,
+            ev.id,
+        );
+    }
+
+    /// ShockWave: boost collapse heat around the blast so swept gas is
+    /// likelier to collapse - and record parentage so induced collapses
+    /// carry the causal chain.
+    fn handle_shock_wave(&mut self, ev: &Event) {
+        let cell = ev.target as usize;
+        if cell >= self.n {
+            return;
+        }
+        let size = self.size as i32;
+        let (c_col, c_row) = (cell as i32 % size, cell as i32 / size);
+        for dr in -Galaxy::SHOCK_RADIUS..=Galaxy::SHOCK_RADIUS {
+            for dc in -Galaxy::SHOCK_RADIUS..=Galaxy::SHOCK_RADIUS {
+                if dc * dc + dr * dr > Galaxy::SHOCK_RADIUS * Galaxy::SHOCK_RADIUS {
+                    continue;
+                }
+                let nc = wrap(c_col + dc, size) as u16;
+                let nr = wrap(c_row + dr, size) as u16;
+                let ni = self.col_row_to_index(nc, nr) as usize;
+                self.collapse_heat[ni] =
+                    self.collapse_heat[ni].saturating_add(Galaxy::SHOCK_HEAT_BOOST);
+                self.heat_parent[ni] = ev.id;
+            }
+        }
+    }
+
     /// Execute this tick's due events in stable order. Handlers may emit
     /// follow-up events, which land next tick by construction.
     fn execute_events(&mut self, due: Vec<Event>, _time: f32) {
@@ -817,7 +1025,9 @@ impl Galaxy {
             match ev.kind {
                 crate::events::EventKind::CloudCollapse => self.handle_cloud_collapse(&ev),
                 crate::events::EventKind::StarBirth => self.handle_star_birth(&ev),
-                _ => {}
+                crate::events::EventKind::Supernova => self.handle_supernova(&ev),
+                crate::events::EventKind::ShockWave => self.handle_shock_wave(&ev),
+                crate::events::EventKind::CloudDissipate => {}
             }
             self.events.record_executed(ev);
         }
@@ -904,6 +1114,8 @@ impl Galaxy {
             let v_circ = (a_mag * r).sqrt();
             let vx = gas_vx + (-ry / r) * v_circ;
             let vy = gas_vy + (rx / r) * v_circ;
+            let star_id = self.next_star_id;
+            self.next_star_id += 1;
             self.stars.spawn(
                 px,
                 py,
@@ -914,6 +1126,7 @@ impl Galaxy {
                 mass.max(1.0).powf(1.5),
                 (mass / 100.0).clamp(0.0, 1.0),
                 cluster,
+                star_id,
             );
         }
     }
@@ -1964,6 +2177,45 @@ mod tests_causal_loop {
             );
         }
         assert!(g.star_count() > 0, "run must include actual star formation");
+        assert!(
+            g.events.executed_count(EventKind::Supernova) > 0,
+            "3000 ticks must include supernovae so the ledger covers ejecta"
+        );
+    }
+
+    #[test]
+    fn test_full_causal_chain_supernova_induces_star_birth() {
+        // The loop's acceptance scenario: a StarBirth whose ancestry runs
+        // birth -> CloudCollapse -> ShockWave -> Supernova -> root.
+        use std::collections::HashMap;
+        let mut g = Galaxy::new(50, 0).seed_with_mode_seeded(25, InitialCondition::Uniform, 42);
+        // (id -> (kind, parent)) log collected from the bounded ring
+        // every tick so eviction cannot lose links.
+        let mut log: HashMap<u64, (EventKind, u64)> = HashMap::new();
+        let mut found = false;
+        for _ in 0..8000 {
+            g = g.tick(0.5);
+            for ev in g.events.recent() {
+                log.insert(ev.id, (ev.kind, ev.parent));
+            }
+            found = log.iter().any(|(_, &(kind, parent))| {
+                kind == EventKind::StarBirth
+                    && matches!(log.get(&parent), Some(&(EventKind::CloudCollapse, gp))
+                        if matches!(log.get(&gp), Some(&(EventKind::ShockWave, ggp))
+                            if matches!(log.get(&ggp), Some(&(EventKind::Supernova, _)))))
+            });
+            if found {
+                break;
+            }
+        }
+        assert!(
+            found,
+            "no supernova-induced star birth chain within 8000 ticks              (events: col={} birth={} sn={} shock={})",
+            g.events.executed_count(EventKind::CloudCollapse),
+            g.events.executed_count(EventKind::StarBirth),
+            g.events.executed_count(EventKind::Supernova),
+            g.events.executed_count(EventKind::ShockWave),
+        );
     }
 }
 
