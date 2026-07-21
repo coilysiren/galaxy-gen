@@ -130,6 +130,10 @@ export class Frontend {
     return this.overrideTransients ?? this.galaxy.render_transients();
   }
 
+  public supernovaCount(): number {
+    return Number(this.galaxy.events_executed(2));
+  }
+
   /** Debug/test spawn; production stars come from StarBirth events. */
   public spawnStar(x: number, y: number, vx: number, vy: number, mass: number): number {
     this.overrideStars = null;
@@ -231,6 +235,7 @@ export class TickWorker {
     tickId: number,
     stars: Float32Array,
     transients: Float32Array,
+    snCount: number,
   ) => void;
   private stopResolver: ((state: StoppedState | null) => void) | null = null;
 
@@ -241,6 +246,7 @@ export class TickWorker {
       tickId: number,
       stars: Float32Array,
       transients: Float32Array,
+      snCount: number,
     ) => void,
   ) {
     if (typeof Worker === "undefined") {
@@ -259,7 +265,14 @@ export class TickWorker {
     const msg = ev.data;
     if (!msg || typeof msg.type !== "string") return;
     if (msg.type === "snapshot") {
-      this.onSnapshot(msg.mass, msg.tickMs, msg.tickId, msg.stars, msg.transients);
+      this.onSnapshot(
+        msg.mass,
+        msg.tickMs,
+        msg.tickId,
+        msg.stars,
+        msg.transients,
+        msg.snCount,
+      );
     } else if (msg.type === "stopped") {
       if (!this.stopResolver) return;
       const resolver = this.stopResolver;

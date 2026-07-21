@@ -4,6 +4,7 @@
 //! same kernel, no webpack in the loop.
 
 use galaxy_gen_backend::galaxy::{Galaxy, InitialCondition};
+use galaxy_gen_backend::process;
 
 struct Metrics {
     nonzero: usize,
@@ -85,6 +86,17 @@ fn main() {
         (InitialCondition::Uniform, "uniform"),
         (InitialCondition::Bang, "bang"),
     ] {
+        // Per-process timing profile at the seeded state (native only -
+        // the wasm build has no monotonic clock without JS interop).
+        let probe = Galaxy::new(size, 0).seed_with_mode_seeded(25, mode, 12345);
+        print!("profile[{name}]:");
+        for p in process::registry() {
+            let mut clone = probe.clone();
+            let t0 = std::time::Instant::now();
+            (p.run)(&mut clone, 0.5);
+            print!("  {}={:.2}ms", p.name, t0.elapsed().as_secs_f64() * 1000.0);
+        }
+        println!();
         let mut g = Galaxy::new(size, 0).seed_with_mode_seeded(25, mode, 12345);
         println!("--- {name} (size={size}, seed=12345, dt=0.5) ---");
         let mut done = 0usize;

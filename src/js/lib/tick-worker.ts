@@ -78,6 +78,7 @@ function runOneTick() {
     tickId,
     stars,
     transients,
+    snCount: Number(galaxy.events_executed(2)),
   };
   (self as unknown as Worker).postMessage(payload, [
     mass.buffer,
