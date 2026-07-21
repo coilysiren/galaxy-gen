@@ -4,6 +4,9 @@ use rand::rngs::StdRng;
 use rand::{RngExt, SeedableRng};
 use wasm_bindgen::prelude::*;
 
+use crate::events::{Event, EventQueue};
+use crate::process;
+
 /// Initial-condition presets. See `seed_with_mode`. Every mode seeds a
 /// circular disk with orbital rotation baked in.
 #[wasm_bindgen]
@@ -34,6 +37,13 @@ pub struct Galaxy {
     ys_i: Vec<i16>,
     inv_r3: Vec<f32>,
     scratch_mass: Vec<u32>,
+
+    /// Ticks elapsed since seeding. Drives process cadence and the
+    /// per-tick RNG stream derivation.
+    tick_count: u64,
+    /// Master seed for the RNG service. 0 until seeded.
+    master_seed: u64,
+    events: EventQueue,
 }
 
 impl Galaxy {
@@ -111,6 +121,9 @@ impl Galaxy {
             ys_i,
             inv_r3,
             scratch_mass: vec![0; n],
+            tick_count: 0,
+            master_seed: 0,
+            events: EventQueue::new(),
         }
     }
 
@@ -123,8 +136,8 @@ impl Galaxy {
     /// Seed with a named initial condition. Tuning constants assume
     /// default UI params (size=250, seed_mass=25).
     pub fn seed_with_mode(&self, additional: u16, mode: InitialCondition) -> Galaxy {
-        let mut rng = rand::rng();
-        self.seed_mode_kernel(additional, mode, &mut rng)
+        let seed: u64 = rand::rng().random();
+        self.seed_with_mode_seeded(additional, mode, seed)
     }
 
     /// Reproducible [`seed_with_mode`]: same `(additional, mode, seed)`
@@ -137,7 +150,7 @@ impl Galaxy {
         seed: u64,
     ) -> Galaxy {
         let mut rng = StdRng::seed_from_u64(seed);
-        self.seed_mode_kernel(additional, mode, &mut rng)
+        self.seed_mode_kernel(additional, mode, seed, &mut rng)
     }
 
     // Private, so wasm-bindgen skips it; `dyn` because bindgen impls
@@ -146,6 +159,7 @@ impl Galaxy {
         &self,
         additional: u16,
         mode: InitialCondition,
+        master_seed: u64,
         rng: &mut dyn rand::Rng,
     ) -> Galaxy {
         let mut mass = self.mass.clone();
@@ -258,6 +272,9 @@ impl Galaxy {
             ys_i: self.ys_i.clone(),
             inv_r3: self.inv_r3.clone(),
             scratch_mass: vec![0; self.n],
+            tick_count: 0,
+            master_seed,
+            events: EventQueue::new(),
         }
     }
 
@@ -267,6 +284,8 @@ impl Galaxy {
         self.seed_with_mode_seeded(additional, InitialCondition::Uniform, seed)
     }
 
+    /// One simulation step: run every due process in registry order, then
+    /// execute the events scheduled for this tick (emitted last tick).
     pub fn tick(&self, time: f32) -> Galaxy {
         let mut next = Galaxy {
             size: self.size,
@@ -282,9 +301,17 @@ impl Galaxy {
             ys_i: self.ys_i.clone(),
             inv_r3: self.inv_r3.clone(),
             scratch_mass: vec![0; self.n],
+            tick_count: self.tick_count + 1,
+            master_seed: self.master_seed,
+            events: self.events.clone(),
         };
-        next.gravitate_all();
-        next.apply_acceleration(time);
+        for p in process::registry() {
+            if process::is_due(p, next.tick_count) {
+                (p.run)(&mut next, time);
+            }
+        }
+        let due = next.events.take_due(next.tick_count);
+        next.execute_events(due, time);
         next
     }
 
@@ -314,6 +341,9 @@ impl Galaxy {
             ys_i: self.ys_i.clone(),
             inv_r3: self.inv_r3.clone(),
             scratch_mass: vec![0; n],
+            tick_count: self.tick_count + 1,
+            master_seed: self.master_seed,
+            events: self.events.clone(),
         };
         next.apply_acceleration(time);
         next
@@ -398,11 +428,46 @@ impl Galaxy {
             ys_i: base.ys_i,
             inv_r3: base.inv_r3,
             scratch_mass: vec![0; n],
+            tick_count: 0,
+            master_seed: 0,
+            events: EventQueue::new(),
         }
     }
 }
 
 impl Galaxy {
+    // Process entry points, referenced by name in process::REGISTRY.
+
+    pub(crate) fn process_gravity(&mut self, _time: f32) {
+        self.gravitate_all();
+    }
+
+    pub(crate) fn process_integrate_gas(&mut self, time: f32) {
+        self.apply_acceleration(time);
+    }
+
+    /// Execute this tick's due events in stable order. Handlers may emit
+    /// follow-up events, which land next tick by construction.
+    fn execute_events(&mut self, due: Vec<Event>, _time: f32) {
+        for ev in due {
+            // Handlers arrive with the causal-loop phases; the queue,
+            // ordering, and instrumentation ring are live already.
+            self.events.record_executed(ev);
+        }
+    }
+
+    /// Stateless per-(process, tick) RNG stream. Derivation depends only
+    /// on (master_seed, process_id, tick_count), so streams are
+    /// independent per process, reproducible after a state round-trip,
+    /// and adding a process never shifts another's draw sequence.
+    pub(crate) fn rng_stream(&self, process_id: u64) -> StdRng {
+        let mixed = splitmix64(
+            self.master_seed
+                ^ splitmix64(process_id ^ self.tick_count.wrapping_mul(0x9E37_79B9_7F4A_7C15)),
+        );
+        StdRng::seed_from_u64(mixed)
+    }
+
     /// World-disk radius: seeding stays inside it, the boundary spring
     /// engages past it.
     fn disk_radius(&self) -> f32 {
@@ -697,6 +762,15 @@ impl Galaxy {
         }
     }
 
+}
+
+/// splitmix64 finalizer - cheap, well-mixed u64 -> u64 for RNG stream
+/// derivation.
+fn splitmix64(mut z: u64) -> u64 {
+    z = z.wrapping_add(0x9E37_79B9_7F4A_7C15);
+    z = (z ^ (z >> 30)).wrapping_mul(0xBF58_476D_1CE4_E5B9);
+    z = (z ^ (z >> 27)).wrapping_mul(0x94D0_49BB_1331_11EB);
+    z ^ (z >> 31)
 }
 
 /// Wrap-around: cells past the edge reappear on the other side.
@@ -1253,6 +1327,60 @@ mod tests_dynamics {
             l1 > l0 * 0.5,
             "disk lost too much angular momentum: L_z {l0:.1} -> {l1:.1}"
         );
+    }
+}
+
+#[cfg(test)]
+mod tests_golden {
+    use super::*;
+
+    fn mass_hash(g: &Galaxy) -> u64 {
+        let mut h: u64 = 1469598103934665603;
+        for &m in g.mass.iter() {
+            h ^= m as u64;
+            h = h.wrapping_mul(1099511628211);
+        }
+        h
+    }
+
+    /// Phase-0 acceptance: re-expressing the tick as registered processes
+    /// changed nothing. Golden values captured on the pre-registry
+    /// pipeline (uniform seed 42 / bang seed 7, size 50, 100 ticks at
+    /// dt 0.5). If a deliberate physics change lands, recapture and say
+    /// so in the commit.
+    #[test]
+    fn test_golden_uniform_mass_field() {
+        let mut g = Galaxy::new(50, 0).seed_with_mode_seeded(25, InitialCondition::Uniform, 42);
+        for _ in 0..100 {
+            g = g.tick(0.5);
+        }
+        assert_eq!(mass_hash(&g), 5006051126598297968);
+    }
+
+    #[test]
+    fn test_golden_bang_mass_field() {
+        let mut g = Galaxy::new(50, 0).seed_with_mode_seeded(25, InitialCondition::Bang, 7);
+        for _ in 0..100 {
+            g = g.tick(0.5);
+        }
+        assert_eq!(mass_hash(&g), 18166966706675598303);
+    }
+
+    #[test]
+    fn test_rng_streams_are_reproducible_and_independent() {
+        let g = Galaxy::new(10, 0).seed_with_mode_seeded(5, InitialCondition::Uniform, 99);
+        let mut a1 = g.rng_stream(1);
+        let mut a2 = g.rng_stream(1);
+        let mut b = g.rng_stream(2);
+        let draws1: Vec<u32> = (0..8).map(|_| a1.random()).collect();
+        let draws2: Vec<u32> = (0..8).map(|_| a2.random()).collect();
+        let draws_b: Vec<u32> = (0..8).map(|_| b.random()).collect();
+        assert_eq!(draws1, draws2, "same (seed, process, tick) must repeat");
+        assert_ne!(draws1, draws_b, "different processes must not share a stream");
+        let g2 = g.tick(0.5);
+        let mut a_next = g2.rng_stream(1);
+        let draws_next: Vec<u32> = (0..8).map(|_| a_next.random()).collect();
+        assert_ne!(draws1, draws_next, "streams must advance across ticks");
     }
 }
 

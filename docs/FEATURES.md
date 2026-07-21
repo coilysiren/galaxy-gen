@@ -17,6 +17,10 @@ Baseline of what ships. Pairs with `README.md` (pitch) and `development.md` (arc
 - Zero-copy typed-array exports (`mass_ptr` / `mass_len` plus `mass` / `x` / `y` / `vel_x` / `vel_y` / `frac_x` / `frac_y`).
 - Rust unit tests in-file under `mod tests_*`. Benches at `benches/{tick_bench,debug_sim}.rs`.
 
+## Process graph + events (`src/rust/process.rs`, `src/rust/events.rs`)
+
+Static process registry with declared reads/writes, freshness requirements, and per-process cadence; `tick` runs due processes in registry order then executes the tick's due events. Deterministic event queue (emit at N, execute at N+1, stable ordering, causal parent ids) with a bounded instrumentation ring. Stateless per-(process, tick) RNG streams derived from the `?seed=` master. Walkthrough: [processes-events.md](processes-events.md).
+
 ## JS / WASM boundary (`src/js/lib/galaxy.ts`)
 
 - `Frontend` class wraps the WASM `Galaxy`, stable JS surface.
