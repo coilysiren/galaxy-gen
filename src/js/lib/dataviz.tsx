@@ -19,6 +19,14 @@ const FADE_END = 1.5;
 // past the canvas edge and the radial fade handles the rest.
 const VIEW_SPAN = 1.1;
 
+// Gravitational lens around the central black hole. Screen-space
+// point-mass deflection r_src = r - thetaE^2 / r: sources appear pushed
+// outward, the region inside the Einstein radius shows the inverted
+// image (negative r_src flips through the center), and the whole warp
+// tapers back to identity at the edge of the lens region so there is no
+// seam. Einstein radius as a fraction of world size:
+const LENS_THETA_E_FRAC = 0.035;
+
 // Soft nebular sprites for gas, one per color bucket, pre-rendered once.
 // drawImage of a gradient sprite is far cheaper than per-cell gradients
 // and the alpha accumulation makes dense regions glow on its own.
@@ -78,6 +86,7 @@ interface State {
   host: HTMLElement;
   canvas: HTMLCanvasElement;
   ctx: CanvasRenderingContext2D;
+  dpr: number;
   size: number;
   scale: number;
   rMax: number;
@@ -138,7 +147,8 @@ export function initViz(galaxyFrontend: galaxy.Frontend) {
   canvas.style.touchAction = "none";
   canvas.setAttribute("data-testid", "dataviz-canvas");
 
-  const ctx = canvas.getContext("2d");
+  // willReadFrequently: the lens post-process reads pixels every frame.
+  const ctx = canvas.getContext("2d", { willReadFrequently: true });
   if (!ctx) return;
   ctx.scale(dpr, dpr);
 
@@ -246,6 +256,7 @@ export function initViz(galaxyFrontend: galaxy.Frontend) {
     host,
     canvas,
     ctx,
+    dpr,
     size,
     scale,
     rMax: scale * 0.5,
@@ -340,6 +351,88 @@ function drawFrame(s: State, mass: Uint16Array) {
   drawStars(s, toCx, toCy);
   drawTransients(s, toCx, toCy);
 
+  ctx.restore();
+
+  applyBlackHoleLens(s);
+}
+
+// Post-process: warp the finished frame around the central black hole
+// and draw its shadow + photon ring. Operates on device pixels, after
+// the camera transform is popped, so it lenses whatever is on screen.
+function applyBlackHoleLens(s: State) {
+  const { ctx, canvas, size, scale, camera, dpr } = s;
+  // Black hole sits at the world center = canvas center pre-camera.
+  const cssX = camera.zoom * (CANVAS / 2) + camera.tx;
+  const cssY = camera.zoom * (CANVAS / 2) + camera.ty;
+  const thetaCss = LENS_THETA_E_FRAC * size * scale * camera.zoom;
+  const bx = cssX * dpr;
+  const by = cssY * dpr;
+  const te = thetaCss * dpr;
+  if (te < 3) return;
+  const R = Math.min(te * 3.5, canvas.width * 0.5);
+  const x0 = Math.max(0, Math.floor(bx - R));
+  const y0 = Math.max(0, Math.floor(by - R));
+  const x1 = Math.min(canvas.width, Math.ceil(bx + R));
+  const y1 = Math.min(canvas.height, Math.ceil(by + R));
+  if (x1 <= x0 || y1 <= y0) return;
+  const w = x1 - x0;
+  const h = y1 - y0;
+  const img = ctx.getImageData(x0, y0, w, h);
+  const data = img.data;
+  const src = new Uint8ClampedArray(data);
+  const te2 = te * te;
+  const shadowR = te * 0.3;
+  const taperStart = R * 0.75;
+  for (let py = 0; py < h; py++) {
+    const dy = py + y0 - by;
+    for (let px = 0; px < w; px++) {
+      const dx = px + x0 - bx;
+      const r2 = dx * dx + dy * dy;
+      if (r2 >= R * R) continue;
+      const o = (py * w + px) * 4;
+      const r = Math.sqrt(r2) || 1e-3;
+      if (r < shadowR) {
+        data[o] = 0;
+        data[o + 1] = 0;
+        data[o + 2] = 4;
+        data[o + 3] = 255;
+        continue;
+      }
+      let f = (r - te2 / r) / r;
+      if (r > taperStart) {
+        const t = (r - taperStart) / (R - taperStart);
+        f = f + (1 - f) * t * t * (3 - 2 * t);
+      }
+      let sx = Math.round(bx + dx * f) - x0;
+      let sy = Math.round(by + dy * f) - y0;
+      if (sx < 0) sx = 0;
+      else if (sx >= w) sx = w - 1;
+      if (sy < 0) sy = 0;
+      else if (sy >= h) sy = h - 1;
+      const so = (sy * w + sx) * 4;
+      data[o] = src[so];
+      data[o + 1] = src[so + 1];
+      data[o + 2] = src[so + 2];
+      data[o + 3] = src[so + 3];
+    }
+  }
+  ctx.putImageData(img, x0, y0);
+
+  // Photon ring hugging the shadow edge.
+  const shadowCss = thetaCss * 0.3;
+  ctx.save();
+  ctx.setTransform(1, 0, 0, 1, 0, 0);
+  ctx.scale(dpr, dpr);
+  ctx.strokeStyle = "rgba(255,214,160,0.22)";
+  ctx.lineWidth = 3;
+  ctx.beginPath();
+  ctx.arc(cssX, cssY, shadowCss * 1.12, 0, Math.PI * 2);
+  ctx.stroke();
+  ctx.strokeStyle = "rgba(255,238,210,0.85)";
+  ctx.lineWidth = 1.1;
+  ctx.beginPath();
+  ctx.arc(cssX, cssY, shadowCss * 1.05, 0, Math.PI * 2);
+  ctx.stroke();
   ctx.restore();
 }
 
