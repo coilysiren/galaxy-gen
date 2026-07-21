@@ -97,11 +97,27 @@ impl Galaxy {
     /// every tick, so any per-block bleed spins it down fast. DRAG_COEFF
     /// is the energy sink instead.
     const BLOCKED_FRICTION: f32 = 1.0;
-    /// Spring stiffness of the circular world boundary. Beyond the disk
-    /// radius (size/2 - 1) cells feel a gentle inward pull proportional
-    /// to overshoot, replacing hard square-wall behavior. The toroidal
-    /// wrap stays as a backstop but is effectively unreachable.
+    /// Spring stiffness of the circular world boundary for GAS. Beyond
+    /// the disk radius (size/2 - 1) cells feel a gentle inward pull
+    /// proportional to overshoot. Gas is grid-bound anyway; stars use
+    /// the two-tier halo confinement below instead.
     const CONFINE_STIFFNESS: f32 = 0.02;
+    /// Stars: hard-clip radius as a multiple of the soft (disk) radius.
+    /// Between soft and hard lies the halo band with a repulsive
+    /// gradient a = K (r - soft)/(hard - r) - gentle at the soft edge,
+    /// divergent at the hard edge, so no finite speed reaches the hard
+    /// clip. Replaces the old rim hard-stop that parked all ejecta in a
+    /// ring at disk_r + 3.
+    const HARD_CLIP_FACTOR: f32 = 2.0;
+    /// Gradient scale for the halo repulsion.
+    const HALO_STIFFNESS: f32 = 0.04;
+    /// Acceleration ceiling for the halo gradient (the analytic form
+    /// diverges at the hard clip; the clamp keeps integration sane).
+    const HALO_ACCEL_MAX: f32 = 2.0;
+    /// Velocity drag applied to stars only while in the halo band. The
+    /// halo spring is conservative - without dissipation ejecta would
+    /// oscillate through the halo forever instead of rejoining the disk.
+    const STAR_HALO_DRAG: f32 = 0.01;
     /// Barnes-Hut opening angle, shared by the gas kernel and the coarse
     /// field builder.
     const THETA: f32 = 0.7;
@@ -748,12 +764,16 @@ impl Galaxy {
         (ax, ay)
     }
 
-    /// Integrate the star population: field gravity + boundary spring,
-    /// semi-implicit Euler, no movement cap (stars cannot jam).
+    /// Integrate the star population: field gravity + two-tier halo
+    /// confinement, semi-implicit Euler, no movement cap (stars cannot
+    /// jam). Positions may leave the grid into the halo band; field
+    /// sampling clamps internally.
     pub(crate) fn process_integrate_stars(&mut self, time: f32) {
         let size_f = self.size as f32;
         let center = size_f * 0.5;
-        let disk_r = self.disk_radius();
+        let soft_r = self.disk_radius();
+        let hard_r = soft_r * Galaxy::HARD_CLIP_FACTOR;
+        let halo_drag = (-Galaxy::STAR_HALO_DRAG * time).exp();
         for i in 0..self.stars.len() {
             let px = self.stars.pos_x[i];
             let py = self.stars.pos_y[i];
@@ -761,30 +781,35 @@ impl Galaxy {
             let dx = px - center;
             let dy = py - center;
             let r = (dx * dx + dy * dy).sqrt();
-            if r > disk_r && r > 1e-3 {
-                let k = Galaxy::CONFINE_STIFFNESS * (r - disk_r) / r;
-                ax -= k * dx;
-                ay -= k * dy;
+            let in_halo = r > soft_r && r > 1e-3;
+            if in_halo {
+                let grad = (Galaxy::HALO_STIFFNESS * (r - soft_r) / (hard_r - r).max(1e-3))
+                    .min(Galaxy::HALO_ACCEL_MAX);
+                ax -= grad * dx / r;
+                ay -= grad * dy / r;
             }
-            let vx = self.stars.vel_x[i] + ax * time;
-            let vy = self.stars.vel_y[i] + ay * time;
+            let mut vx = self.stars.vel_x[i] + ax * time;
+            let mut vy = self.stars.vel_y[i] + ay * time;
+            if in_halo {
+                vx *= halo_drag;
+                vy *= halo_drag;
+            }
             self.stars.vel_x[i] = vx;
             self.stars.vel_y[i] = vy;
             let mut nx = px + vx * time;
             let mut ny = py + vy * time;
-            // Hard stop just outside the disk (the spring handles the
-            // rest). A rectangular clamp pins escapees in the grid
-            // corners, outside the circular world.
+            // Numerical backstop just inside the hard clip - the gradient
+            // makes this effectively unreachable.
             let hx = nx - center;
             let hy = ny - center;
             let hr = (hx * hx + hy * hy).sqrt();
-            let max_r = disk_r + 3.0;
+            let max_r = hard_r - 1.0;
             if hr > max_r {
                 nx = center + hx / hr * max_r;
                 ny = center + hy / hr * max_r;
             }
-            self.stars.pos_x[i] = nx.clamp(0.0, size_f - 1e-3);
-            self.stars.pos_y[i] = ny.clamp(0.0, size_f - 1e-3);
+            self.stars.pos_x[i] = nx;
+            self.stars.pos_y[i] = ny;
         }
     }
 
@@ -2103,6 +2128,42 @@ mod tests_stars_dynamics {
         assert!(
             r1 < r0,
             "field gravity must pull a resting star inward: r {r0:.2} -> {r1:.2}"
+        );
+    }
+
+    #[test]
+    fn test_ejected_star_stays_inside_hard_clip_and_rejoins_disk() {
+        let mut g = Galaxy::new(50, 0).seed_with_mode_seeded(25, InitialCondition::Uniform, 42);
+        g.spawn_star(25.0, 25.0, 6.0, 0.0, 10.0);
+        let soft = 24.0f32;
+        let hard = soft * 2.0;
+        let mut max_r = 0.0f32;
+        let mut g = g;
+        for _ in 0..4000 {
+            g = g.tick(0.5);
+            if g.star_count() == 0 {
+                break;
+            }
+            let r = (g.stars.pos_x[0] - 25.0).hypot(g.stars.pos_y[0] - 25.0);
+            if r > max_r {
+                max_r = r;
+            }
+        }
+        assert!(
+            max_r < hard,
+            "halo gradient must stop ejecta before the hard clip: max r {max_r:.1}"
+        );
+        assert!(
+            max_r > soft,
+            "test must actually exercise the halo band: max r {max_r:.1}"
+        );
+        // Halo drag decays the excursion into a skim orbit at the disk
+        // edge - "returned" means out of the deep halo, not parked at a
+        // fixed rim like the old hard-stop.
+        let r_final = (g.stars.pos_x[0] - 25.0).hypot(g.stars.pos_y[0] - 25.0);
+        assert!(
+            r_final < soft * 1.2,
+            "halo drag must decay ejecta back to the disk edge: final r {r_final:.1}"
         );
     }
 

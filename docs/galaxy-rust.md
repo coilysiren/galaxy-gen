@@ -23,7 +23,8 @@ Struct-of-arrays (parallel `Vec<f32>` / `Vec<u16>`) so the physics inner loop is
 - `DRAG_COEFF` is 0.001, applied as `v *= exp(-DRAG_COEFF * dt)` per tick. Keeps the grid-quantized sim from overheating at large dt while staying weak enough that rotation holds for minutes of wall-clock. The old flat `0.995`/tick damping halved velocity every second.
 - `REPULSE_R2` is 2.0. Gravity flips repulsive at integer r-squared at or below it - a crude contact-pressure proxy, mirrored in the WGSL kernel via a params field. Placeholder until a real equation of state.
 - `CELL_MASS_CAP` is 128. Transfers into a cell never pack it past this (incompressibility floor). A full destination rejects the mover, which parks at its cell edge with velocity intact (`BLOCKED_FRICTION` = 1.0, traffic-jam model - reflecting or damping thermalizes disk rotation). Cells above the cap shed the excess to their four neighbors each tick (pressure overflow), so capped cores breathe instead of gridlocking.
-- `CONFINE_STIFFNESS` is 0.02. The world is a disk of radius size/2 - 1: past it, cells feel a spring pull back toward the center. The toroidal wrap remains as a backstop only.
+- `CONFINE_STIFFNESS` is 0.02. Gas boundary spring: past the disk radius (size/2 - 1, the soft clip) cells feel a linear pull back toward the center. The toroidal wrap remains as a backstop only.
+- Stars use a two-tier halo instead: between the soft clip and the hard clip (`HARD_CLIP_FACTOR` 2.0 x soft) a repulsive gradient `HALO_STIFFNESS x (r - soft)/(hard - r)` (clamped at `HALO_ACCEL_MAX`) diverges at the hard clip, so no finite speed reaches it. `STAR_HALO_DRAG` bleeds velocity only inside the band - the halo spring is conservative, and without dissipation ejecta would oscillate forever instead of rejoining the disk. The renderer fades matter from the soft clip to invisible by 1.35 x soft; the deep halo exists but never renders.
 
 ## Stars and the causal loop
 

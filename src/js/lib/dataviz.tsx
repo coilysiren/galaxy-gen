@@ -8,6 +8,12 @@ const MARGIN = 20;
 const MIN_ZOOM = 1;
 const MAX_ZOOM = 50;
 
+// Radial render fade: full brightness inside the soft clip (the disk
+// radius), fading to invisible by FADE_END x soft. Matter deeper in the
+// halo band exists in the sim but does not render - the sim's hard clip
+// sits at 2x soft, far past visibility.
+const FADE_END = 1.35;
+
 
 interface Camera {
   // Screen-space (CSS px) transform: screen = zoom * world + translate.
@@ -255,25 +261,40 @@ function drawFrame(s: State, mass: Uint16Array) {
     bucketColors.push(`rgb(${r},${g},${bl})`);
   }
 
+  const softR = size / 2 - 1;
+  const fadeEndSq = softR * FADE_END * (softR * FADE_END);
+  const softSq = softR * softR;
+  const center = size / 2;
+
   for (let b = 0; b < buckets; b++) {
     ctx.fillStyle = bucketColors[b];
-    ctx.beginPath();
-    for (let i = 0; i < mass.length; i++) {
-      const m = mass[i];
-      if (m === 0) continue;
-      const t = Math.log(m + 1) * invLogMax;
-      const bi = Math.min(buckets - 1, Math.floor(t * buckets));
-      if (bi !== b) continue;
-      const r = Math.max(0.5, Math.min(rMax, 0.5 + t * rMax * 1.4));
-      const col = i % size;
-      const row = (i / size) | 0;
-      const cx = MARGIN + (col + 0.5) * scale;
-      const cy = MARGIN + (size - 1 - row + 0.5) * scale;
-      ctx.moveTo(cx + r, cy);
-      ctx.arc(cx, cy, r, 0, Math.PI * 2);
+    // Full-brightness pass (inside the soft clip), then a dim halo pass.
+    for (const haloPass of [false, true]) {
+      ctx.globalAlpha = haloPass ? 0.3 : 1.0;
+      ctx.beginPath();
+      for (let i = 0; i < mass.length; i++) {
+        const m = mass[i];
+        if (m === 0) continue;
+        const col = i % size;
+        const row = (i / size) | 0;
+        const rx = col - center;
+        const ry = row - center;
+        const radSq = rx * rx + ry * ry;
+        if (radSq > fadeEndSq) continue;
+        if (haloPass !== radSq > softSq) continue;
+        const t = Math.log(m + 1) * invLogMax;
+        const bi = Math.min(buckets - 1, Math.floor(t * buckets));
+        if (bi !== b) continue;
+        const r = Math.max(0.5, Math.min(rMax, 0.5 + t * rMax * 1.4));
+        const cx = MARGIN + (col + 0.5) * scale;
+        const cy = MARGIN + (size - 1 - row + 0.5) * scale;
+        ctx.moveTo(cx + r, cy);
+        ctx.arc(cx, cy, r, 0, Math.PI * 2);
+      }
+      ctx.fill();
     }
-    ctx.fill();
   }
+  ctx.globalAlpha = 1.0;
 
   drawStars(s);
   drawTransients(s);
@@ -330,7 +351,15 @@ function drawStars(s: State) {
   if (!stars || stars.length === 0) return;
   const { ctx, size, scale } = s;
   const maxLum = 1200;
+  const softR = size / 2 - 1;
+  const center = size / 2;
   for (let i = 0; i < stars.length; i += 4) {
+    // Radial fade into the halo; deep-halo stars do not render.
+    const rad = Math.hypot(stars[i] - center, stars[i + 1] - center);
+    const fade =
+      rad <= softR ? 1 : Math.max(0, 1 - (rad / softR - 1) / (FADE_END - 1));
+    if (fade <= 0.02) continue;
+    ctx.globalAlpha = fade;
     const px = MARGIN + (stars[i] + 0.5) * scale;
     const py = MARGIN + (size - 1 - stars[i + 1] + 0.5) * scale;
     const lum = Math.min(stars[i + 2], maxLum) / maxLum;
@@ -349,6 +378,7 @@ function drawStars(s: State) {
     ctx.arc(px, py, r, 0, Math.PI * 2);
     ctx.fill();
   }
+  ctx.globalAlpha = 1.0;
 }
 
 export function resetView() {
