@@ -25,6 +25,7 @@ export class Frontend {
   private overrideMass: Uint16Array | null = null;
   private overrideStars: Float32Array | null = null;
   private overrideTransients: Float32Array | null = null;
+  private overrideRadiation: Float32Array | null = null;
   private overrideLensScale: number | null = null;
   // CPU uses `Galaxy.tick`; WebGPU uses `tick_with_accel` after WGSL forces.
   private backend: ComputeBackend = "cpu";
@@ -126,9 +127,18 @@ export class Frontend {
     return this.overrideStars ?? this.galaxy.star_render_data();
   }
 
-  /** Renderer transients: [kind, x, y, ticksAgo] per recent event. */
+  /** Renderer transients: [kind, x, y, ticksAgo, magnitude] per event. */
   public transientsArray(): Float32Array {
     return this.overrideTransients ?? this.galaxy.render_transients();
+  }
+
+  /** Coarse radiation field for gas temperature tinting. */
+  public radiationArray(): Float32Array {
+    return this.overrideRadiation ?? this.galaxy.radiation_field();
+  }
+
+  public setOverrideRadiation(radiation: Float32Array): void {
+    this.overrideRadiation = radiation;
   }
 
   public supernovaCount(): number {
@@ -245,6 +255,7 @@ export class TickWorker {
     tickId: number,
     stars: Float32Array,
     transients: Float32Array,
+    radiation: Float32Array,
     snCount: number,
     lensScale: number,
   ) => void;
@@ -257,6 +268,7 @@ export class TickWorker {
       tickId: number,
       stars: Float32Array,
       transients: Float32Array,
+      radiation: Float32Array,
       snCount: number,
       lensScale: number,
     ) => void,
@@ -283,6 +295,7 @@ export class TickWorker {
         msg.tickId,
         msg.stars,
         msg.transients,
+        msg.radiation,
         msg.snCount,
         msg.lensScale,
       );

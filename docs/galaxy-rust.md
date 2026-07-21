@@ -36,7 +36,7 @@ The central hole is live: `bh_accretion` (cadence 8) eats 1% of the gas within 2
 
 ## Seeding
 
-Every mode seeds inside the disk radius and then adds circular-orbit support on top: v += sqrt(G * M_enc / r) tangentially, with M_enc prefix-summed over cells sorted by radius. `seed_with_mode_seeded` gives byte-identical output for the same `(additional, mode, seed)` - the `?seed=` URL invariant covers every mode.
+Every mode seeds inside the disk radius and then adds circular-orbit support on top: v += sqrt(G * M_enc / r) tangentially (times ROTATION_BOOST, slightly super-circular so differential shear stretches structure), with M_enc prefix-summed over cells sorted by radius. The uniform mode seeds region-scale structure instead of per-cell white noise: two octaves of bilinear value noise (cloud/void regions times finer texture) multiplied by a two-arm logarithmic-spiral overdensity - the density wave that shear turns into a pinwheel. `seed_with_mode_seeded` gives byte-identical output for the same `(additional, mode, seed)` - the `?seed=` URL invariant covers every mode.
 
 ## Buffers
 

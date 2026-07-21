@@ -28,20 +28,49 @@ const LENS_THETA_E_FRAC = 0.035;
 // drawImage of a gradient sprite is far cheaper than per-cell gradients
 // and the alpha accumulation makes dense regions glow on its own.
 const GAS_SPRITE_PX = 32;
-let gasSprites: HTMLCanvasElement[] = [];
+let gasSprites: HTMLCanvasElement[][] = [];
 
-// Blue-violet nebular ramp. Deliberately flat and mid-dark: brightness
-// comes from ACCUMULATION (screen blending of overlapping clouds), the
-// way real emission scales with integrated density - a bright ramp here
-// double-counts density and clips the cores to white.
-const GAS_COLORS: [number, number, number][] = [
-  [58, 52, 120],
-  [70, 62, 145],
-  [82, 72, 168],
-  [94, 84, 190],
-  [108, 98, 210],
-  [124, 112, 228],
+// Gas hue follows temperature (the radiation field), not just
+// brightness: cold clouds sit blue-violet, warm gas shifts magenta, and
+// strongly irradiated regions glow H-alpha pink like real emission
+// nebulae around young clusters. Ramps stay deliberately flat and
+// mid-dark: brightness comes from ACCUMULATION (screen blending of
+// overlapping clouds) - a bright ramp double-counts density and clips
+// the cores to white.
+const GAS_TIERS: [number, number, number][][] = [
+  // Cold: blue-violet.
+  [
+    [58, 52, 120],
+    [70, 62, 145],
+    [82, 72, 168],
+    [94, 84, 190],
+    [108, 98, 210],
+    [124, 112, 228],
+  ],
+  // Warm: violet-magenta.
+  [
+    [86, 50, 116],
+    [104, 58, 140],
+    [124, 68, 164],
+    [144, 80, 188],
+    [164, 94, 210],
+    [186, 112, 230],
+  ],
+  // Hot: H-alpha pink-red.
+  [
+    [116, 48, 76],
+    [142, 56, 92],
+    [168, 66, 108],
+    [194, 78, 124],
+    [218, 94, 142],
+    [240, 116, 162],
+  ],
 ];
+
+// Radiation levels where gas shifts warm and hot (sim units; gas
+// dissipates above 60). Dithered per cell so tier edges stay organic.
+const GAS_WARM_RAD = 7;
+const GAS_HOT_RAD = 26;
 
 // Stable per-cell jitter so the gas field is cloudy, not uniform - a
 // hash of the cell index, constant across frames (no flicker).
@@ -53,21 +82,25 @@ function cellJitter(i: number, salt: number): number {
 
 function buildGasSprites() {
   if (gasSprites.length > 0) return;
-  for (const [r, g, b] of GAS_COLORS) {
-    const c = document.createElement("canvas");
-    c.width = GAS_SPRITE_PX;
-    c.height = GAS_SPRITE_PX;
-    const cctx = c.getContext("2d")!;
-    const half = GAS_SPRITE_PX / 2;
-    const grad = cctx.createRadialGradient(half, half, 0, half, half, half);
-    // Low alpha on purpose: dense clumps stack dozens of overlaps.
-    grad.addColorStop(0, `rgba(${r},${g},${b},0.16)`);
-    grad.addColorStop(0.35, `rgba(${r},${g},${b},0.07)`);
-    grad.addColorStop(0.7, `rgba(${r},${g},${b},0.025)`);
-    grad.addColorStop(1, `rgba(${r},${g},${b},0)`);
-    cctx.fillStyle = grad;
-    cctx.fillRect(0, 0, GAS_SPRITE_PX, GAS_SPRITE_PX);
-    gasSprites.push(c);
+  for (const tier of GAS_TIERS) {
+    const sprites: HTMLCanvasElement[] = [];
+    for (const [r, g, b] of tier) {
+      const c = document.createElement("canvas");
+      c.width = GAS_SPRITE_PX;
+      c.height = GAS_SPRITE_PX;
+      const cctx = c.getContext("2d")!;
+      const half = GAS_SPRITE_PX / 2;
+      const grad = cctx.createRadialGradient(half, half, 0, half, half, half);
+      // Low alpha on purpose: dense clumps stack dozens of overlaps.
+      grad.addColorStop(0, `rgba(${r},${g},${b},0.16)`);
+      grad.addColorStop(0.35, `rgba(${r},${g},${b},0.07)`);
+      grad.addColorStop(0.7, `rgba(${r},${g},${b},0.025)`);
+      grad.addColorStop(1, `rgba(${r},${g},${b},0)`);
+      cctx.fillStyle = grad;
+      cctx.fillRect(0, 0, GAS_SPRITE_PX, GAS_SPRITE_PX);
+      sprites.push(c);
+    }
+    gasSprites.push(sprites);
   }
 }
 
@@ -102,6 +135,7 @@ interface State {
   lastMass: Uint16Array | null;
   lastStars: Float32Array | null;
   lastTransients: Float32Array | null;
+  lastRadiation: Float32Array | null;
   lastLensScale: number;
   cleanup: () => void;
 }
@@ -317,6 +351,7 @@ export function initViz(galaxyFrontend: galaxy.Frontend) {
     lastMass: null,
     lastStars: null,
     lastTransients: null,
+    lastRadiation: null,
     lastLensScale: 1,
     cleanup,
   };
@@ -336,6 +371,7 @@ export function updateData(galaxyFrontend: galaxy.Frontend, simTick?: number) {
   state.lastMass = mass.slice();
   state.lastStars = galaxyFrontend.starRenderArray().slice();
   state.lastTransients = galaxyFrontend.transientsArray().slice();
+  state.lastRadiation = galaxyFrontend.radiationArray().slice();
   state.lastLensScale = galaxyFrontend.lensScale();
   drawFrame(state, state.lastMass);
 }
@@ -367,7 +403,10 @@ function drawFrame(s: State, mass: Uint16Array) {
   const softR = size / 2 - 1;
   const fadeEndSq = softR * FADE_END * (softR * FADE_END);
   const softSq = softR * softR;
-  const buckets = GAS_COLORS.length;
+  const buckets = GAS_TIERS[0].length;
+  const rad = s.lastRadiation;
+  const radRes = rad ? Math.round(Math.sqrt(rad.length)) : 0;
+  const radScale = radRes / size;
 
   // Screen blending: overlapping clouds glow into each other but
   // saturate smoothly instead of clipping to white the way additive
@@ -384,6 +423,16 @@ function drawFrame(s: State, mass: Uint16Array) {
     if (radSq > fadeEndSq) continue;
     const t = Math.log(m + 1) * invLogMax;
     const bi = Math.min(buckets - 1, Math.floor(t * buckets));
+    // Temperature tier from the radiation field, dithered per cell so
+    // the boundaries stay organic.
+    let tier = 0;
+    if (rad && radRes > 0) {
+      const fx = Math.min(radRes - 1, (col * radScale) | 0);
+      const fy = Math.min(radRes - 1, (row * radScale) | 0);
+      const heat = rad[fy * radRes + fx] + (cellJitter(i, 3) - 0.5) * 6;
+      if (heat > GAS_HOT_RAD) tier = 2;
+      else if (heat > GAS_WARM_RAD) tier = 1;
+    }
     // Fuzz overflows the cell on purpose, with per-cell size and
     // brightness jitter so the field is cloudy rather than uniform.
     const footprint =
@@ -391,7 +440,7 @@ function drawFrame(s: State, mass: Uint16Array) {
     const brightness = 0.45 + 0.75 * cellJitter(i, 2);
     ctx.globalAlpha = (radSq > softSq ? 0.3 : 1.0) * brightness;
     ctx.drawImage(
-      gasSprites[bi],
+      gasSprites[tier][bi],
       toCx(col) - footprint / 2,
       toCy(row) - footprint / 2,
       footprint,

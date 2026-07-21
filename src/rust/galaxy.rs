@@ -154,6 +154,17 @@ impl Galaxy {
     /// Max stars spawned per birth event (render + integration budget).
     const BIRTH_MAX_STARS: usize = 24;
 
+    // Uniform-seed structure. Region-scale value noise (two octaves)
+    // replaces per-cell white noise, and a two-arm logarithmic-spiral
+    // overdensity seeds the density wave that differential rotation
+    // shears into a pinwheel. ROTATION_BOOST spins the disk slightly
+    // super-circular so the shear actually stretches the arms.
+    const NOISE_COARSE_RES: usize = 7;
+    const NOISE_MID_RES: usize = 17;
+    const SPIRAL_AMP: f32 = 0.55;
+    const SPIRAL_PITCH: f32 = 4.0;
+    const ROTATION_BOOST: f32 = 1.1;
+
     // Cloud-collapse tuning. A cell must stay at or above the density
     // fraction of CELL_MASS_CAP and below the radiation resist level for
     // COLLAPSE_HEAT_TRIGGER consecutive scans (collapse_watch cadence 16)
@@ -340,13 +351,54 @@ impl Galaxy {
         match mode {
             InitialCondition::Uniform => {
                 if additional > 0 {
+                    // Region noise: coarse cloud/void structure times a
+                    // finer texture octave, sampled bilinearly.
+                    let n_coarse = Galaxy::NOISE_COARSE_RES;
+                    let n_mid = Galaxy::NOISE_MID_RES;
+                    let coarse: Vec<f32> = (0..n_coarse * n_coarse)
+                        .map(|_| rng.random_range(0.25f32..1.75))
+                        .collect();
+                    let mid: Vec<f32> = (0..n_mid * n_mid)
+                        .map(|_| rng.random_range(0.55f32..1.45))
+                        .collect();
+                    let spiral_phase = rng.random_range(0.0f32..std::f32::consts::TAU);
+                    let bilinear = |grid: &[f32], res: usize, u: f32, v: f32| -> f32 {
+                        let fu = (u * (res - 1) as f32).clamp(0.0, (res - 1) as f32);
+                        let fv = (v * (res - 1) as f32).clamp(0.0, (res - 1) as f32);
+                        let x0 = fu as usize;
+                        let y0 = fv as usize;
+                        let x1 = (x0 + 1).min(res - 1);
+                        let y1 = (y0 + 1).min(res - 1);
+                        let tx = fu - x0 as f32;
+                        let ty = fv - y0 as f32;
+                        let a = grid[y0 * res + x0] * (1.0 - tx) + grid[y0 * res + x1] * tx;
+                        let b = grid[y1 * res + x0] * (1.0 - tx) + grid[y1 * res + x1] * tx;
+                        a * (1.0 - ty) + b * ty
+                    };
                     for i in 0..self.n {
                         let x = self.xs_i[i] as f32 - cx;
                         let y = self.ys_i[i] as f32 - cy;
                         if x * x + y * y > disk_r2 {
                             continue;
                         }
-                        mass[i] = mass[i].saturating_add(rng.random_range(0..=additional));
+                        let u = (x / size + 0.5).clamp(0.0, 1.0);
+                        let v = (y / size + 0.5).clamp(0.0, 1.0);
+                        let region = bilinear(&coarse, n_coarse, u, v)
+                            * bilinear(&mid, n_mid, u, v);
+                        let r = (x * x + y * y).sqrt().max(1.0);
+                        let theta = y.atan2(x);
+                        // Two-arm density wave: cos(2 theta - pitch ln r).
+                        let arm = 1.0
+                            + Galaxy::SPIRAL_AMP
+                                * (2.0 * theta - Galaxy::SPIRAL_PITCH * r.ln()
+                                    + spiral_phase)
+                                    .cos();
+                        let m = additional as f32 * 0.5
+                            * region
+                            * arm
+                            * rng.random_range(0.85f32..1.15);
+                        mass[i] = mass[i]
+                            .saturating_add(m.round().clamp(0.0, u16::MAX as f32) as u16);
                     }
                 }
             }
@@ -416,7 +468,8 @@ impl Galaxy {
             if r < 1e-3 {
                 continue;
             }
-            let v = (Galaxy::GRAVATIONAL_CONSTANT * m_enc as f32 / r).sqrt();
+            let v = (Galaxy::GRAVATIONAL_CONSTANT * m_enc as f32 / r).sqrt()
+                * Galaxy::ROTATION_BOOST;
             vel_x[i] += -y / r * v;
             vel_y[i] += x / r * v;
         }
@@ -558,6 +611,15 @@ impl Galaxy {
 
     pub fn bh_mass_value(&self) -> f32 {
         self.bh_mass
+    }
+
+    /// Coarse radiation field for the renderer's gas temperature tiers.
+    pub fn radiation_field(&self) -> Vec<f32> {
+        self.radiation.clone()
+    }
+
+    pub fn radiation_res() -> usize {
+        Galaxy::FIELD_RES
     }
 
     /// Lens-depth scale for the renderer: sqrt of the black hole's mass
@@ -2290,18 +2352,17 @@ mod tests_golden {
     }
 
     /// Golden values pin the mass field after 100 ticks (uniform seed 42
-    /// / bang seed 7, size 50, dt 0.5). Bang recaptured when black-hole
-    /// accretion landed (its dense core feeds the hole inside the golden
-    /// window; uniform's cells are light enough that the integer take
-    /// rounds to zero there). If another deliberate change lands,
-    /// recapture and say so in the commit.
+    /// / bang seed 7, size 50, dt 0.5). Last recaptured for the
+    /// region-noise + spiral-density-wave seeding and the rotation
+    /// boost (both modes share the boosted orbital step). If another
+    /// deliberate change lands, recapture and say so in the commit.
     #[test]
     fn test_golden_uniform_mass_field() {
         let mut g = Galaxy::new(50, 0).seed_with_mode_seeded(25, InitialCondition::Uniform, 42);
         for _ in 0..100 {
             g = g.tick(0.5);
         }
-        assert_eq!(mass_hash(&g), 5006051126598297968);
+        assert_eq!(mass_hash(&g), 14143635165160636807);
     }
 
     #[test]
@@ -2310,7 +2371,7 @@ mod tests_golden {
         for _ in 0..100 {
             g = g.tick(0.5);
         }
-        assert_eq!(mass_hash(&g), 9442849267090298022);
+        assert_eq!(mass_hash(&g), 200863505778242815);
     }
 
     #[test]

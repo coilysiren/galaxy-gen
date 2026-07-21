@@ -120,6 +120,7 @@ export function Interface() {
     tickId: number;
     stars: Float32Array;
     transients: Float32Array;
+    radiation: Float32Array;
     snCount: number;
     lensScale: number;
   } | null>(null);
@@ -274,6 +275,7 @@ export function Interface() {
       galaxyFrontendRef.current.setOverrideMass(snap.mass);
       galaxyFrontendRef.current.setOverrideStars(snap.stars);
       galaxyFrontendRef.current.setOverrideTransients(snap.transients);
+      galaxyFrontendRef.current.setOverrideRadiation(snap.radiation);
       galaxyFrontendRef.current.setOverrideLensScale(snap.lensScale);
       dataviz.updateData(galaxyFrontendRef.current, snap.tickId);
       setStarCount(snap.stars.length / 4);
@@ -313,13 +315,14 @@ export function Interface() {
         return;
       }
       workerRef.current = new galaxy.TickWorker(
-        (mass, tickMs, tickId, stars, transients, snCount, lensScale) => {
+        (mass, tickMs, tickId, stars, transients, radiation, snCount, lensScale) => {
           latestSnapshotRef.current = {
             mass,
             tickMs,
             tickId,
             stars,
             transients,
+            radiation,
             snCount,
             lensScale,
           };

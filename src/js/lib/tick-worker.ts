@@ -70,6 +70,7 @@ function runOneTick() {
   const mass: Uint16Array = galaxy.mass();
   const stars: Float32Array = galaxy.star_render_data();
   const transients: Float32Array = galaxy.render_transients();
+  const radiation: Float32Array = galaxy.radiation_field();
   tickId += 1;
   const payload = {
     type: "snapshot" as const,
@@ -78,6 +79,7 @@ function runOneTick() {
     tickId,
     stars,
     transients,
+    radiation,
     snCount: Number(galaxy.events_executed(2)),
     lensScale: galaxy.bh_lens_scale(),
   };
@@ -85,6 +87,7 @@ function runOneTick() {
     mass.buffer,
     stars.buffer,
     transients.buffer,
+    radiation.buffer,
   ]);
 
   scheduleLoop(Math.max(0, MIN_TICK_INTERVAL_MS - tickMs));
