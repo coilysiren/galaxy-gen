@@ -445,6 +445,10 @@ function applyBlackHoleLens(s: State) {
   lensCtx.putImageData(img, 0, 0);
   ctx.save();
   ctx.setTransform(1, 0, 0, 1, 0, 0);
+  // Clear before drawing back: the scratch holds the region's exact
+  // pixels, and compositing them source-over onto the originals
+  // double-blends every semi-transparent pixel into a visible square.
+  ctx.clearRect(x0, y0, w, h);
   ctx.drawImage(lensCanvas, 0, 0, w, h, x0, y0, w, h);
   ctx.restore();
 
