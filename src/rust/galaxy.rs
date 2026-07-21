@@ -134,10 +134,18 @@ impl Galaxy {
     const FIELD_SOFTENING_SQ: f32 = 25.0;
     /// Central black hole mass as a fraction of total seeded mass.
     const BH_MASS_FRACTION: f32 = 0.05;
-    /// Star lifetime = coefficient / mass, in sim-time units. Heavy stars
-    /// die young, which is what closes the causal loop fast enough to
-    /// watch.
-    const STAR_LIFETIME_COEFF: f32 = 40_000.0;
+    // Stellar population. Births sample a Salpeter-flavored IMF
+    // (dN/dm proportional to m^-2.35) between the mass bounds: many
+    // faint red dwarfs, rare blue giants. Luminosity follows a
+    // main-sequence-ish power law and lifetime falls steeply with mass,
+    // so M-dwarfs outlive the session while O-stars die in minutes.
+    const STAR_MASS_MIN: f32 = 3.0;
+    const STAR_MASS_MAX: f32 = 120.0;
+    const IMF_ALPHA: f32 = 2.35;
+    /// Lifetime = COEFF x (30/m)^2 sim-time units.
+    const STAR_LIFETIME_COEFF: f32 = 900.0;
+    /// Max stars spawned per birth event (render + integration budget).
+    const BIRTH_MAX_STARS: usize = 24;
 
     // Cloud-collapse tuning. A cell must stay at or above the density
     // fraction of CELL_MASS_CAP and below the radiation resist level for
@@ -178,7 +186,7 @@ impl Galaxy {
     // or above the mass threshold detonate; lighter ones fade to
     // remnants. A supernova returns most of the star's mass to nearby
     // gas with an outward kick and leaves a dim compact remnant.
-    const SN_MASS_THRESHOLD: f32 = 60.0;
+    const SN_MASS_THRESHOLD: f32 = 30.0;
     const SN_GAS_RETURN: f32 = 0.8;
     const SN_KICK: f32 = 1.2;
     const SN_RADIUS: i32 = 2;
@@ -480,20 +488,11 @@ impl Galaxy {
     /// (lifetime, luminosity, color) come from mass.
     pub fn spawn_star(&mut self, x: f32, y: f32, vx: f32, vy: f32, mass: f32) -> usize {
         let m = mass.max(1.0);
+        let (lifetime, luminosity, class_index) = Galaxy::star_attrs(m);
         let id = self.next_star_id;
         self.next_star_id += 1;
-        self.stars.spawn(
-            x,
-            y,
-            vx,
-            vy,
-            m,
-            Galaxy::STAR_LIFETIME_COEFF / m,
-            m.powf(1.5),
-            (m / 100.0).clamp(0.0, 1.0),
-            NO_CLUSTER,
-            id,
-        )
+        self.stars
+            .spawn(x, y, vx, vy, m, lifetime, luminosity, class_index, NO_CLUSTER, id)
     }
 
     /// Renderer transients: [kind, x, y, ticks_ago] per recent executed
@@ -1128,10 +1127,11 @@ impl Galaxy {
         );
     }
 
-    /// Spawn 1-5 stars from the budget at the birth cell, sharing a
-    /// cluster id. Velocities = local gas velocity + prograde circular
-    /// orbit component from the gravity field. Star masses sum to the
-    /// budget exactly, so the baryonic ledger stays closed.
+    /// Spawn a cluster of stars from the budget, masses drawn from the
+    /// IMF (mostly red dwarfs, occasionally a giant), leftover folded
+    /// into the heaviest draw so the masses sum to the budget exactly
+    /// and the baryonic ledger stays closed. Velocities = capped local
+    /// gas velocity + prograde circular orbit component from the field.
     fn handle_star_birth(&mut self, ev: &Event) {
         let i = ev.target as usize;
         if i >= self.n {
@@ -1139,7 +1139,29 @@ impl Galaxy {
         }
         let budget = ev.payload;
         let mut rng = self.rng_stream(Galaxy::RNG_STAR_BIRTH);
-        let n_stars = ((budget / 80.0).round() as usize).clamp(1, 5);
+        // Draw IMF masses until the budget runs out.
+        let mut masses: Vec<f32> = Vec::new();
+        let mut remaining = budget;
+        while remaining >= Galaxy::STAR_MASS_MIN && masses.len() < Galaxy::BIRTH_MAX_STARS {
+            let m = Galaxy::imf_sample(rng.random_range(0.0f32..1.0)).min(remaining);
+            remaining -= m;
+            masses.push(m);
+        }
+        if masses.is_empty() {
+            masses.push(budget);
+            remaining = 0.0;
+        }
+        if remaining > 0.0 {
+            // Fold the leftover into the heaviest star.
+            let mut hi = 0;
+            for (k, &m) in masses.iter().enumerate() {
+                if m > masses[hi] {
+                    hi = k;
+                }
+            }
+            masses[hi] += remaining;
+        }
+        let n_stars = masses.len();
         let cluster = self.next_cluster_id;
         self.next_cluster_id += 1;
 
@@ -1155,18 +1177,10 @@ impl Galaxy {
             gas_vy *= scale;
         }
 
-        let mut remaining = budget;
         for k in 0..n_stars {
-            let mass = if k + 1 == n_stars {
-                remaining
-            } else {
-                let base = budget / n_stars as f32;
-                let m = (base * rng.random_range(0.7f32..1.3)).min(remaining - 1.0);
-                m.max(1.0)
-            };
-            remaining -= mass;
-            let px = (cx + rng.random_range(-1.2f32..1.2)).clamp(0.0, self.size as f32 - 1e-3);
-            let py = (cy + rng.random_range(-1.2f32..1.2)).clamp(0.0, self.size as f32 - 1e-3);
+            let mass = masses[k];
+            let px = (cx + rng.random_range(-1.8f32..1.8)).clamp(0.0, self.size as f32 - 1e-3);
+            let py = (cy + rng.random_range(-1.8f32..1.8)).clamp(0.0, self.size as f32 - 1e-3);
             // Prograde circular support from the INWARD RADIAL component
             // of the field only - the raw magnitude is dominated by
             // whatever clump is nearest and mis-aims newborns.
@@ -1178,6 +1192,7 @@ impl Galaxy {
             let v_circ = (a_rad * r).sqrt().min(Galaxy::BIRTH_VCIRC_CAP);
             let vx = gas_vx + (-ry / r) * v_circ;
             let vy = gas_vy + (rx / r) * v_circ;
+            let (lifetime, luminosity, class_index) = Galaxy::star_attrs(mass);
             let star_id = self.next_star_id;
             self.next_star_id += 1;
             self.stars.spawn(
@@ -1186,9 +1201,9 @@ impl Galaxy {
                 vx,
                 vy,
                 mass,
-                Galaxy::STAR_LIFETIME_COEFF / mass.max(1.0),
-                mass.max(1.0).powf(1.5),
-                (mass / 100.0).clamp(0.0, 1.0),
+                lifetime,
+                luminosity,
+                class_index,
                 cluster,
                 star_id,
             );
@@ -1222,6 +1237,27 @@ impl Galaxy {
                 ^ splitmix64(process_id ^ self.tick_count.wrapping_mul(0x9E37_79B9_7F4A_7C15)),
         );
         StdRng::seed_from_u64(mixed)
+    }
+
+    /// Derived main-sequence attributes: (lifetime, luminosity,
+    /// class_index). class_index is log-mass normalized 0..1, M -> O;
+    /// the renderer maps it through the stellar-classification colors.
+    fn star_attrs(mass: f32) -> (f32, f32, f32) {
+        let m = mass.max(1.0);
+        let lifetime = Galaxy::STAR_LIFETIME_COEFF * (30.0 / m).powi(2);
+        let luminosity = m.powf(2.0);
+        let class_index = ((m / Galaxy::STAR_MASS_MIN).ln()
+            / (Galaxy::STAR_MASS_MAX / Galaxy::STAR_MASS_MIN).ln())
+        .clamp(0.0, 1.0);
+        (lifetime, luminosity, class_index)
+    }
+
+    /// Inverse-transform sample of the truncated power-law IMF.
+    fn imf_sample(u: f32) -> f32 {
+        let a = 1.0 - Galaxy::IMF_ALPHA;
+        let lo = Galaxy::STAR_MASS_MIN.powf(a);
+        let hi = Galaxy::STAR_MASS_MAX.powf(a);
+        (lo + u * (hi - lo)).powf(1.0 / a)
     }
 
     /// World-disk radius: seeding stays inside it, the boundary spring

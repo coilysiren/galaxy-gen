@@ -393,10 +393,41 @@ function drawTransients(
 // (light stars, warm cream) to hot (heavy stars, blue-white); size and
 // halo derive from luminosity. Render-only exaggeration is fine - none
 // of this flows back into the sim.
-// Stars: cross-shaped points - a tight bright core with four
-// diffraction spikes, the way stars read in a telescope image. Light
-// stars are cream, heavy ones blue-white. Spike length scales with
-// luminosity; the fuzz belongs to the gas.
+// Stellar-classification color sequence, M -> O, keyed by the sim's
+// log-mass class_index (0 = red dwarf, 1 = blue giant). Perceived star
+// colors are subtle: warm orange through cream and white to blue-white.
+const CLASS_STOPS: [number, [number, number, number]][] = [
+  [0.0, [255, 184, 128]],
+  [0.2, [255, 210, 164]],
+  [0.4, [255, 238, 214]],
+  [0.55, [255, 249, 240]],
+  [0.7, [242, 246, 255]],
+  [0.85, [198, 214, 255]],
+  [1.0, [160, 186, 255]],
+];
+
+function classColor(ci: number): [number, number, number] {
+  let lo = CLASS_STOPS[0];
+  let hi = CLASS_STOPS[CLASS_STOPS.length - 1];
+  for (let k = 0; k < CLASS_STOPS.length - 1; k++) {
+    if (ci >= CLASS_STOPS[k][0] && ci <= CLASS_STOPS[k + 1][0]) {
+      lo = CLASS_STOPS[k];
+      hi = CLASS_STOPS[k + 1];
+      break;
+    }
+  }
+  const t = hi[0] === lo[0] ? 0 : (ci - lo[0]) / (hi[0] - lo[0]);
+  return [
+    (lo[1][0] + (hi[1][0] - lo[1][0]) * t) | 0,
+    (lo[1][1] + (hi[1][1] - lo[1][1]) * t) | 0,
+    (lo[1][2] + (hi[1][2] - lo[1][2]) * t) | 0,
+  ];
+}
+
+// Stars: three brightness tiers, like a long-exposure field. Most stars
+// are bare points of their class color; the bright minority get a tight
+// glow; only the rare giants (top of the luminosity range) earn
+// diffraction spikes.
 function drawStars(
   s: State,
   toCx: (x: number) => number,
@@ -405,7 +436,7 @@ function drawStars(
   const stars = s.lastStars;
   if (!stars || stars.length === 0) return;
   const { ctx, size } = s;
-  const maxLum = 1200;
+  const maxLum = 120 * 120;
   const softR = size / 2 - 1;
   const center = size / 2;
   for (let i = 0; i < stars.length; i += 4) {
@@ -416,23 +447,35 @@ function drawStars(
     if (fade <= 0.02) continue;
     const px = toCx(stars[i] - 0.5);
     const py = toCy(stars[i + 1] - 0.5);
-    const lum = Math.min(stars[i + 2], maxLum) / maxLum;
-    const heat = stars[i + 3];
-    const core = 0.7 + 1.1 * Math.sqrt(lum);
-    const spike = core * (2.5 + 4.5 * lum);
-    const cr = (255 - 45 * heat) | 0;
-    const cg = (240 - 18 * heat) | 0;
-    const cb = (208 + 47 * heat) | 0;
-    // Diffraction spikes: thin tapering strokes, then the core on top.
-    ctx.strokeStyle = `rgba(${cr},${cg},${cb},${(0.55 * fade).toFixed(3)})`;
-    ctx.lineWidth = 0.7;
-    ctx.beginPath();
-    ctx.moveTo(px - spike, py);
-    ctx.lineTo(px + spike, py);
-    ctx.moveTo(px, py - spike);
-    ctx.lineTo(px, py + spike);
-    ctx.stroke();
-    ctx.globalAlpha = fade;
+    // Fourth root compresses the huge mass-luminosity range into a
+    // usable brightness scale.
+    const b = Math.pow(Math.min(stars[i + 2], maxLum) / maxLum, 0.25);
+    const [cr, cg, cb] = classColor(stars[i + 3]);
+    const core = 0.4 + 1.7 * b;
+    const alpha = (0.3 + 0.7 * b) * fade;
+    if (b > 0.62) {
+      // Giants: diffraction spikes plus a tight glow.
+      const spike = core * (2.0 + 5.0 * b);
+      ctx.strokeStyle = `rgba(${cr},${cg},${cb},${(0.5 * fade).toFixed(3)})`;
+      ctx.lineWidth = 0.7;
+      ctx.beginPath();
+      ctx.moveTo(px - spike, py);
+      ctx.lineTo(px + spike, py);
+      ctx.moveTo(px, py - spike);
+      ctx.lineTo(px, py + spike);
+      ctx.stroke();
+      ctx.fillStyle = `rgba(${cr},${cg},${cb},${(0.16 * fade).toFixed(3)})`;
+      ctx.beginPath();
+      ctx.arc(px, py, core * 2.4, 0, Math.PI * 2);
+      ctx.fill();
+    } else if (b > 0.45) {
+      // Mid-bright: a faint tight glow, no spikes.
+      ctx.fillStyle = `rgba(${cr},${cg},${cb},${(0.12 * fade).toFixed(3)})`;
+      ctx.beginPath();
+      ctx.arc(px, py, core * 1.9, 0, Math.PI * 2);
+      ctx.fill();
+    }
+    ctx.globalAlpha = alpha;
     ctx.fillStyle = `rgb(${cr},${cg},${cb})`;
     ctx.beginPath();
     ctx.arc(px, py, core, 0, Math.PI * 2);
