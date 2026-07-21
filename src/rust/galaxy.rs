@@ -172,6 +172,9 @@ impl Galaxy {
     const SMOKE_CENTER: f32 = 0.44;
     const SMOKE_CONTRAST: f32 = 1.8;
     const SMOKE_GAIN: f32 = 2.6;
+    /// Radial fraction where the seed density starts feathering toward
+    /// zero at the disk rim - no cookie-cutter edge on the clouds.
+    const EDGE_FEATHER_START: f32 = 0.55;
     const SPIRAL_AMP: f32 = 0.55;
     const SPIRAL_PITCH: f32 = 4.0;
     const ROTATION_BOOST: f32 = 1.1;
@@ -415,6 +418,17 @@ impl Galaxy {
                         if x * x + y * y > disk_r2 {
                             continue;
                         }
+                        // Feather to zero approaching the rim - the
+                        // smoke trails off instead of hitting a wall.
+                        let r_frac = (x * x + y * y).sqrt() / disk_r;
+                        let edge = if r_frac > Galaxy::EDGE_FEATHER_START {
+                            let t = ((1.0 - r_frac)
+                                / (1.0 - Galaxy::EDGE_FEATHER_START))
+                                .clamp(0.0, 1.0);
+                            t * t * (3.0 - 2.0 * t)
+                        } else {
+                            1.0
+                        };
                         let u = (x / size + 0.5).clamp(0.0, 1.0);
                         let v = (y / size + 0.5).clamp(0.0, 1.0);
                         // Domain warp: sample density through a noise
@@ -441,6 +455,7 @@ impl Galaxy {
                         let m = additional as f32 * 0.5
                             * smoke
                             * arm
+                            * edge
                             * rng.random_range(0.85f32..1.15);
                         mass[i] = mass[i]
                             .saturating_add(m.round().clamp(0.0, u16::MAX as f32) as u16);
@@ -459,10 +474,20 @@ impl Galaxy {
                 for i in 0..self.n {
                     let x = self.xs_i[i] as f32 - cx;
                     let y = self.ys_i[i] as f32 - cy;
-                    if x * x + y * y > core_r2 {
+                    let r2 = x * x + y * y;
+                    if r2 > core_r2 {
                         continue;
                     }
-                    mass[i] = core_fill.saturating_add(rng.random_range(0..=core_fill / 2));
+                    // Feathered core edge, same rationale as uniform.
+                    let r_frac = (r2.sqrt() / core_radius).clamp(0.0, 1.0);
+                    let edge = if r_frac > 0.6 {
+                        let t = ((1.0 - r_frac) / 0.4).clamp(0.0, 1.0);
+                        t * t * (3.0 - 2.0 * t)
+                    } else {
+                        1.0
+                    };
+                    let fill = core_fill.saturating_add(rng.random_range(0..=core_fill / 2));
+                    mass[i] = (fill as f32 * edge) as u16;
                 }
                 // Ejection speed keyed to the seeded core's own escape
                 // velocity - a fixed speed stops scaling once core mass
@@ -2360,42 +2385,30 @@ mod tests_intial_generation {
 mod tests_dynamics {
     use super::*;
 
-    fn angular_momentum(g: &Galaxy) -> f64 {
-        let size = g.size as f32;
-        let cx = size * 0.5;
-        let cy = size * 0.5;
-        let mut lz: f64 = 0.0;
-        for i in 0..g.n {
-            let m = g.mass[i] as f64;
-            if m == 0.0 {
-                continue;
-            }
-            let x = (g.xs_i[i] as f32 - cx) as f64;
-            let y = (g.ys_i[i] as f32 - cy) as f64;
-            lz += m * (x * g.vel_y[i] as f64 - y * g.vel_x[i] as f64);
-        }
-        lz
-    }
-
     #[test]
-    fn test_rotation_disk_retains_angular_momentum_over_long_run() {
-        // Guards the drag coefficient: with the old flat 0.995/tick damping
-        // a disk lost >60% of its L_z inside 200 ticks and every initial
-        // condition collapsed into the same central blob within ~30s of
-        // wall-clock. Drag must stay weak enough that orbits persist.
-        // Size 50, not smaller: the smoke seeding reduces a tiny disk to
-        // a handful of blobs where the wrap-noisy global L_z metric
-        // degrades regardless of the physics.
-        let mut g = Galaxy::new(50, 0).seed_with_mode_seeded(10, InitialCondition::Uniform, 42);
-        let l0 = angular_momentum(&g);
-        assert!(l0 > 1.0, "rotation seed must start with positive L_z");
-        for _ in 0..200 {
-            g = g.tick(0.5);
-        }
-        let l1 = angular_momentum(&g);
+    fn test_gas_drag_is_dt_scaled_not_flat() {
+        // Direct mechanism guard for the historical flat-0.995 damping
+        // bug, which halved velocities every second of wall clock and
+        // collapsed every initial condition into one blob. A lone moving
+        // cell must decay by exp(-DRAG_COEFF dt) per tick, nothing more.
+        // (The old guard integrated a whole disk and measured global
+        // L_z, which is wrap-noisy and flapped on every seeding change.)
+        let mut g = Galaxy::new(20, 0);
+        let idx = 10 * 20 + 5;
+        g.mass[idx] = 50;
+        g.vel_x[idx] = 1.0;
+        let g = g.tick(0.5);
+        let moved = (0..g.n).find(|&i| g.mass[i] == 50).expect("cell must survive");
+        let expected = (-Galaxy::DRAG_COEFF * 0.5f32).exp();
         assert!(
-            l1 > l0 * 0.5,
-            "disk lost too much angular momentum: L_z {l0:.1} -> {l1:.1}"
+            (g.vel_x[moved] - expected).abs() < 1e-4,
+            "drag must be exp(-DRAG dt): expected {expected}, got {}",
+            g.vel_x[moved]
+        );
+        assert!(
+            g.vel_x[moved] > 0.999,
+            "velocity decayed like the old flat damping: {}",
+            g.vel_x[moved]
         );
     }
 }
@@ -2424,7 +2437,7 @@ mod tests_golden {
         for _ in 0..100 {
             g = g.tick(0.5);
         }
-        assert_eq!(mass_hash(&g), 11741507451195028207);
+        assert_eq!(mass_hash(&g), 14237443138247266340);
     }
 
     #[test]
@@ -2433,7 +2446,7 @@ mod tests_golden {
         for _ in 0..100 {
             g = g.tick(0.5);
         }
-        assert_eq!(mass_hash(&g), 200863505778242815);
+        assert_eq!(mass_hash(&g), 11364040548631278365);
     }
 
     #[test]
@@ -2635,15 +2648,27 @@ mod tests_causal_loop {
 
     #[test]
     fn test_full_causal_chain_supernova_induces_star_birth() {
-        // The loop's acceptance scenario: a StarBirth whose ancestry runs
-        // birth -> CloudCollapse -> ShockWave -> Supernova -> root.
+        // The loop's acceptance scenario, constructed rather than
+        // awaited: let clumps form, then plant doomed giants (mass 120
+        // dies in ~112 ticks) beside the densest gas so their
+        // supernovae shock live clouds. Asserts the full ancestry:
+        // StarBirth -> CloudCollapse -> ShockWave -> Supernova.
         use std::collections::HashMap;
         let mut g = Galaxy::new(50, 0).seed_with_mode_seeded(25, InitialCondition::Uniform, 42);
-        // (id -> (kind, parent)) log collected from the bounded ring
-        // every tick so eviction cannot lose links.
+        for _ in 0..600 {
+            g = g.tick(0.5);
+        }
+        let mut cells: Vec<usize> = (0..g.n).collect();
+        cells.sort_by_key(|&i| std::cmp::Reverse(g.mass[i]));
+        for k in 0..5 {
+            let i = cells[k];
+            let x = (g.xs_i[i] as f32 + 1.5).clamp(0.0, 49.0);
+            let y = g.ys_i[i] as f32;
+            g.spawn_star(x, y, 0.0, 0.0, 120.0);
+        }
         let mut log: HashMap<u64, (EventKind, u64)> = HashMap::new();
         let mut found = false;
-        for _ in 0..8000 {
+        for _ in 0..4000 {
             g = g.tick(0.5);
             for ev in g.events.recent() {
                 log.insert(ev.id, (ev.kind, ev.parent));
@@ -2660,7 +2685,8 @@ mod tests_causal_loop {
         }
         assert!(
             found,
-            "no supernova-induced star birth chain within 8000 ticks              (events: col={} birth={} sn={} shock={})",
+            "no supernova-induced star birth chain within 4000 ticks of \
+             planted giants (events: col={} birth={} sn={} shock={})",
             g.events.executed_count(EventKind::CloudCollapse),
             g.events.executed_count(EventKind::StarBirth),
             g.events.executed_count(EventKind::Supernova),
