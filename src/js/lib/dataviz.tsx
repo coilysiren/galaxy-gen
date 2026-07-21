@@ -390,8 +390,8 @@ function applyShockShimmer(s: State) {
   for (let i = 0; i < t.length && drawn < MAX_SHIMMER_WAVES; i += 5) {
     if (t[i] !== 2) continue;
     const age = t[i + 3];
-    const life = 1 - age / 55;
-    if (life <= 0) continue;
+    const life = 1 - age / BLAST_LIFE;
+    if (life <= 0.15) continue;
     // World -> canvas -> screen css -> device.
     const cx = half + (t[i + 1] + 0.5 - center) * scale;
     const cy = half + (center - t[i + 2] - 0.5) * scale;
@@ -402,9 +402,9 @@ function applyShockShimmer(s: State) {
     if (sx + front < 0 || sy + front < 0 || sx - front > canvas.width || sy - front > canvas.height) {
       continue;
     }
-    const thickness = Math.max(3, front * 0.16);
+    const thickness = Math.max(3, front * 0.13);
     // Displacement shrinks as the wave ages - the medium relaxes.
-    const k = 1 + (2.2 * life * dpr) / front;
+    const k = 1 + (1.3 * life * dpr) / front;
     ctx.save();
     ctx.beginPath();
     ctx.arc(sx, sy, front, 0, Math.PI * 2);
@@ -523,8 +523,12 @@ function applyBlackHoleLens(s: State) {
 // the progenitor mass standing in for energy, so a 120-mass giant's
 // remnant dwarfs a 30-mass star's, and the shock visibly decelerates.
 function blastRadius(mass: number, age: number): number {
-  return 1.2 + 2.1 * Math.pow(Math.max(mass, 30) / 30, 0.2) * Math.pow(age + 1, 0.4);
+  return 1.0 + 1.4 * Math.pow(Math.max(mass, 30) / 30, 0.2) * Math.pow(age + 1, 0.4);
 }
+
+/// Blast lifetime in ticks. Short on purpose: supernovae are incidents,
+/// not the composition, and a busy epoch overlaps many shells.
+const BLAST_LIFE = 42;
 
 // Event flashes: supernova blast waves and star-birth glints. Duration
 // and brightness are render exaggerations of instantaneous events -
@@ -546,13 +550,14 @@ function drawTransients(
     if (kind === 2) {
       // Supernova: a shell with a bright leading edge and a fading wake
       // - a wave, not a stroked circle. Size and brightness follow the
-      // progenitor's stellar class.
-      const life = 1 - age / 55;
+      // progenitor's stellar class, but stay understated: a big epoch
+      // fires many at once.
+      const life = 1 - age / BLAST_LIFE;
       if (life <= 0) continue;
       const heft = Math.min(mag / 120, 1);
       const front = blastRadius(mag, age) * scale;
-      const inner = Math.max(front * 0.55, front - (2.5 + 3 * heft) * scale);
-      const peak = (0.26 + 0.3 * heft) * life;
+      const inner = Math.max(front * 0.6, front - (2 + 2 * heft) * scale);
+      const peak = (0.12 + 0.13 * heft) * life;
       const g = ctx.createRadialGradient(px, py, inner, px, py, front);
       g.addColorStop(0, "rgba(255,236,200,0)");
       g.addColorStop(0.55, `rgba(255,228,185,${(peak * 0.35).toFixed(3)})`);
@@ -562,26 +567,40 @@ function drawTransients(
       ctx.beginPath();
       ctx.arc(px, py, front, 0, Math.PI * 2);
       ctx.fill();
-      // Crisp leading edge.
-      ctx.strokeStyle = `rgba(255,246,226,${(peak * 0.8).toFixed(3)})`;
-      ctx.lineWidth = 0.9;
+      // Leading edge, faint.
+      ctx.strokeStyle = `rgba(255,246,226,${(peak * 0.55).toFixed(3)})`;
+      ctx.lineWidth = 0.7;
       ctx.beginPath();
       ctx.arc(px, py, front * 0.985, 0, Math.PI * 2);
       ctx.stroke();
-      if (age < 12) {
-        const coreLife = 1 - age / 12;
-        const coreAlpha = 0.6 + 0.35 * heft;
+      if (age < 10) {
+        const coreLife = 1 - age / 10;
+        const coreAlpha = 0.4 + 0.25 * heft;
         ctx.fillStyle = `rgba(255,255,245,${(coreAlpha * coreLife).toFixed(3)})`;
         ctx.beginPath();
-        ctx.arc(px, py, (1.5 + heft * 2 + age * 0.2) * scale * 0.6, 0, Math.PI * 2);
+        ctx.arc(px, py, (1.2 + heft * 1.5 + age * 0.15) * scale * 0.45, 0, Math.PI * 2);
         ctx.fill();
       }
-    } else if (kind === 1 && age < 30) {
-      // Star birth: soft glint.
-      const life = 1 - age / 30;
-      ctx.fillStyle = `rgba(200,220,255,${(0.35 * life).toFixed(3)})`;
+    } else if (kind === 1 && age < 18) {
+      // Star birth: a quick mint-green sparkle with tiny spikes. No real
+      // astro analog - and green on purpose: no star is ever green, so
+      // the birth marker cannot be confused with a bright cluster star.
+      const life = 1 - age / 18;
+      const budget = Math.min(mag / 250, 1);
+      const r = (0.5 + 0.6 * budget) * scale * (0.7 + 0.5 * (1 - life));
+      const a = 0.85 * life * life;
+      ctx.strokeStyle = `rgba(140,240,190,${(a * 0.7).toFixed(3)})`;
+      ctx.lineWidth = 0.6;
+      const spike = r * 2.6 * life;
       ctx.beginPath();
-      ctx.arc(px, py, (1.2 + age * 0.05) * scale, 0, Math.PI * 2);
+      ctx.moveTo(px - spike, py);
+      ctx.lineTo(px + spike, py);
+      ctx.moveTo(px, py - spike);
+      ctx.lineTo(px, py + spike);
+      ctx.stroke();
+      ctx.fillStyle = `rgba(185,255,220,${a.toFixed(3)})`;
+      ctx.beginPath();
+      ctx.arc(px, py, r, 0, Math.PI * 2);
       ctx.fill();
     }
   }
