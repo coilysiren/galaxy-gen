@@ -154,13 +154,24 @@ impl Galaxy {
     /// Max stars spawned per birth event (render + integration budget).
     const BIRTH_MAX_STARS: usize = 24;
 
-    // Uniform-seed structure. Region-scale value noise (two octaves)
-    // replaces per-cell white noise, and a two-arm logarithmic-spiral
-    // overdensity seeds the density wave that differential rotation
-    // shears into a pinwheel. ROTATION_BOOST spins the disk slightly
-    // super-circular so the shear actually stretches the arms.
-    const NOISE_COARSE_RES: usize = 7;
-    const NOISE_MID_RES: usize = 17;
+    // Uniform-seed structure: domain-warped fractal noise shaped into
+    // smoke. Four octaves of smoothstep value noise (fBm) give the
+    // power-law texture, a second fBm field warps the sampling
+    // coordinates so blobs curl into wisps and billows, and a power-law
+    // contrast exponent carves thin filaments and true voids out of
+    // what would otherwise read as smooth milk. A two-arm
+    // logarithmic-spiral overdensity still seeds the density wave that
+    // differential rotation shears into a pinwheel; ROTATION_BOOST
+    // spins the disk slightly super-circular so the shear works.
+    const SMOKE_OCTAVE_RES: [usize; 4] = [6, 12, 24, 48];
+    const SMOKE_WARP: f32 = 0.11;
+    /// Normalized fBm clusters tightly around its mean - stretch it
+    /// (about a slightly dark center) so voids reach true zero and
+    /// billows saturate, THEN shape with the power law.
+    const SMOKE_STRETCH: f32 = 3.2;
+    const SMOKE_CENTER: f32 = 0.44;
+    const SMOKE_CONTRAST: f32 = 1.8;
+    const SMOKE_GAIN: f32 = 2.6;
     const SPIRAL_AMP: f32 = 0.55;
     const SPIRAL_PITCH: f32 = 4.0;
     const ROTATION_BOOST: f32 = 1.1;
@@ -351,30 +362,53 @@ impl Galaxy {
         match mode {
             InitialCondition::Uniform => {
                 if additional > 0 {
-                    // Region noise: coarse cloud/void structure times a
-                    // finer texture octave, sampled bilinearly.
-                    let n_coarse = Galaxy::NOISE_COARSE_RES;
-                    let n_mid = Galaxy::NOISE_MID_RES;
-                    let coarse: Vec<f32> = (0..n_coarse * n_coarse)
-                        .map(|_| rng.random_range(0.25f32..1.75))
-                        .collect();
-                    let mid: Vec<f32> = (0..n_mid * n_mid)
-                        .map(|_| rng.random_range(0.55f32..1.45))
-                        .collect();
+                    // Smoke field: three fBm stacks (density + two warp
+                    // components), each four octaves of smoothstep value
+                    // noise drawn from the seeded RNG.
+                    let make_octaves = |rng: &mut dyn rand::Rng| -> Vec<Vec<f32>> {
+                        Galaxy::SMOKE_OCTAVE_RES
+                            .iter()
+                            .map(|&res| {
+                                (0..res * res).map(|_| rng.random_range(0.0f32..1.0)).collect()
+                            })
+                            .collect()
+                    };
+                    let density_oct = make_octaves(rng);
+                    let warp_x_oct = make_octaves(rng);
+                    let warp_y_oct = make_octaves(rng);
                     let spiral_phase = rng.random_range(0.0f32..std::f32::consts::TAU);
-                    let bilinear = |grid: &[f32], res: usize, u: f32, v: f32| -> f32 {
-                        let fu = (u * (res - 1) as f32).clamp(0.0, (res - 1) as f32);
-                        let fv = (v * (res - 1) as f32).clamp(0.0, (res - 1) as f32);
+
+                    let vnoise = |grid: &[f32], res: usize, u: f32, v: f32| -> f32 {
+                        let fu = (u.rem_euclid(1.0)) * (res - 1) as f32;
+                        let fv = (v.rem_euclid(1.0)) * (res - 1) as f32;
                         let x0 = fu as usize;
                         let y0 = fv as usize;
                         let x1 = (x0 + 1).min(res - 1);
                         let y1 = (y0 + 1).min(res - 1);
+                        // Smoothstep fade - bilinear alone leaves diamond
+                        // artifacts.
                         let tx = fu - x0 as f32;
                         let ty = fv - y0 as f32;
+                        let tx = tx * tx * (3.0 - 2.0 * tx);
+                        let ty = ty * ty * (3.0 - 2.0 * ty);
                         let a = grid[y0 * res + x0] * (1.0 - tx) + grid[y0 * res + x1] * tx;
                         let b = grid[y1 * res + x0] * (1.0 - tx) + grid[y1 * res + x1] * tx;
                         a * (1.0 - ty) + b * ty
                     };
+                    let fbm = |octaves: &[Vec<f32>], u: f32, v: f32| -> f32 {
+                        let mut sum = 0.0f32;
+                        let mut amp = 1.0f32;
+                        let mut norm = 0.0f32;
+                        for (grid, &res) in
+                            octaves.iter().zip(Galaxy::SMOKE_OCTAVE_RES.iter())
+                        {
+                            sum += amp * vnoise(grid, res, u, v);
+                            norm += amp;
+                            amp *= 0.5;
+                        }
+                        sum / norm
+                    };
+
                     for i in 0..self.n {
                         let x = self.xs_i[i] as f32 - cx;
                         let y = self.ys_i[i] as f32 - cy;
@@ -383,8 +417,19 @@ impl Galaxy {
                         }
                         let u = (x / size + 0.5).clamp(0.0, 1.0);
                         let v = (y / size + 0.5).clamp(0.0, 1.0);
-                        let region = bilinear(&coarse, n_coarse, u, v)
-                            * bilinear(&mid, n_mid, u, v);
+                        // Domain warp: sample density through a noise
+                        // displacement so structure curls instead of
+                        // pooling.
+                        let wu = u + Galaxy::SMOKE_WARP * (fbm(&warp_x_oct, u, v) - 0.5);
+                        let wv = v + Galaxy::SMOKE_WARP * (fbm(&warp_y_oct, u, v) - 0.5);
+                        let d = fbm(&density_oct, wu, wv);
+                        // Stretch, then power-law: thin bright filaments,
+                        // voids that reach clean through the disk.
+                        let stretched = ((d - 0.5) * Galaxy::SMOKE_STRETCH
+                            + Galaxy::SMOKE_CENTER)
+                            .clamp(0.0, 1.0);
+                        let smoke =
+                            stretched.powf(Galaxy::SMOKE_CONTRAST) * Galaxy::SMOKE_GAIN;
                         let r = (x * x + y * y).sqrt().max(1.0);
                         let theta = y.atan2(x);
                         // Two-arm density wave: cos(2 theta - pitch ln r).
@@ -394,7 +439,7 @@ impl Galaxy {
                                     + spiral_phase)
                                     .cos();
                         let m = additional as f32 * 0.5
-                            * region
+                            * smoke
                             * arm
                             * rng.random_range(0.85f32..1.15);
                         mass[i] = mass[i]
@@ -1004,11 +1049,18 @@ impl Galaxy {
         let tick = self.tick_count;
         for i in 0..self.n {
             let m = self.mass[i];
-            let qualifies = m >= density_floor
-                && self.radiation_at_cell(i) < Galaxy::COLLAPSE_RADIATION_RESIST;
-            if !qualifies {
+            if m < density_floor {
+                // Only density failure resets - dispersal undoes the
+                // compression. Radiation merely DELAYS ignition: a
+                // shock-compressed cell near a luminous region holds its
+                // heat (and causal parent) and waits to cool, otherwise
+                // every dead giant's afterglow would erase the very
+                // trigger its supernova just planted.
                 self.collapse_heat[i] = 0;
                 self.heat_parent[i] = 0;
+                continue;
+            }
+            if self.radiation_at_cell(i) >= Galaxy::COLLAPSE_RADIATION_RESIST {
                 continue;
             }
             self.collapse_heat[i] = self.collapse_heat[i].saturating_add(1);
@@ -2369,7 +2421,7 @@ mod tests_golden {
         for _ in 0..100 {
             g = g.tick(0.5);
         }
-        assert_eq!(mass_hash(&g), 14143635165160636807);
+        assert_eq!(mass_hash(&g), 11741507451195028207);
     }
 
     #[test]
