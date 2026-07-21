@@ -5,13 +5,14 @@ import * as galaxy from "./galaxy";
 
 const wasm = import("galaxy_gen_backend/galaxy_gen_backend");
 
-const DEFAULT_DT = 0.5;
-const DT_STEP = 1.25;
-const DT_MIN = 0.01;
-const DT_MAX = 10;
+/// Fixed sim time-step per tick. Was user-tunable (?dt= plus arrow-key
+/// scaling); retired as a config surface - the physics tuning assumes
+/// this value anyway.
+const DT = 0.5;
 
 const DEFAULT_GALAXY_SIZE = 250;
-const DEFAULT_SEED_MASS = 25;
+/// Fixed seed-mass intensity. Was the ?mass= URL knob; retired.
+const SEED_MASS = 25;
 
 const U64_MAX = (1n << 64n) - 1n;
 
@@ -42,8 +43,6 @@ function parseSeed(s: string): bigint | null {
 
 interface InitialParams {
   galaxySize: number;
-  seedMass: number;
-  timeModifier: number;
   seed: string;
   /// `?lock=1`: generate reuses the seed instead of cycling to a fresh
   /// one on every press.
@@ -53,25 +52,17 @@ interface InitialParams {
 function readInitialParams(): InitialParams {
   const defaults: InitialParams = {
     galaxySize: DEFAULT_GALAXY_SIZE,
-    seedMass: DEFAULT_SEED_MASS,
-    timeModifier: DEFAULT_DT,
     seed: "",
     seedLocked: false,
   };
   if (typeof window === "undefined") return defaults;
   const params = new URLSearchParams(window.location.search);
   const sizeRaw = params.get("size");
-  const massRaw = params.get("mass");
-  const dtRaw = params.get("dt");
   const seedRaw = params.get("seed");
   const sizeN = sizeRaw != null ? parseInt(sizeRaw, 10) : NaN;
-  const massN = massRaw != null ? parseInt(massRaw, 10) : NaN;
-  const dtN = dtRaw != null ? parseFloat(dtRaw) : NaN;
   const lockRaw = params.get("lock");
   return {
     galaxySize: Number.isFinite(sizeN) && sizeN > 0 ? sizeN : defaults.galaxySize,
-    seedMass: Number.isFinite(massN) && massN >= 0 ? massN : defaults.seedMass,
-    timeModifier: Number.isFinite(dtN) && dtN > 0 ? dtN : defaults.timeModifier,
     seed: seedRaw != null && parseSeed(seedRaw) != null ? seedRaw.trim() : "",
     seedLocked: lockRaw != null && lockRaw !== "0" && lockRaw !== "false",
   };
@@ -80,8 +71,6 @@ function readInitialParams(): InitialParams {
 /** Push init params to URL via replaceState (avoids history pileup). */
 function writeUrlParams(p: {
   galaxySize: number;
-  seedMass: number;
-  timeModifier: number;
   seed: string;
   seedLocked: boolean;
 }): void {
@@ -89,8 +78,6 @@ function writeUrlParams(p: {
   const params = new URLSearchParams();
   params.set("seed", p.seed);
   params.set("size", p.galaxySize.toString());
-  params.set("mass", p.seedMass.toString());
-  params.set("dt", p.timeModifier.toString());
   if (p.seedLocked) params.set("lock", "1");
   const next = `${window.location.pathname}?${params.toString()}${window.location.hash}`;
   window.history.replaceState(null, "", next);
@@ -100,9 +87,6 @@ export function Interface() {
   const initial = React.useMemo(() => readInitialParams(), []);
 
   const [galaxySize, setGalaxySize] = React.useState(initial.galaxySize);
-  // Seed mass has no UI input; it flows from the `?mass=` URL param only.
-  const [galaxySeedMass] = React.useState(initial.seedMass);
-  const [timeModifier, setTimeModifier] = React.useState(initial.timeModifier);
   // Seed stays a string; parse at Init/Seed time. Empty means fresh random.
   const [seed, setSeed] = React.useState<string>(initial.seed);
   // Generate cycles the seed unless ?lock=1 pins it. A URL-provided seed
@@ -126,12 +110,7 @@ export function Interface() {
   const galaxyFrontendRef = React.useRef<galaxy.Frontend | null>(null);
   const runningRef = React.useRef(false);
   const rafRef = React.useRef<number | null>(null);
-  const timeModRef = React.useRef(timeModifier);
   const fpsSamplesRef = React.useRef<number[]>([]);
-
-  React.useEffect(() => {
-    timeModRef.current = timeModifier;
-  }, [timeModifier]);
 
   // Worker owns its Galaxy and posts mass snapshots back for the renderer.
   const workerRef = React.useRef<galaxy.TickWorker | null>(null);
@@ -247,9 +226,9 @@ export function Interface() {
     const next = new galaxy.Frontend(galaxySize);
     // Reproducible path covers every initial condition.
     if (parsed != null) {
-      next.seedWith(galaxySeedMass, parsed, initialCondition);
+      next.seedWith(SEED_MASS, parsed, initialCondition);
     } else {
-      next.seed(galaxySeedMass, initialCondition);
+      next.seed(SEED_MASS, initialCondition);
     }
     galaxyFrontendRef.current = next;
     dataviz.initViz(next);
@@ -260,8 +239,6 @@ export function Interface() {
     setSnCount(0);
     writeUrlParams({
       galaxySize,
-      seedMass: galaxySeedMass,
-      timeModifier,
       seed: effectiveSeed,
       seedLocked,
     });
@@ -275,7 +252,7 @@ export function Interface() {
     }
     const t0 = performance.now();
     // Single-step routes via tickAsync so WebGPU path is exercised.
-    await galaxyFrontendRef.current.tickAsync(timeModifier);
+    await galaxyFrontendRef.current.tickAsync(DT);
     const elapsed = performance.now() - t0;
     setTickMs(elapsed);
     setTickCount((n) => {
@@ -353,34 +330,13 @@ export function Interface() {
     // arrays; those buffers are transferred to the worker (zero copy).
     const snapshot = galaxyFrontendRef.current.snapshotState();
     workerRef.current.init(snapshot);
-    workerRef.current.start(timeModRef.current);
+    workerRef.current.start(DT);
     exposeForTests();
 
     runningRef.current = true;
     setRunning(true);
     rafRef.current = requestAnimationFrame(renderLoop);
   };
-
-  // Keep the worker's dt in sync with the UI while running.
-  React.useEffect(() => {
-    if (workerRef.current && runningRef.current) {
-      workerRef.current.setTimeModifier(timeModifier);
-    }
-  }, [timeModifier]);
-
-  const clampDt = (value: number) => Math.min(DT_MAX, Math.max(DT_MIN, value));
-
-  const adjustDt = React.useCallback((factor: number) => {
-    setTimeModifier((prev) => {
-      const next = clampDt(prev * factor);
-      // Round to 3 decimals so the display stays tidy.
-      return Math.round(next * 1000) / 1000;
-    });
-  }, []);
-
-  const resetDt = React.useCallback(() => {
-    setTimeModifier(DEFAULT_DT);
-  }, []);
 
   const handleRunToggleRef = React.useRef(handleRunToggle);
   React.useEffect(() => {
@@ -402,35 +358,17 @@ export function Interface() {
       if (e.metaKey || e.ctrlKey || e.altKey) return;
       if (isEditable(e.target)) return;
 
-      switch (e.key) {
-        case " ":
-        case "Spacebar":
-          if (galaxyFrontendRef.current) {
-            e.preventDefault();
-            handleRunToggleRef.current();
-          }
-          break;
-        case "ArrowUp":
+      if (e.key === " " || e.key === "Spacebar") {
+        if (galaxyFrontendRef.current) {
           e.preventDefault();
-          adjustDt(DT_STEP);
-          break;
-        case "ArrowDown":
-          e.preventDefault();
-          adjustDt(1 / DT_STEP);
-          break;
-        case "r":
-        case "R":
-          e.preventDefault();
-          resetDt();
-          break;
-        default:
-          break;
+          handleRunToggleRef.current();
+        }
       }
     };
 
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [adjustDt, resetDt]);
+  }, []);
 
   return (
     <div data-testid="app" data-wasm-ready={wasmReady ? "true" : "false"} className="min-h-screen">
@@ -513,7 +451,6 @@ export function Interface() {
             </div>
 
             <div className="input-label mt-5 grid grid-cols-2 gap-x-4 gap-y-1">
-              <span data-testid="stat-dt">dt: {timeModifier.toFixed(3)}</span>
               <span data-testid="stat-ticks">ticks: {tickCount}</span>
               <span>tick: {tickMs.toFixed(1)} ms</span>
               <span>fps: {fps}</span>
@@ -527,12 +464,6 @@ export function Interface() {
             >
               <div>
                 <kbd>space</kbd> play/pause
-              </div>
-              <div>
-                <kbd>↑</kbd>/<kbd>↓</kbd> dt ×{DT_STEP} / ÷{DT_STEP}
-              </div>
-              <div>
-                <kbd>r</kbd> reset dt
               </div>
               <div>drag pan · wheel zoom</div>
               <div>double-click reset view</div>

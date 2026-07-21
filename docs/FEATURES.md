@@ -37,7 +37,7 @@ WGSL compute shader for direct-sum O(N²) N-body force kernel. Bodies as `(pos.x
 
 ## React UI (`src/js/lib/application.tsx`)
 
-Plain `useState`. Sidebar layout on desktop (sticky controls left, viz right), stacked on mobile. Controls: galaxy size (default 250), init-condition dropdown (uniform rotating disk / bang), generate / run-pause / advance-time. Seed mass is `?mass=` URL-param-only (no input). Live stats: dt, tick count, tick ms, FPS. Keyboard: `space` play/pause, `↑/↓` scale dt by 1.25×, `r` reset dt. URL param round-trip (`?seed=&size=&mass=&dt=&lock=`) via `history.replaceState`; generate cycles to a fresh seed each press unless `lock=1` pins it (a URL-provided seed is honored for the first generate either way, so shared links reproduce). u64 seed: `crypto.getRandomValues` for fresh, `BigInt` for paste/validate. `data-wasm-ready` gate. Every E2E-touched element has `data-testid` (load-bearing).
+Plain `useState`. Sidebar layout on desktop (sticky controls left, viz right), stacked on mobile. Controls: galaxy size (default 250), init-condition dropdown (uniform rotating disk / bang), generate / play-pause / step. Seed mass and dt are fixed constants - both retired as config surfaces. Live stats: dt, tick count, tick ms, FPS. Keyboard: `space` play/pause. URL param round-trip (`?seed=&size=&lock=`) via `history.replaceState`; generate cycles to a fresh seed each press unless `lock=1` pins it (a URL-provided seed is honored for the first generate either way, so shared links reproduce). u64 seed: `crypto.getRandomValues` for fresh, `BigInt` for paste/validate. `data-wasm-ready` gate. Every E2E-touched element has `data-testid` (load-bearing).
 
 ## Visualization (`src/js/lib/dataviz.tsx`)
 

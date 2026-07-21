@@ -356,7 +356,8 @@ impl Galaxy {
                 }
                 let core_radius = (size * 0.15).max(2.0);
                 let core_r2 = core_radius * core_radius;
-                // `additional` is the intensity knob (`?mass=` URL param).
+                // `additional` is the intensity knob (fixed SEED_MASS
+                // constant on the JS side; the URL knob is retired).
                 let core_fill = additional.saturating_mul(6).max(150);
                 for i in 0..self.n {
                     let x = self.xs_i[i] as f32 - cx;

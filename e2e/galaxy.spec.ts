@@ -40,7 +40,7 @@ test.describe("Galaxy Generator", () => {
   test("renders the UI shell with controls", async ({ page }) => {
     await expect(page.getByRole("heading", { name: "Galaxy Generator" })).toBeVisible();
     await expect(page.getByTestId("input-galaxy-size")).toHaveValue("250");
-    await expect(page.getByTestId("stat-dt")).toHaveText("dt: 0.500");
+    await expect(page.getByTestId("stat-ticks")).toHaveText("ticks: 0");
     await expect(page.getByTestId("btn-init")).toBeVisible();
     await expect(page.getByTestId("btn-tick")).toBeVisible();
     // Seed mass is URL-param-only; it must not render an input.
@@ -225,110 +225,13 @@ test.describe("Galaxy Generator", () => {
     await expect(page.getByTestId("btn-run")).toBeDisabled();
   });
 
-  test("keyboard shortcut: ArrowUp raises dt", async ({ page }) => {
-    const dtStat = page.getByTestId("stat-dt");
-    await expect(dtStat).toHaveText("dt: 0.500");
-
-    await page.locator("body").press("ArrowUp");
-    // 0.5 * 1.25 = 0.625
-    await expect(dtStat).toHaveText("dt: 0.625");
-
-    await page.locator("body").press("ArrowUp");
-    await page.locator("body").press("ArrowUp");
-    const text = (await dtStat.textContent()) ?? "";
-    const dt = parseFloat(text.replace(/[^\d.]/g, ""));
-    // 0.5 * 1.25^3 ≈ 0.977
-    expect(dt).toBeCloseTo(0.977, 2);
-  });
-
-  test("keyboard shortcut: ArrowDown lowers dt", async ({ page }) => {
-    const dtStat = page.getByTestId("stat-dt");
-    await expect(dtStat).toHaveText("dt: 0.500");
-
-    await page.locator("body").press("ArrowDown");
-    // 0.5 / 1.25 = 0.4
-    await expect(dtStat).toHaveText("dt: 0.400");
-
-    await page.locator("body").press("ArrowDown");
-    const text = (await dtStat.textContent()) ?? "";
-    const dt = parseFloat(text.replace(/[^\d.]/g, ""));
-    // 0.5 / 1.25^2 = 0.32
-    expect(dt).toBeCloseTo(0.32, 2);
-  });
-
-  test("keyboard shortcut: dt is clamped to [0.01, 10]", async ({ page }) => {
-    const dtStat = page.getByTestId("stat-dt");
-
-    // Hammer ArrowUp a lot; dt should cap at 10.
-    for (let i = 0; i < 40; i++) {
-      await page.locator("body").press("ArrowUp");
-    }
-    const hiText = (await dtStat.textContent()) ?? "";
-    const hi = parseFloat(hiText.replace(/[^\d.]/g, ""));
-    expect(hi).toBeLessThanOrEqual(10);
-    expect(hi).toBeGreaterThan(9);
-
-    // Reset to default, then hammer ArrowDown; dt should floor at 0.01.
-    await page.locator("body").press("r");
-    for (let i = 0; i < 60; i++) {
-      await page.locator("body").press("ArrowDown");
-    }
-    const loText = (await dtStat.textContent()) ?? "";
-    const lo = parseFloat(loText.replace(/[^\d.]/g, ""));
-    expect(lo).toBeGreaterThanOrEqual(0.01);
-    expect(lo).toBeLessThan(0.02);
-  });
-
-  test("keyboard shortcut: R resets dt to default", async ({ page }) => {
-    const dtStat = page.getByTestId("stat-dt");
-
-    await page.locator("body").press("ArrowUp");
-    await page.locator("body").press("ArrowUp");
-    await expect(dtStat).not.toHaveText("dt: 0.500");
-
-    await page.locator("body").press("r");
-    await expect(dtStat).toHaveText("dt: 0.500");
-
-    // Uppercase variant also works (caps lock, etc.).
-    await page.locator("body").press("ArrowUp");
-    await page.locator("body").press("R");
-    await expect(dtStat).toHaveText("dt: 0.500");
-  });
-
-  test("keyboard shortcut: R does not affect the tick counter", async ({ page }) => {
-    // R only scopes to dt; it must not secretly reset sim state.
+  test("space is ignored while typing in an input", async ({ page }) => {
     await page.getByTestId("btn-init").click();
-    await page.getByTestId("btn-tick").click();
-    await page.getByTestId("btn-tick").click();
-
-    const ticksStat = page.getByTestId("stat-ticks");
-    await expect(ticksStat).toHaveText("ticks: 2");
-
-    await page.locator("body").press("r");
-    await expect(ticksStat).toHaveText("ticks: 2");
-  });
-
-  test("keyboard shortcuts are ignored while typing in an input", async ({ page }) => {
     const sizeInput = page.getByTestId("input-galaxy-size");
-    const dtStat = page.getByTestId("stat-dt");
-
     await sizeInput.click();
-
-    // Shortcuts must not fire while typing in an input.
-    await sizeInput.press("ArrowUp");
-    await sizeInput.press("ArrowDown");
-    await sizeInput.press("r");
     await sizeInput.press("Space");
-    await expect(dtStat).toHaveText("dt: 0.500");
-  });
-
-  test("keyboard shortcuts are ignored when a modifier key is held", async ({ page }) => {
-    // Cmd/Ctrl/Alt chords should be left to the browser / OS, never to the sim.
-    const dtStat = page.getByTestId("stat-dt");
-    await page.locator("body").press("Meta+ArrowUp");
-    await page.locator("body").press("Control+ArrowUp");
-    await page.locator("body").press("Alt+ArrowUp");
-    await expect(dtStat).toHaveText("dt: 0.500");
+    // Run must not have toggled.
+    await expect(page.getByTestId("btn-run")).toHaveText("play");
   });
 
   test("keyboard hints row is visible to users", async ({ page }) => {
@@ -461,29 +364,27 @@ test.describe("Galaxy Generator", () => {
     await expect(host).toHaveAttribute("data-cam-zoom", "1.0000");
   });
 
-  test("url query params flow into state and init pushes full state back to the URL", async ({
+  test("url query params flow into state and init pushes state back to the URL", async ({
     page,
   }) => {
-    await page.goto("/?seed=42&size=30&mass=10&dt=0.25");
+    await page.goto("/?seed=42&size=30");
     await waitForWasm(page);
 
-    // size is still UI-visible; seed/mass/dt are URL-only and flow
-    // through state without a dedicated input.
     await expect(page.getByTestId("input-galaxy-size")).toHaveValue("30");
-    await expect(page.getByTestId("stat-dt")).toHaveText("dt: 0.250");
 
-    // After Init, the URL should carry all four params (shareable state).
+    // After Init, the URL carries the shareable state - and only that.
+    // The retired mass/dt knobs must not reappear.
     await page.getByTestId("btn-init").click();
     const url = new URL(page.url());
     expect(url.searchParams.get("seed")).toBe("42");
     expect(url.searchParams.get("size")).toBe("30");
-    expect(url.searchParams.get("mass")).toBe("10");
-    expect(url.searchParams.get("dt")).toBe("0.25");
+    expect(url.searchParams.get("mass")).toBeNull();
+    expect(url.searchParams.get("dt")).toBeNull();
   });
 
   test("same seed produces the same mass distribution (reproducible)", async ({ page }) => {
     // First run, seed from URL param.
-    await page.goto("/?seed=12345&size=20&mass=50");
+    await page.goto("/?seed=12345&size=20");
     await waitForWasm(page);
     await page.getByTestId("btn-init").click();
     const first = await page.evaluate(() => {
@@ -492,7 +393,7 @@ test.describe("Galaxy Generator", () => {
     });
 
     // Second run with the same seed.
-    await page.goto("/?seed=12345&size=20&mass=50");
+    await page.goto("/?seed=12345&size=20");
     await waitForWasm(page);
     await page.getByTestId("btn-init").click();
     const second = await page.evaluate(() => {
