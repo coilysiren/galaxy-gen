@@ -83,6 +83,41 @@ static REGISTRY: &[ProcessDescriptor] = &[
         phase_offset: 0,
         run: Galaxy::process_integrate_stars,
     },
+    ProcessDescriptor {
+        name: "radiation_field",
+        reads: &[StateKey::StarKinematics, StateKey::StarLifecycle],
+        writes: &[StateKey::RadiationField],
+        requires_fresh: &[],
+        cadence: 4,
+        phase_offset: 1,
+        run: Galaxy::process_radiation_field,
+    },
+    ProcessDescriptor {
+        // Low cadence: lifecycle-scale rules run far less often than
+        // motion. Emits CloudCollapse.
+        name: "collapse_watch",
+        reads: &[
+            StateKey::GasMass,
+            StateKey::GasKinematics,
+            StateKey::RadiationField,
+            StateKey::CollapseWatch,
+        ],
+        writes: &[StateKey::CollapseWatch, StateKey::EventQueue],
+        requires_fresh: &[],
+        cadence: 16,
+        phase_offset: 3,
+        run: Galaxy::process_collapse_watch,
+    },
+    ProcessDescriptor {
+        // Emits CloudDissipate; feeds the dissipated ledger sink.
+        name: "gas_dissipation",
+        reads: &[StateKey::GasMass, StateKey::RadiationField],
+        writes: &[StateKey::GasMass, StateKey::EventQueue],
+        requires_fresh: &[],
+        cadence: 8,
+        phase_offset: 5,
+        run: Galaxy::process_gas_dissipation,
+    },
 ];
 
 /// True when `p` is due at `tick`.
@@ -139,7 +174,15 @@ mod tests_graph {
         let names: Vec<&str> = registry().iter().map(|p| p.name).collect();
         assert_eq!(
             names,
-            vec!["gravity", "gravity_field", "integrate_gas", "integrate_stars"]
+            vec![
+                "gravity",
+                "gravity_field",
+                "integrate_gas",
+                "integrate_stars",
+                "radiation_field",
+                "collapse_watch",
+                "gas_dissipation",
+            ]
         );
     }
 

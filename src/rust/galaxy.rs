@@ -56,6 +56,16 @@ pub struct Galaxy {
     /// rebuilt by process_gravity_field, bilinear-sampled by stars.
     field_ax: Vec<f32>,
     field_ay: Vec<f32>,
+    /// Coarse radiation field (FIELD_RES x FIELD_RES): star luminosity
+    /// deposits with decay. Hot gas resists collapse and dissipates.
+    radiation: Vec<f32>,
+    /// Per-cell sustained-density counter driving CloudCollapse. Bumped
+    /// by collapse_watch when a cell stays dense, slow, and cool.
+    collapse_heat: Vec<u8>,
+    /// Mass destroyed by radiation dissipation - the one documented sink
+    /// in the baryonic ledger (gas + stars + pending births + this).
+    dissipated_total: u64,
+    next_cluster_id: u32,
 }
 
 impl Galaxy {
@@ -98,6 +108,34 @@ impl Galaxy {
     /// die young, which is what closes the causal loop fast enough to
     /// watch.
     const STAR_LIFETIME_COEFF: f32 = 40_000.0;
+
+    // Cloud-collapse tuning. A cell must stay at or above the density
+    // fraction of CELL_MASS_CAP and below the radiation resist level for
+    // COLLAPSE_HEAT_TRIGGER consecutive scans (collapse_watch cadence 16)
+    // before it can roll for collapse. No velocity gate: jammed cells
+    // accumulate large STORED velocity while standing still, so a speed
+    // limit anti-selects exactly the proto-cluster cells.
+    const COLLAPSE_DENSITY_FRACTION: f32 = 0.75;
+    const COLLAPSE_HEAT_TRIGGER: u8 = 6;
+    const COLLAPSE_CHANCE: f32 = 0.35;
+    const COLLAPSE_RADIATION_RESIST: f32 = 20.0;
+    /// Fraction of the collapsing cell's gas consumed into the birth
+    /// budget; neighbors contribute half this fraction.
+    const COLLAPSE_CONSUME_FRACTION: f32 = 0.55;
+    /// Minimum birth budget - collapses thinner than this fizzle.
+    const BIRTH_MIN_BUDGET: f32 = 20.0;
+
+    // Radiation tuning. Deposits scale luminosity into the coarse field
+    // with a 3x3 splat; the field decays every rebuild.
+    const RAD_DEPOSIT_SCALE: f32 = 0.01;
+    const RAD_DECAY: f32 = 0.85;
+    /// Above this radiation level gas dissipates (mass -> dissipated
+    /// ledger), emitting CloudDissipate when a cell empties.
+    const RAD_DISSIPATE_THRESHOLD: f32 = 60.0;
+
+    // RNG stream ids (see rng_stream).
+    const RNG_COLLAPSE_WATCH: u64 = 1;
+    const RNG_STAR_BIRTH: u64 = 2;
 }
 
 #[wasm_bindgen]
@@ -151,6 +189,10 @@ impl Galaxy {
             bh_mass: 0.0,
             field_ax: vec![0.0; Galaxy::FIELD_RES * Galaxy::FIELD_RES],
             field_ay: vec![0.0; Galaxy::FIELD_RES * Galaxy::FIELD_RES],
+            radiation: vec![0.0; Galaxy::FIELD_RES * Galaxy::FIELD_RES],
+            collapse_heat: vec![0; n],
+            dissipated_total: 0,
+            next_cluster_id: 0,
         }
     }
 
@@ -302,6 +344,10 @@ impl Galaxy {
         g.events = EventQueue::new();
         g.stars = Stars::new();
         g.bh_mass = total_mass as f32 * Galaxy::BH_MASS_FRACTION;
+        g.radiation = vec![0.0; Galaxy::FIELD_RES * Galaxy::FIELD_RES];
+        g.collapse_heat = vec![0; self.n];
+        g.dissipated_total = 0;
+        g.next_cluster_id = 0;
         g
     }
 
@@ -387,6 +433,20 @@ impl Galaxy {
         )
     }
 
+    /// Executed-event count by kind index (EventKind discriminant).
+    /// Instrumentation surface for debug_sim and the UI stats row.
+    pub fn events_executed(&self, kind: u32) -> u64 {
+        use crate::events::EventKind::*;
+        let k = match kind {
+            0 => CloudCollapse,
+            1 => StarBirth,
+            2 => Supernova,
+            3 => ShockWave,
+            _ => CloudDissipate,
+        };
+        self.events.executed_count(k)
+    }
+
     // --- Worker state round-trip (opaque to JS) ---------------------
 
     /// Full star state, STAR_FLOATS per star. Opaque to JS: hold it and
@@ -399,48 +459,76 @@ impl Galaxy {
         self.stars = Stars::from_flat(data);
     }
 
-    /// Coarse-field state: [field_ax..., field_ay...]. The field is
-    /// mid-tick derived state - rebuilding it after restore would use
-    /// post-tick inputs and fork the trajectory. Opaque to JS.
+    /// Coarse-field state: [field_ax..., field_ay..., radiation...]. The
+    /// fields are mid-tick derived state - rebuilding after restore would
+    /// use post-tick inputs and fork the trajectory. Opaque to JS.
     pub fn sim_state_field(&self) -> Vec<f32> {
         let mut out = self.field_ax.clone();
         out.extend_from_slice(&self.field_ay);
+        out.extend_from_slice(&self.radiation);
         out
     }
 
     pub fn restore_sim_state_field(&mut self, data: &[f32]) {
         let res = Galaxy::FIELD_RES * Galaxy::FIELD_RES;
-        if data.len() != res * 2 {
+        if data.len() != res * 3 {
             return;
         }
         self.field_ax.copy_from_slice(&data[..res]);
-        self.field_ay.copy_from_slice(&data[res..]);
+        self.field_ay.copy_from_slice(&data[res..res * 2]);
+        self.radiation.copy_from_slice(&data[res * 2..]);
     }
 
-    /// Versioned scheduler/event/RNG state: [version, tick lo, tick hi,
-    /// seed lo, seed hi, bh_mass bits, then the event-queue flat form].
-    /// Opaque to JS.
+    /// Versioned scheduler/event/RNG state: [version=2, tick lo/hi, seed
+    /// lo/hi, bh_mass bits, dissipated lo/hi, next_cluster, n_heat, heat
+    /// bytes packed 4-per-u32, then the event-queue flat form]. Opaque
+    /// to JS.
     pub fn sim_state_meta(&self) -> Vec<u32> {
-        let mut out = vec![
-            1u32,
-            self.tick_count as u32,
-            (self.tick_count >> 32) as u32,
-            self.master_seed as u32,
-            (self.master_seed >> 32) as u32,
-            self.bh_mass.to_bits(),
-        ];
+        let heat_words = self.collapse_heat.len().div_ceil(4);
+        let mut out = Vec::with_capacity(10 + heat_words + 6);
+        out.push(2u32);
+        out.push(self.tick_count as u32);
+        out.push((self.tick_count >> 32) as u32);
+        out.push(self.master_seed as u32);
+        out.push((self.master_seed >> 32) as u32);
+        out.push(self.bh_mass.to_bits());
+        out.push(self.dissipated_total as u32);
+        out.push((self.dissipated_total >> 32) as u32);
+        out.push(self.next_cluster_id);
+        out.push(self.collapse_heat.len() as u32);
+        for chunk in self.collapse_heat.chunks(4) {
+            let mut w = 0u32;
+            for (k, &b) in chunk.iter().enumerate() {
+                w |= (b as u32) << (8 * k);
+            }
+            out.push(w);
+        }
         out.extend(self.events.to_flat());
         out
     }
 
     pub fn restore_sim_state_meta(&mut self, data: &[u32]) {
-        if data.len() < 6 || data[0] != 1 {
+        if data.len() < 10 || data[0] != 2 {
             return;
         }
         self.tick_count = data[1] as u64 | ((data[2] as u64) << 32);
         self.master_seed = data[3] as u64 | ((data[4] as u64) << 32);
         self.bh_mass = f32::from_bits(data[5]);
-        self.events = EventQueue::from_flat(&data[6..]);
+        self.dissipated_total = data[6] as u64 | ((data[7] as u64) << 32);
+        self.next_cluster_id = data[8];
+        let n_heat = data[9] as usize;
+        if n_heat != self.n {
+            return;
+        }
+        let heat_words = n_heat.div_ceil(4);
+        if data.len() < 10 + heat_words {
+            return;
+        }
+        for i in 0..n_heat {
+            let w = data[10 + i / 4];
+            self.collapse_heat[i] = ((w >> (8 * (i % 4))) & 0xFF) as u8;
+        }
+        self.events = EventQueue::from_flat(&data[10 + heat_words..]);
     }
 
     /// Flat-buffer exposure for zero-copy JS reads via wasm.memory.
@@ -622,14 +710,229 @@ impl Galaxy {
         }
     }
 
+    /// Deposit star luminosity into the coarse radiation field (3x3
+    /// splat) and decay the whole field.
+    pub(crate) fn process_radiation_field(&mut self, _time: f32) {
+        let res = Galaxy::FIELD_RES;
+        for r in self.radiation.iter_mut() {
+            *r *= Galaxy::RAD_DECAY;
+        }
+        let size_f = self.size as f32;
+        let cell = size_f / res as f32;
+        for i in 0..self.stars.len() {
+            if self.stars.stage[i] != crate::stars::Stage::MainSequence as u8 {
+                continue;
+            }
+            let fx = (self.stars.pos_x[i] / cell) as usize;
+            let fy = (self.stars.pos_y[i] / cell) as usize;
+            let deposit = self.stars.luminosity[i] * Galaxy::RAD_DEPOSIT_SCALE;
+            for dy in -1i32..=1 {
+                for dx in -1i32..=1 {
+                    let x = fx as i32 + dx;
+                    let y = fy as i32 + dy;
+                    if x < 0 || y < 0 || x >= res as i32 || y >= res as i32 {
+                        continue;
+                    }
+                    let w = if dx == 0 && dy == 0 { 0.4 } else { 0.075 };
+                    self.radiation[y as usize * res + x as usize] += deposit * w;
+                }
+            }
+        }
+    }
+
+    /// Radiation level at a gas cell's position.
+    fn radiation_at_cell(&self, cell: usize) -> f32 {
+        let res = Galaxy::FIELD_RES;
+        let scale = res as f32 / self.size as f32;
+        let fx = ((self.xs_i[cell] as f32 * scale) as usize).min(res - 1);
+        let fy = ((self.ys_i[cell] as f32 * scale) as usize).min(res - 1);
+        self.radiation[fy * res + fx]
+    }
+
+    /// Scan for cells that have stayed dense, slow, and cool; sustained
+    /// qualification plus an RNG roll emits CloudCollapse.
+    pub(crate) fn process_collapse_watch(&mut self, _time: f32) {
+        let density_floor =
+            (Galaxy::CELL_MASS_CAP as f32 * Galaxy::COLLAPSE_DENSITY_FRACTION) as u16;
+        let mut rng = self.rng_stream(Galaxy::RNG_COLLAPSE_WATCH);
+        let tick = self.tick_count;
+        for i in 0..self.n {
+            let m = self.mass[i];
+            let qualifies = m >= density_floor
+                && self.radiation_at_cell(i) < Galaxy::COLLAPSE_RADIATION_RESIST;
+            if !qualifies {
+                self.collapse_heat[i] = 0;
+                continue;
+            }
+            self.collapse_heat[i] = self.collapse_heat[i].saturating_add(1);
+            if self.collapse_heat[i] >= Galaxy::COLLAPSE_HEAT_TRIGGER
+                && rng.random_range(0.0f32..1.0) < Galaxy::COLLAPSE_CHANCE
+            {
+                self.collapse_heat[i] = 0;
+                self.events.emit(
+                    tick,
+                    crate::events::EventKind::CloudCollapse,
+                    i as u32,
+                    i as u32,
+                    0.0,
+                    crate::events::NO_PARENT,
+                );
+            }
+        }
+    }
+
+    /// Irradiated gas evaporates into the dissipated ledger.
+    pub(crate) fn process_gas_dissipation(&mut self, _time: f32) {
+        let tick = self.tick_count;
+        let mut dissipate_events = 0u32;
+        for i in 0..self.n {
+            let m = self.mass[i];
+            if m == 0 {
+                continue;
+            }
+            if self.radiation_at_cell(i) < Galaxy::RAD_DISSIPATE_THRESHOLD {
+                continue;
+            }
+            let lose = (m / 50).max(1).min(m);
+            self.mass[i] = m - lose;
+            self.dissipated_total += lose as u64;
+            if self.mass[i] == 0 && dissipate_events < 32 {
+                dissipate_events += 1;
+                self.events.emit(
+                    tick,
+                    crate::events::EventKind::CloudDissipate,
+                    i as u32,
+                    i as u32,
+                    lose as f32,
+                    crate::events::NO_PARENT,
+                );
+            }
+        }
+    }
+
     /// Execute this tick's due events in stable order. Handlers may emit
     /// follow-up events, which land next tick by construction.
     fn execute_events(&mut self, due: Vec<Event>, _time: f32) {
         for ev in due {
-            // Handlers arrive with the causal-loop phases; the queue,
-            // ordering, and instrumentation ring are live already.
+            match ev.kind {
+                crate::events::EventKind::CloudCollapse => self.handle_cloud_collapse(&ev),
+                crate::events::EventKind::StarBirth => self.handle_star_birth(&ev),
+                _ => {}
+            }
             self.events.record_executed(ev);
         }
+    }
+
+    /// Consume gas around the collapsing cell into a birth budget carried
+    /// on the follow-up StarBirth event. The budget mass is in flight for
+    /// exactly one tick (see pending_birth_mass and the ledger test).
+    fn handle_cloud_collapse(&mut self, ev: &Event) {
+        let i = ev.source as usize;
+        if i >= self.n {
+            return;
+        }
+        let size = self.size as i32;
+        let mut budget = 0.0f32;
+        let take = |m: u16, frac: f32| -> u16 { (m as f32 * frac) as u16 };
+        let own = take(self.mass[i], Galaxy::COLLAPSE_CONSUME_FRACTION);
+        self.mass[i] -= own;
+        budget += own as f32;
+        let (col, row) = (i as i32 % size, i as i32 / size);
+        for (dc, dr) in [(1, 0), (-1, 0), (0, 1), (0, -1)] {
+            let nc = wrap(col + dc, size) as u16;
+            let nr = wrap(row + dr, size) as u16;
+            let ni = self.col_row_to_index(nc, nr) as usize;
+            let part = take(self.mass[ni], Galaxy::COLLAPSE_CONSUME_FRACTION * 0.5);
+            self.mass[ni] -= part;
+            budget += part as f32;
+        }
+        if budget < Galaxy::BIRTH_MIN_BUDGET {
+            // Fizzle: return the gas where it came from.
+            self.mass[i] = self.mass[i].saturating_add(budget as u16);
+            return;
+        }
+        let tick = self.tick_count;
+        self.events.emit(
+            tick,
+            crate::events::EventKind::StarBirth,
+            ev.source,
+            ev.source,
+            budget,
+            ev.id,
+        );
+    }
+
+    /// Spawn 1-5 stars from the budget at the birth cell, sharing a
+    /// cluster id. Velocities = local gas velocity + prograde circular
+    /// orbit component from the gravity field. Star masses sum to the
+    /// budget exactly, so the baryonic ledger stays closed.
+    fn handle_star_birth(&mut self, ev: &Event) {
+        let i = ev.target as usize;
+        if i >= self.n {
+            return;
+        }
+        let budget = ev.payload;
+        let mut rng = self.rng_stream(Galaxy::RNG_STAR_BIRTH);
+        let n_stars = ((budget / 80.0).round() as usize).clamp(1, 5);
+        let cluster = self.next_cluster_id;
+        self.next_cluster_id += 1;
+
+        let cx = self.xs_i[i] as f32;
+        let cy = self.ys_i[i] as f32;
+        let center = self.size as f32 * 0.5;
+        let gas_vx = self.vel_x[i];
+        let gas_vy = self.vel_y[i];
+
+        let mut remaining = budget;
+        for k in 0..n_stars {
+            let mass = if k + 1 == n_stars {
+                remaining
+            } else {
+                let base = budget / n_stars as f32;
+                let m = (base * rng.random_range(0.7f32..1.3)).min(remaining - 1.0);
+                m.max(1.0)
+            };
+            remaining -= mass;
+            let px = (cx + rng.random_range(-1.2f32..1.2)).clamp(0.0, self.size as f32 - 1e-3);
+            let py = (cy + rng.random_range(-1.2f32..1.2)).clamp(0.0, self.size as f32 - 1e-3);
+            // Prograde circular support: v_circ = sqrt(|a| r) tangential.
+            let rx = px - center;
+            let ry = py - center;
+            let r = (rx * rx + ry * ry).sqrt().max(1e-3);
+            let (ax, ay) = self.sample_field(px, py);
+            let a_mag = (ax * ax + ay * ay).sqrt();
+            let v_circ = (a_mag * r).sqrt();
+            let vx = gas_vx + (-ry / r) * v_circ;
+            let vy = gas_vy + (rx / r) * v_circ;
+            self.stars.spawn(
+                px,
+                py,
+                vx,
+                vy,
+                mass,
+                Galaxy::STAR_LIFETIME_COEFF / mass.max(1.0),
+                mass.max(1.0).powf(1.5),
+                (mass / 100.0).clamp(0.0, 1.0),
+                cluster,
+            );
+        }
+    }
+
+    /// Birth budgets currently in flight on pending StarBirth events.
+    /// Part of the baryonic ledger between collapse and birth.
+    pub(crate) fn pending_birth_mass(&self) -> f64 {
+        self.events
+            .pending()
+            .filter(|e| e.kind == crate::events::EventKind::StarBirth)
+            .map(|e| e.payload as f64)
+            .sum()
+    }
+
+    /// Baryonic ledger: gas + stars + in-flight births + dissipated sink.
+    pub(crate) fn baryonic_total(&self) -> f64 {
+        let gas: f64 = self.mass.iter().map(|&m| m as f64).sum();
+        let stars: f64 = self.stars.mass.iter().map(|&m| m as f64).sum();
+        gas + stars + self.pending_birth_mass() + self.dissipated_total as f64
     }
 
     /// Stateless per-(process, tick) RNG stream. Derivation depends only
@@ -1620,6 +1923,47 @@ mod tests_stars_dynamics {
         assert_eq!(a.stars.pos_y, b.stars.pos_y, "star y trajectories must match");
         assert_eq!(a.mass, b.mass, "gas must match");
         assert_eq!(a.tick_count, b.tick_count);
+    }
+}
+
+#[cfg(test)]
+mod tests_causal_loop {
+    use super::*;
+    use crate::events::EventKind;
+
+    #[test]
+    fn test_stars_form_unattended_from_cold_gas() {
+        let mut g = Galaxy::new(50, 0).seed_with_mode_seeded(25, InitialCondition::Uniform, 42);
+        let mut formed_at = None;
+        for t in 0..4000 {
+            g = g.tick(0.5);
+            if g.star_count() > 0 {
+                formed_at = Some(t);
+                break;
+            }
+        }
+        assert!(
+            formed_at.is_some(),
+            "cold uniform gas must form stars unattended within 4000 ticks"
+        );
+        assert!(g.events.executed_count(EventKind::CloudCollapse) > 0);
+        assert!(g.events.executed_count(EventKind::StarBirth) > 0);
+    }
+
+    #[test]
+    fn test_baryonic_ledger_is_conserved_through_star_formation() {
+        let mut g = Galaxy::new(50, 0).seed_with_mode_seeded(25, InitialCondition::Uniform, 42);
+        let initial = g.baryonic_total();
+        for _ in 0..3000 {
+            g = g.tick(0.5);
+            let now = g.baryonic_total();
+            assert!(
+                (now - initial).abs() < 1.0,
+                "ledger drifted at tick {}: {initial} -> {now}",
+                g.tick_count
+            );
+        }
+        assert!(g.star_count() > 0, "run must include actual star formation");
     }
 }
 

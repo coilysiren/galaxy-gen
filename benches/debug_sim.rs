@@ -95,8 +95,18 @@ fn main() {
             }
             let m = metrics(&g, size);
             println!(
-                "t={cp:5}  nz={:4}  max={:5}  total={:6}  rms_r={:5.1}  annulus_vt={:+.3}",
-                m.nonzero, m.max, m.total, m.rms_radius, m.annulus_vt
+                "t={cp:5}  nz={:4}  max={:5}  total={:6}  rms_r={:5.1}  vt={:+.3}  stars={:4}  ev(col/birth/sn/shock/diss)={}/{}/{}/{}/{}",
+                m.nonzero,
+                m.max,
+                m.total,
+                m.rms_radius,
+                m.annulus_vt,
+                g.star_count(),
+                g.events_executed(0),
+                g.events_executed(1),
+                g.events_executed(2),
+                g.events_executed(3),
+                g.events_executed(4),
             );
         }
     }

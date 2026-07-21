@@ -134,6 +134,10 @@ impl EventQueue {
         self.pending.len()
     }
 
+    pub fn pending(&self) -> impl Iterator<Item = &Event> {
+        self.pending.iter()
+    }
+
     pub fn executed_count(&self, kind: EventKind) -> u64 {
         self.executed_counts[kind as usize]
     }
