@@ -2,9 +2,6 @@ import * as galaxy from "./galaxy";
 
 // Canvas, not SVG: 2500+ DOM attrs/frame hits hundreds of ms.
 
-const CANVAS = 800;
-const MARGIN = 20;
-
 const MIN_ZOOM = 1;
 const MAX_ZOOM = 50;
 
@@ -86,6 +83,10 @@ interface State {
   host: HTMLElement;
   canvas: HTMLCanvasElement;
   ctx: CanvasRenderingContext2D;
+  /// Canvas CSS dimensions - the full viewport. The disk fits the short
+  /// dimension; wide screens gain space and halo at the sides.
+  cw: number;
+  ch: number;
   /// Small scratch canvas for the lens: pixel read-back happens here so
   /// the main canvas never gets a willReadFrequently (CPU) context -
   /// that flag silently software-renders ALL compositing, which tripled
@@ -124,10 +125,9 @@ function clampZoom(z: number): number {
 }
 
 // Clamp pan so the world rectangle always intersects the viewport.
-function clampPan(cam: Camera): Camera {
-  const min = CANVAS * (1 - cam.zoom);
-  const tx = Math.max(min, Math.min(0, cam.tx));
-  const ty = Math.max(min, Math.min(0, cam.ty));
+function clampPan(cam: Camera, cw: number, ch: number): Camera {
+  const tx = Math.max(cw * (1 - cam.zoom), Math.min(0, cam.tx));
+  const ty = Math.max(ch * (1 - cam.zoom), Math.min(0, cam.ty));
   return { ...cam, tx, ty };
 }
 
@@ -144,12 +144,13 @@ export function initViz(galaxyFrontend: galaxy.Frontend) {
 
   const canvas = document.createElement("canvas");
   const dpr = Math.min(window.devicePixelRatio || 1, 2);
-  canvas.width = CANVAS * dpr;
-  canvas.height = CANVAS * dpr;
+  const cw = host.clientWidth || window.innerWidth;
+  const ch = host.clientHeight || window.innerHeight;
+  canvas.width = Math.max(1, Math.round(cw * dpr));
+  canvas.height = Math.max(1, Math.round(ch * dpr));
   canvas.style.width = "100%";
-  canvas.style.height = "auto";
+  canvas.style.height = "100%";
   canvas.style.display = "block";
-  canvas.style.aspectRatio = "1 / 1";
   canvas.style.cursor = "grab";
   canvas.style.touchAction = "none";
   canvas.setAttribute("data-testid", "dataviz-canvas");
@@ -162,7 +163,7 @@ export function initViz(galaxyFrontend: galaxy.Frontend) {
 
   buildGasSprites();
   const size = galaxyFrontend.galaxySize;
-  const scale = (CANVAS - MARGIN * 2) / (size * VIEW_SPAN);
+  const scale = Math.min(cw, ch) / (size * VIEW_SPAN);
 
   const camera: Camera = { tx: 0, ty: 0, zoom: 1 };
 
@@ -171,9 +172,9 @@ export function initViz(galaxyFrontend: galaxy.Frontend) {
   // Convert a pointer event to canvas-local CSS pixels.
   const pointerToCanvas = (ev: MouseEvent | WheelEvent) => {
     const rect = canvas.getBoundingClientRect();
-    // CSS pixels are normalized to the logical CANVAS size.
-    const x = ((ev.clientX - rect.left) / rect.width) * CANVAS;
-    const y = ((ev.clientY - rect.top) / rect.height) * CANVAS;
+    if (!state) return { x: 0, y: 0 };
+    const x = ((ev.clientX - rect.left) / rect.width) * state.cw;
+    const y = ((ev.clientY - rect.top) / rect.height) * state.ch;
     return { x, y };
   };
 
@@ -193,7 +194,7 @@ export function initViz(galaxyFrontend: galaxy.Frontend) {
     // Zoom about the cursor: keep the world point under the cursor fixed.
     const tx = x - k * (x - state.camera.tx);
     const ty = y - k * (y - state.camera.ty);
-    state.camera = clampPan({ tx, ty, zoom: newZoom });
+    state.camera = clampPan({ tx, ty, zoom: newZoom }, state.cw, state.ch);
     publishCamera(state);
     redraw();
   };
@@ -215,13 +216,17 @@ export function initViz(galaxyFrontend: galaxy.Frontend) {
     if (!dragging || !state) return;
     const rect = canvas.getBoundingClientRect();
     // Scale screen-pixel drag delta into canvas CSS px.
-    const dx = ((ev.clientX - dragStart.x) / rect.width) * CANVAS;
-    const dy = ((ev.clientY - dragStart.y) / rect.height) * CANVAS;
-    state.camera = clampPan({
-      tx: dragCam.tx + dx,
-      ty: dragCam.ty + dy,
-      zoom: state.camera.zoom,
-    });
+    const dx = ((ev.clientX - dragStart.x) / rect.width) * state.cw;
+    const dy = ((ev.clientY - dragStart.y) / rect.height) * state.ch;
+    state.camera = clampPan(
+      {
+        tx: dragCam.tx + dx,
+        ty: dragCam.ty + dy,
+        zoom: state.camera.zoom,
+      },
+      state.cw,
+      state.ch,
+    );
     publishCamera(state);
     redraw();
   };
@@ -242,6 +247,26 @@ export function initViz(galaxyFrontend: galaxy.Frontend) {
     resetView();
   };
 
+  // Track viewport resizes: re-fit the canvas and world scale, redraw.
+  const onResize = () => {
+    if (!state) return;
+    const ncw = host.clientWidth || window.innerWidth;
+    const nch = host.clientHeight || window.innerHeight;
+    if (ncw === state.cw && nch === state.ch) return;
+    state.cw = ncw;
+    state.ch = nch;
+    canvas.width = Math.max(1, Math.round(ncw * dpr));
+    canvas.height = Math.max(1, Math.round(nch * dpr));
+    state.ctx.setTransform(1, 0, 0, 1, 0, 0);
+    state.ctx.scale(dpr, dpr);
+    state.scale = Math.min(ncw, nch) / (state.size * VIEW_SPAN);
+    state.rMax = state.scale * 0.5;
+    state.camera = clampPan(state.camera, ncw, nch);
+    publishCamera(state);
+    redraw();
+  };
+  window.addEventListener("resize", onResize);
+
   canvas.addEventListener("wheel", onWheel, { passive: false });
   canvas.addEventListener("pointerdown", onPointerDown);
   canvas.addEventListener("pointermove", onPointerMove);
@@ -250,6 +275,7 @@ export function initViz(galaxyFrontend: galaxy.Frontend) {
   canvas.addEventListener("dblclick", onDblClick);
 
   const cleanup = () => {
+    window.removeEventListener("resize", onResize);
     canvas.removeEventListener("wheel", onWheel);
     canvas.removeEventListener("pointerdown", onPointerDown);
     canvas.removeEventListener("pointermove", onPointerMove);
@@ -267,6 +293,8 @@ export function initViz(galaxyFrontend: galaxy.Frontend) {
     host,
     canvas,
     ctx,
+    cw,
+    ch,
     lensCanvas,
     lensCtx,
     dpr,
@@ -314,16 +342,15 @@ function drawFrame(s: State, mass: Uint16Array) {
   ctx.setTransform(1, 0, 0, 1, 0, 0);
   const dpr = Math.min(window.devicePixelRatio || 1, 2);
   ctx.scale(dpr, dpr);
-  ctx.clearRect(0, 0, CANVAS, CANVAS);
+  ctx.clearRect(0, 0, s.cw, s.ch);
 
   // Apply the camera: screen = zoom * world + translate.
   ctx.translate(camera.tx, camera.ty);
   ctx.scale(camera.zoom, camera.zoom);
 
   const center = size / 2;
-  const half = CANVAS / 2;
-  const toCx = (x: number) => half + (x + 0.5 - center) * scale;
-  const toCy = (y: number) => half + (center - y - 0.5) * scale;
+  const toCx = (x: number) => s.cw / 2 + (x + 0.5 - center) * scale;
+  const toCy = (y: number) => s.ch / 2 + (center - y - 0.5) * scale;
 
   // Gas: soft nebular sprites, alpha-accumulating where dense.
   const softR = size / 2 - 1;
@@ -383,7 +410,6 @@ function applyShockShimmer(s: State) {
   if (!t || t.length === 0) return;
   const { ctx, canvas, size, scale, camera, dpr } = s;
   const center = size / 2;
-  const half = CANVAS / 2;
   let drawn = 0;
   ctx.save();
   ctx.setTransform(1, 0, 0, 1, 0, 0);
@@ -393,8 +419,8 @@ function applyShockShimmer(s: State) {
     const life = 1 - age / BLAST_LIFE;
     if (life <= 0.15) continue;
     // World -> canvas -> screen css -> device.
-    const cx = half + (t[i + 1] + 0.5 - center) * scale;
-    const cy = half + (center - t[i + 2] - 0.5) * scale;
+    const cx = s.cw / 2 + (t[i + 1] + 0.5 - center) * scale;
+    const cy = s.ch / 2 + (center - t[i + 2] - 0.5) * scale;
     const sx = (camera.zoom * cx + camera.tx) * dpr;
     const sy = (camera.zoom * cy + camera.ty) * dpr;
     const front = blastRadius(t[i + 4], age) * scale * camera.zoom * dpr;
@@ -428,8 +454,8 @@ function applyBlackHoleLens(s: State) {
   // Black hole sits at the world center = canvas center pre-camera.
   // Lens depth follows the hole's live mass: it deepens as the hole
   // feeds and vanishes if Hawking evaporation finishes it off.
-  const cssX = camera.zoom * (CANVAS / 2) + camera.tx;
-  const cssY = camera.zoom * (CANVAS / 2) + camera.ty;
+  const cssX = camera.zoom * (s.cw / 2) + camera.tx;
+  const cssY = camera.zoom * (s.ch / 2) + camera.ty;
   const thetaCss = LENS_THETA_E_FRAC * size * scale * camera.zoom * s.lastLensScale;
   const bx = cssX * dpr;
   const by = cssY * dpr;

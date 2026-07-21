@@ -415,8 +415,8 @@ export function Interface() {
 
   return (
     <div data-testid="app" data-wasm-ready={wasmReady ? "true" : "false"} className="min-h-screen">
-      <main className="mx-auto max-w-none px-3 py-4 lg:grid lg:grid-cols-[280px_minmax(0,1fr)] lg:items-start lg:gap-4">
-        <aside className="mb-4 lg:sticky lg:top-4 lg:mb-0">
+      <main>
+        <aside className="fixed left-3 top-3 z-10 w-72 max-w-[calc(100vw-1.5rem)] max-h-[calc(100vh-1.5rem)] overflow-y-auto">
           <section className="panel p-5">
             <header className="mb-5">
               <h1 className="text-2xl tracking-[0.1em]">Galaxy Generator</h1>
@@ -527,8 +527,8 @@ export function Interface() {
           </section>
         </aside>
 
-        <section>
-          <div id="dataviz" />
+        <section className="fixed inset-0 z-0">
+          <div id="dataviz" className="h-full w-full" />
         </section>
       </main>
     </div>

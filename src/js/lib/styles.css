@@ -59,10 +59,13 @@
   }
 
   .panel {
-    background: rgba(87, 79, 125, 0.16);
+    /* Floats over the full-viewport sim; the blur keeps it readable
+       when the galaxy drifts underneath. */
+    background: rgba(44, 38, 74, 0.55);
     border: 2px solid var(--color-plum-700);
     border-radius: 0.75em;
-    box-shadow: 0 2px 12px rgba(62, 55, 93, 0.25);
+    box-shadow: 0 2px 12px rgba(62, 55, 93, 0.35);
+    backdrop-filter: blur(8px);
   }
 
 
@@ -107,10 +110,8 @@ kbd {
   line-height: 1.4;
 }
 
-/* Keep the square canvas fully on-screen on desktop: never wider than
-   the column, never taller than the viewport. The sim floats directly
-   on the space background - no card chrome. */
+/* The sim owns the whole viewport; the canvas fills its fixed host. */
 #dataviz canvas {
-  max-width: min(100%, calc(100vh - 2rem));
-  margin: 0 auto;
+  width: 100%;
+  height: 100%;
 }
