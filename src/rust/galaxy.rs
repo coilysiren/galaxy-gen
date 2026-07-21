@@ -2195,6 +2195,42 @@ mod tests_causal_loop {
     }
 
     #[test]
+    fn test_determinism_same_seed_same_trajectory_at_two_depths() {
+        // Same seed + same dt sequence -> identical star arrays and
+        // event log, checked at two depths to catch cadence-boundary
+        // nondeterminism. Both depths reach into the star-formation era.
+        fn run(n: usize) -> (Vec<f32>, Vec<f32>, u64, [u64; 5]) {
+            let mut g =
+                Galaxy::new(50, 0).seed_with_mode_seeded(25, InitialCondition::Uniform, 42);
+            for _ in 0..n {
+                g = g.tick(0.5);
+            }
+            let counts = [
+                g.events.executed_count(EventKind::CloudCollapse),
+                g.events.executed_count(EventKind::StarBirth),
+                g.events.executed_count(EventKind::Supernova),
+                g.events.executed_count(EventKind::ShockWave),
+                g.events.executed_count(EventKind::CloudDissipate),
+            ];
+            (
+                g.stars.pos_x.clone(),
+                g.stars.vel_y.clone(),
+                g.stars.len() as u64,
+                counts,
+            )
+        }
+        for n in [900usize, 1800] {
+            let a = run(n);
+            let b = run(n);
+            assert_eq!(a.2, b.2, "star count must be deterministic at n={n}");
+            assert!(a.2 > 0, "depth n={n} must include star formation");
+            assert_eq!(a.0, b.0, "star positions must be deterministic at n={n}");
+            assert_eq!(a.1, b.1, "star velocities must be deterministic at n={n}");
+            assert_eq!(a.3, b.3, "event log must be deterministic at n={n}");
+        }
+    }
+
+    #[test]
     fn test_full_causal_chain_supernova_induces_star_birth() {
         // The loop's acceptance scenario: a StarBirth whose ancestry runs
         // birth -> CloudCollapse -> ShockWave -> Supernova -> root.
