@@ -15,16 +15,14 @@
 @layer base {
   html,
   body {
-    background: var(--color-ink);
+    /* Space black - not true black; deep space photographs sit around
+       a very dark blue-grey. Purple belongs to the control panel only. */
+    background: #05060a;
     color: var(--color-plum-50);
     font-family: var(--font-sans);
   }
 
   body {
-    background-image:
-      radial-gradient(ellipse at 20% 10%, rgba(145, 146, 187, 0.08), transparent 40%),
-      radial-gradient(ellipse at 80% 90%, rgba(87, 79, 125, 0.15), transparent 45%),
-      linear-gradient(180deg, #160018 0%, #201a35 100%);
     min-height: 100vh;
   }
 
@@ -67,13 +65,6 @@
     box-shadow: 0 2px 12px rgba(62, 55, 93, 0.25);
   }
 
-  /* Panel without the purple accent bar - the viz container, where a
-     border above the galaxy reads as clutter. */
-  .panel-plain {
-    background: rgba(238, 238, 238, 0.04);
-    border-radius: 0.75em;
-    box-shadow: 0 2px 12px rgba(62, 55, 93, 0.25);
-  }
 
   .input-label {
     color: var(--color-plum-400);
@@ -116,9 +107,10 @@ kbd {
   line-height: 1.4;
 }
 
-/* Keep the square canvas fully on-screen on desktop: never wider than the
-   panel, never taller than the viewport minus panel chrome. */
+/* Keep the square canvas fully on-screen on desktop: never wider than
+   the column, never taller than the viewport. The sim floats directly
+   on the space background - no card chrome. */
 #dataviz canvas {
-  max-width: min(100%, calc(100vh - 6rem));
+  max-width: min(100%, calc(100vh - 2rem));
   margin: 0 auto;
 }

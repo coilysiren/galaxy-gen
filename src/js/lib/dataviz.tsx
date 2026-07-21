@@ -11,8 +11,48 @@ const MAX_ZOOM = 50;
 // Radial render fade: full brightness inside the soft clip (the disk
 // radius), fading to invisible by FADE_END x soft. Matter deeper in the
 // halo band exists in the sim but does not render - the sim's hard clip
-// sits at 2x soft, far past visibility.
-const FADE_END = 1.35;
+// sits at 3x soft, far past visibility.
+const FADE_END = 1.5;
+
+// The canvas views a world span wider than the grid, centered on the
+// disk, so the halo band is on screen and the galaxy floats in space.
+// 1.6 x size shows out to 1.6 x the soft radius - past FADE_END.
+const VIEW_SPAN = 1.6;
+
+// Soft nebular sprites for gas, one per color bucket, pre-rendered once.
+// drawImage of a gradient sprite is far cheaper than per-cell gradients
+// and the alpha accumulation makes dense regions glow on its own.
+const GAS_SPRITE_PX = 32;
+let gasSprites: HTMLCanvasElement[] = [];
+
+// Cool blue-grey nebular ramp, dim to bright (the warm palette moved to
+// the stars, which render as sharp points - the fuzz/color inversion).
+const GAS_COLORS: [number, number, number][] = [
+  [64, 76, 102],
+  [86, 102, 134],
+  [110, 130, 168],
+  [140, 162, 200],
+  [174, 194, 228],
+  [210, 226, 252],
+];
+
+function buildGasSprites() {
+  if (gasSprites.length > 0) return;
+  for (const [r, g, b] of GAS_COLORS) {
+    const c = document.createElement("canvas");
+    c.width = GAS_SPRITE_PX;
+    c.height = GAS_SPRITE_PX;
+    const cctx = c.getContext("2d")!;
+    const half = GAS_SPRITE_PX / 2;
+    const grad = cctx.createRadialGradient(half, half, 0, half, half, half);
+    grad.addColorStop(0, `rgba(${r},${g},${b},0.7)`);
+    grad.addColorStop(0.45, `rgba(${r},${g},${b},0.28)`);
+    grad.addColorStop(1, `rgba(${r},${g},${b},0)`);
+    cctx.fillStyle = grad;
+    cctx.fillRect(0, 0, GAS_SPRITE_PX, GAS_SPRITE_PX);
+    gasSprites.push(c);
+  }
+}
 
 
 interface Camera {
@@ -92,8 +132,9 @@ export function initViz(galaxyFrontend: galaxy.Frontend) {
 
   host.appendChild(canvas);
 
+  buildGasSprites();
   const size = galaxyFrontend.galaxySize;
-  const scale = (CANVAS - MARGIN * 2) / size;
+  const scale = (CANVAS - MARGIN * 2) / (size * VIEW_SPAN);
 
   const camera: Camera = { tx: 0, ty: 0, zoom: 1 };
 
@@ -241,63 +282,49 @@ function drawFrame(s: State, mass: Uint16Array) {
   ctx.translate(camera.tx, camera.ty);
   ctx.scale(camera.zoom, camera.zoom);
 
-  const worldCenter = MARGIN + (size * scale) / 2;
+  const center = size / 2;
+  const half = CANVAS / 2;
+  const toCx = (x: number) => half + (x + 0.5 - center) * scale;
+  const toCy = (y: number) => half + (center - y - 0.5) * scale;
 
   // Circular world boundary, matching the sim's confinement disk.
   ctx.beginPath();
-  ctx.arc(worldCenter, worldCenter, (size / 2 - 1) * scale, 0, Math.PI * 2);
-  ctx.strokeStyle = "rgba(145, 146, 187, 0.25)";
-  ctx.lineWidth = 1.5 / camera.zoom;
+  ctx.arc(half, half, (size / 2 - 1) * scale, 0, Math.PI * 2);
+  ctx.strokeStyle = "rgba(120, 135, 165, 0.18)";
+  ctx.lineWidth = 1.2 / camera.zoom;
   ctx.stroke();
 
-  // Fixed world radius; scaled by context so cells grow on zoom.
-  const buckets = 6;
-  const bucketColors: string[] = [];
-  for (let b = 0; b < buckets; b++) {
-    const t = b / (buckets - 1);
-    const r = (145 + (255 - 145) * t) | 0;
-    const g = (146 + (240 - 146) * t) | 0;
-    const bl = (187 + (200 - 187) * t) | 0;
-    bucketColors.push(`rgb(${r},${g},${bl})`);
-  }
-
+  // Gas: soft nebular sprites, alpha-accumulating where dense.
   const softR = size / 2 - 1;
   const fadeEndSq = softR * FADE_END * (softR * FADE_END);
   const softSq = softR * softR;
-  const center = size / 2;
+  const buckets = GAS_COLORS.length;
 
-  for (let b = 0; b < buckets; b++) {
-    ctx.fillStyle = bucketColors[b];
-    // Full-brightness pass (inside the soft clip), then a dim halo pass.
-    for (const haloPass of [false, true]) {
-      ctx.globalAlpha = haloPass ? 0.3 : 1.0;
-      ctx.beginPath();
-      for (let i = 0; i < mass.length; i++) {
-        const m = mass[i];
-        if (m === 0) continue;
-        const col = i % size;
-        const row = (i / size) | 0;
-        const rx = col - center;
-        const ry = row - center;
-        const radSq = rx * rx + ry * ry;
-        if (radSq > fadeEndSq) continue;
-        if (haloPass !== radSq > softSq) continue;
-        const t = Math.log(m + 1) * invLogMax;
-        const bi = Math.min(buckets - 1, Math.floor(t * buckets));
-        if (bi !== b) continue;
-        const r = Math.max(0.5, Math.min(rMax, 0.5 + t * rMax * 1.4));
-        const cx = MARGIN + (col + 0.5) * scale;
-        const cy = MARGIN + (size - 1 - row + 0.5) * scale;
-        ctx.moveTo(cx + r, cy);
-        ctx.arc(cx, cy, r, 0, Math.PI * 2);
-      }
-      ctx.fill();
-    }
+  for (let i = 0; i < mass.length; i++) {
+    const m = mass[i];
+    if (m === 0) continue;
+    const col = i % size;
+    const row = (i / size) | 0;
+    const rx = col - center;
+    const ry = row - center;
+    const radSq = rx * rx + ry * ry;
+    if (radSq > fadeEndSq) continue;
+    const t = Math.log(m + 1) * invLogMax;
+    const bi = Math.min(buckets - 1, Math.floor(t * buckets));
+    const footprint = Math.max(2, (0.5 + t * rMax * 1.4) * 4);
+    ctx.globalAlpha = radSq > softSq ? 0.3 : 1.0;
+    ctx.drawImage(
+      gasSprites[bi],
+      toCx(col) - footprint / 2,
+      toCy(row) - footprint / 2,
+      footprint,
+      footprint,
+    );
   }
   ctx.globalAlpha = 1.0;
 
-  drawStars(s);
-  drawTransients(s);
+  drawStars(s, toCx, toCy);
+  drawTransients(s, toCx, toCy);
 
   ctx.restore();
 }
@@ -305,22 +332,28 @@ function drawFrame(s: State, mass: Uint16Array) {
 // Event flashes: an expanding, fading ring for each recent supernova and
 // a brief glint for each star birth. Duration and brightness are render
 // exaggerations of instantaneous events - nothing here is sim state.
-function drawTransients(s: State) {
+function drawTransients(
+  s: State,
+  toCx: (x: number) => number,
+  toCy: (y: number) => number,
+) {
   const t = s.lastTransients;
   if (!t || t.length === 0) return;
-  const { ctx, size, scale } = s;
+  const { ctx, scale } = s;
   for (let i = 0; i < t.length; i += 4) {
     const kind = t[i];
-    const px = MARGIN + (t[i + 1] + 0.5) * scale;
-    const py = MARGIN + (size - 1 - t[i + 2] + 0.5) * scale;
+    const px = toCx(t[i + 1]);
+    const py = toCy(t[i + 2]);
     const age = t[i + 3];
     if (kind === 2) {
-      // Supernova: bright core flash then an expanding shell.
-      const life = 1 - age / 90;
+      // Supernova: bright core flash then an expanding shell. Kept faint
+      // and short-lived - on a space-black field a busy epoch otherwise
+      // drowns the galaxy in rings.
+      const life = 1 - age / 55;
       if (life <= 0) continue;
       const ringR = (1.5 + age * 0.35) * scale;
-      ctx.strokeStyle = `rgba(255,240,210,${(0.7 * life).toFixed(3)})`;
-      ctx.lineWidth = 2.5 * life;
+      ctx.strokeStyle = `rgba(255,240,210,${(0.32 * life).toFixed(3)})`;
+      ctx.lineWidth = 1.6 * life;
       ctx.beginPath();
       ctx.arc(px, py, ringR, 0, Math.PI * 2);
       ctx.stroke();
@@ -346,10 +379,18 @@ function drawTransients(s: State) {
 // (light stars, warm cream) to hot (heavy stars, blue-white); size and
 // halo derive from luminosity. Render-only exaggeration is fine - none
 // of this flows back into the sim.
-function drawStars(s: State) {
+// Stars: sharp warm points - crisp at a distance, the way stars read in
+// a photograph. Light stars are cream, heavy ones blue-white. Only the
+// very brightest get a faint tight glow; there is no soft halo (the
+// fuzz belongs to the gas now).
+function drawStars(
+  s: State,
+  toCx: (x: number) => number,
+  toCy: (y: number) => number,
+) {
   const stars = s.lastStars;
   if (!stars || stars.length === 0) return;
-  const { ctx, size, scale } = s;
+  const { ctx, size } = s;
   const maxLum = 1200;
   const softR = size / 2 - 1;
   const center = size / 2;
@@ -360,19 +401,20 @@ function drawStars(s: State) {
       rad <= softR ? 1 : Math.max(0, 1 - (rad / softR - 1) / (FADE_END - 1));
     if (fade <= 0.02) continue;
     ctx.globalAlpha = fade;
-    const px = MARGIN + (stars[i] + 0.5) * scale;
-    const py = MARGIN + (size - 1 - stars[i + 1] + 0.5) * scale;
+    const px = toCx(stars[i] - 0.5);
+    const py = toCy(stars[i + 1] - 0.5);
     const lum = Math.min(stars[i + 2], maxLum) / maxLum;
     const heat = stars[i + 3];
-    const r = 1.2 + 2.6 * Math.sqrt(lum);
-    const cr = (255 - 60 * heat) | 0;
-    const cg = (235 - 20 * heat) | 0;
-    const cb = (200 + 55 * heat) | 0;
-    // Halo, then core.
-    ctx.fillStyle = `rgba(${cr},${cg},${cb},0.25)`;
-    ctx.beginPath();
-    ctx.arc(px, py, r * 2.2, 0, Math.PI * 2);
-    ctx.fill();
+    const r = 0.9 + 1.6 * Math.sqrt(lum);
+    const cr = (255 - 45 * heat) | 0;
+    const cg = (240 - 18 * heat) | 0;
+    const cb = (208 + 47 * heat) | 0;
+    if (lum > 0.45) {
+      ctx.fillStyle = `rgba(${cr},${cg},${cb},0.18)`;
+      ctx.beginPath();
+      ctx.arc(px, py, r * 1.8, 0, Math.PI * 2);
+      ctx.fill();
+    }
     ctx.fillStyle = `rgb(${cr},${cg},${cb})`;
     ctx.beginPath();
     ctx.arc(px, py, r, 0, Math.PI * 2);

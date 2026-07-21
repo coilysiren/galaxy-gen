@@ -412,16 +412,15 @@ export function Interface() {
 
   return (
     <div data-testid="app" data-wasm-ready={wasmReady ? "true" : "false"} className="min-h-screen">
-      <main className="mx-auto max-w-[1400px] px-4 py-6 sm:px-6 lg:grid lg:grid-cols-[300px_minmax(0,1fr)] lg:items-start lg:gap-6">
-        <aside className="mb-6 lg:sticky lg:top-6 lg:mb-0">
-          <header className="mb-6">
-            <h1 className="text-3xl tracking-[0.1em]">Galaxy Generator</h1>
-            <p className="mt-2 text-sm tracking-[0.08em] text-[color:var(--color-plum-400)]">
-              Gravitational sim computed in Rust, rendered in the browser.
-            </p>
-          </header>
-
+      <main className="mx-auto max-w-none px-3 py-4 lg:grid lg:grid-cols-[280px_minmax(0,1fr)] lg:items-start lg:gap-4">
+        <aside className="mb-4 lg:sticky lg:top-4 lg:mb-0">
           <section className="panel p-5">
+            <header className="mb-5">
+              <h1 className="text-2xl tracking-[0.1em]">Galaxy Generator</h1>
+              <p className="mt-2 text-xs tracking-[0.08em] text-[color:var(--color-plum-400)]">
+                Gravitational sim computed in Rust, rendered in the browser.
+              </p>
+            </header>
             <div className="grid gap-4">
               <label className="block">
                 <span className="input-label mb-1 block">Galaxy Size</span>
@@ -518,7 +517,7 @@ export function Interface() {
           </section>
         </aside>
 
-        <section className="panel-plain p-3 md:p-4">
+        <section>
           <div id="dataviz" />
         </section>
       </main>

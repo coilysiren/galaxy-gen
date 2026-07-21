@@ -103,12 +103,14 @@ impl Galaxy {
     /// the two-tier halo confinement below instead.
     const CONFINE_STIFFNESS: f32 = 0.02;
     /// Stars: hard-clip radius as a multiple of the soft (disk) radius.
+    /// 3x leaves a wide halo band now that the renderer shows past the
+    /// disk edge.
     /// Between soft and hard lies the halo band with a repulsive
     /// gradient a = K (r - soft)/(hard - r) - gentle at the soft edge,
     /// divergent at the hard edge, so no finite speed reaches the hard
     /// clip. Replaces the old rim hard-stop that parked all ejecta in a
     /// ring at disk_r + 3.
-    const HARD_CLIP_FACTOR: f32 = 2.0;
+    const HARD_CLIP_FACTOR: f32 = 3.0;
     /// Gradient scale for the halo repulsion.
     const HALO_STIFFNESS: f32 = 0.04;
     /// Acceleration ceiling for the halo gradient (the analytic form
@@ -2162,7 +2164,7 @@ mod tests_stars_dynamics {
         let mut g = Galaxy::new(50, 0).seed_with_mode_seeded(25, InitialCondition::Uniform, 42);
         g.spawn_star(25.0, 25.0, 6.0, 0.0, 10.0);
         let soft = 24.0f32;
-        let hard = soft * 2.0;
+        let hard = soft * Galaxy::HARD_CLIP_FACTOR;
         let mut max_r = 0.0f32;
         let mut g = g;
         for _ in 0..4000 {

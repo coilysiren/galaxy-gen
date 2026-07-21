@@ -41,7 +41,7 @@ Plain `useState`. Sidebar layout on desktop (sticky controls left, viz right), s
 
 ## Visualization (`src/js/lib/dataviz.tsx`)
 
-Canvas (not SVG) renderer: single `<canvas>` per frame; SVG `setAttribute` was a bottleneck. DPR-aware (clamped 2× for HiDPI). Pan + zoom camera: pointer-drag pan, wheel zoom (with ctrl-wheel pinch), zoom clamp `[1, 50]`, pan clamp so world rect intersects viewport. Camera state observable via `data-cam-{tx,ty,zoom}` for E2E. Double-click resets the camera. Layers: gas dots, glowing stars (halo + core, color by mass heat), and event transients (expanding supernova rings, birth glints) derived from the executed-event ring. Circular world boundary ring drawn to match the sim's confinement disk.
+Canvas (not SVG) renderer: single `<canvas>` per frame; SVG `setAttribute` was a bottleneck. DPR-aware (clamped 2× for HiDPI). Pan + zoom camera: pointer-drag pan, wheel zoom (with ctrl-wheel pinch), zoom clamp `[1, 50]`, pan clamp so world rect intersects viewport. Camera state observable via `data-cam-{tx,ty,zoom}` for E2E. Double-click resets the camera. Layers: soft nebular gas sprites (pre-rendered radial gradients, cool blue-grey, alpha-accumulating where dense), sharp warm star points (cream to blue-white by mass, tight glow on the brightest only), and faint event transients (expanding supernova shells, birth glints) from the executed-event ring. Space-black page with the sim floating chromeless; the view spans 1.6x the grid so the halo band is on screen; radial fade hides the deep halo. Circular world boundary ring matches the sim's confinement disk.
 
 ## Build, test, deploy
 
