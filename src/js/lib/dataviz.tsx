@@ -151,7 +151,6 @@ export function initViz(galaxyFrontend: galaxy.Frontend) {
   canvas.style.width = "100%";
   canvas.style.height = "100%";
   canvas.style.display = "block";
-  canvas.style.cursor = "grab";
   canvas.style.touchAction = "none";
   canvas.setAttribute("data-testid", "dataviz-canvas");
 
@@ -160,6 +159,14 @@ export function initViz(galaxyFrontend: galaxy.Frontend) {
   ctx.scale(dpr, dpr);
 
   host.appendChild(canvas);
+
+  // Camera interaction is a dev utility, gated behind ?debug=1. The
+  // transform itself always runs (identity by default); only the
+  // pointer/wheel/dblclick surface is conditional.
+  const debugCamera =
+    typeof window !== "undefined" &&
+    new URLSearchParams(window.location.search).has("debug");
+  canvas.style.cursor = debugCamera ? "grab" : "default";
 
   buildGasSprites();
   const size = galaxyFrontend.galaxySize;
@@ -267,21 +274,25 @@ export function initViz(galaxyFrontend: galaxy.Frontend) {
   };
   window.addEventListener("resize", onResize);
 
-  canvas.addEventListener("wheel", onWheel, { passive: false });
-  canvas.addEventListener("pointerdown", onPointerDown);
-  canvas.addEventListener("pointermove", onPointerMove);
-  canvas.addEventListener("pointerup", onPointerUp);
-  canvas.addEventListener("pointercancel", onPointerUp);
-  canvas.addEventListener("dblclick", onDblClick);
+  if (debugCamera) {
+    canvas.addEventListener("wheel", onWheel, { passive: false });
+    canvas.addEventListener("pointerdown", onPointerDown);
+    canvas.addEventListener("pointermove", onPointerMove);
+    canvas.addEventListener("pointerup", onPointerUp);
+    canvas.addEventListener("pointercancel", onPointerUp);
+    canvas.addEventListener("dblclick", onDblClick);
+  }
 
   const cleanup = () => {
     window.removeEventListener("resize", onResize);
-    canvas.removeEventListener("wheel", onWheel);
-    canvas.removeEventListener("pointerdown", onPointerDown);
-    canvas.removeEventListener("pointermove", onPointerMove);
-    canvas.removeEventListener("pointerup", onPointerUp);
-    canvas.removeEventListener("pointercancel", onPointerUp);
-    canvas.removeEventListener("dblclick", onDblClick);
+    if (debugCamera) {
+      canvas.removeEventListener("wheel", onWheel);
+      canvas.removeEventListener("pointerdown", onPointerDown);
+      canvas.removeEventListener("pointermove", onPointerMove);
+      canvas.removeEventListener("pointerup", onPointerUp);
+      canvas.removeEventListener("pointercancel", onPointerUp);
+      canvas.removeEventListener("dblclick", onDblClick);
+    }
   };
 
   const lensCanvas = document.createElement("canvas");

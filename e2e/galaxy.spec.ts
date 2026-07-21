@@ -207,41 +207,10 @@ test.describe("Galaxy Generator", () => {
     expect(diffs / r.cpuMass.length).toBeLessThanOrEqual(threshold);
   });
 
-  test("keyboard shortcut: Space toggles run/pause", async ({ page }) => {
-    await page.getByTestId("btn-init").click();
-    const runBtn = page.getByTestId("btn-run");
-    await expect(runBtn).toHaveText("play");
-
-    await page.locator("body").press("Space");
-    await expect(runBtn).toHaveText("pause");
-
-    await page.locator("body").press("Space");
-    await expect(runBtn).toHaveText("play");
-  });
-
-  test("keyboard shortcut: Space does nothing before galaxy is initialised", async ({ page }) => {
-    // Run button is disabled; Space should be a no-op and must not throw.
-    await page.locator("body").press("Space");
-    await expect(page.getByTestId("btn-run")).toBeDisabled();
-  });
-
-  test("space is ignored while typing in an input", async ({ page }) => {
-    await page.getByTestId("btn-init").click();
-    const sizeInput = page.getByTestId("input-galaxy-size");
-    await sizeInput.click();
-    await sizeInput.press("Space");
-    // Run must not have toggled.
-    await expect(page.getByTestId("btn-run")).toHaveText("play");
-  });
-
-  test("keyboard hints row is visible to users", async ({ page }) => {
-    const hints = page.getByTestId("keyboard-hints");
-    await expect(hints).toBeVisible();
-    await expect(hints).toContainText("space");
-    await expect(hints).toContainText("reset");
-  });
-
-  test("camera pan+zoom: wheel zooms, double-click restores", async ({ page }) => {
+  test("camera pan+zoom: wheel zooms, double-click restores (debug only)", async ({ page }) => {
+    // Camera interaction is a dev utility behind ?debug=1.
+    await page.goto("/?debug=1");
+    await waitForWasm(page);
     await page.getByTestId("btn-init").click();
 
     const canvas = page.locator("#dataviz canvas");
@@ -286,7 +255,9 @@ test.describe("Galaxy Generator", () => {
     expect(after).toEqual({ tx: 0, ty: 0, zoom: 1 });
   });
 
-  test("camera pan: click-drag on canvas updates data-cam-* on #dataviz", async ({ page }) => {
+  test("camera pan: click-drag updates data-cam-* (debug only)", async ({ page }) => {
+    await page.goto("/?debug=1");
+    await waitForWasm(page);
     await page.getByTestId("btn-init").click();
 
     const host = page.locator("#dataviz");
@@ -503,6 +474,29 @@ test.describe("Galaxy Generator", () => {
       10,
     );
     expect(tickCountAfter).toBe(tickCountBefore + 1);
+  });
+
+  test("camera interaction is inert without the debug flag", async ({ page }) => {
+    await page.getByTestId("btn-init").click();
+    const host = page.locator("#dataviz");
+    await page.evaluate(() => {
+      const c = document.querySelector("#dataviz canvas") as HTMLCanvasElement;
+      const rect = c.getBoundingClientRect();
+      const cx = rect.left + rect.width / 2;
+      const cy = rect.top + rect.height / 2;
+      for (let i = 0; i < 6; i++) {
+        c.dispatchEvent(
+          new WheelEvent("wheel", {
+            deltaY: -200,
+            clientX: cx,
+            clientY: cy,
+            bubbles: true,
+            cancelable: true,
+          })
+        );
+      }
+    });
+    await expect(host).toHaveAttribute("data-cam-zoom", "1.0000");
   });
 
   test("generate cycles the seed unless locked", async ({ page }) => {

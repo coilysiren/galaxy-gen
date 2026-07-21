@@ -338,38 +338,6 @@ export function Interface() {
     rafRef.current = requestAnimationFrame(renderLoop);
   };
 
-  const handleRunToggleRef = React.useRef(handleRunToggle);
-  React.useEffect(() => {
-    handleRunToggleRef.current = handleRunToggle;
-  });
-
-  React.useEffect(() => {
-    const isEditable = (el: EventTarget | null): boolean => {
-      if (!(el instanceof HTMLElement)) return false;
-      const tag = el.tagName;
-      if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT") {
-        return true;
-      }
-      if (el.isContentEditable) return true;
-      return false;
-    };
-
-    const onKeyDown = (e: KeyboardEvent) => {
-      if (e.metaKey || e.ctrlKey || e.altKey) return;
-      if (isEditable(e.target)) return;
-
-      if (e.key === " " || e.key === "Spacebar") {
-        if (galaxyFrontendRef.current) {
-          e.preventDefault();
-          handleRunToggleRef.current();
-        }
-      }
-    };
-
-    window.addEventListener("keydown", onKeyDown);
-    return () => window.removeEventListener("keydown", onKeyDown);
-  }, []);
-
   return (
     <div data-testid="app" data-wasm-ready={wasmReady ? "true" : "false"} className="min-h-screen">
       <main>
@@ -456,17 +424,6 @@ export function Interface() {
               <span>fps: {fps}</span>
               <span data-testid="stat-stars">stars: {starCount}</span>
               <span data-testid="stat-sn">sn: {snCount}</span>
-            </div>
-
-            <div
-              className="mt-5 space-y-1.5 text-[0.65rem] tracking-widest uppercase text-[color:var(--color-plum-400)]"
-              data-testid="keyboard-hints"
-            >
-              <div>
-                <kbd>space</kbd> play/pause
-              </div>
-              <div>drag pan · wheel zoom</div>
-              <div>double-click reset view</div>
             </div>
 
             {!wasmReady && (
