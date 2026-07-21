@@ -59,9 +59,9 @@
   }
 
   .panel {
-    background: rgba(238, 238, 238, 0.04);
-    border-top: 4px solid var(--color-plum-900);
-    border-radius: 0 0 0.75em 0.75em;
+    background: rgba(87, 79, 125, 0.16);
+    border: 2px solid var(--color-plum-700);
+    border-radius: 0.75em;
     box-shadow: 0 2px 12px rgba(62, 55, 93, 0.25);
   }
 

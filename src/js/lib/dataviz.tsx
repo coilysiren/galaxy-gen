@@ -15,9 +15,9 @@ const MAX_ZOOM = 50;
 const FADE_END = 1.5;
 
 // The canvas views a world span wider than the grid, centered on the
-// disk, so the halo band is on screen and the galaxy floats in space.
-// 1.6 x size shows out to 1.6 x the soft radius - past FADE_END.
-const VIEW_SPAN = 1.6;
+// disk. 1.1 x size lets the disk own the frame; the near-halo spills
+// past the canvas edge and the radial fade handles the rest.
+const VIEW_SPAN = 1.1;
 
 // Soft nebular sprites for gas, one per color bucket, pre-rendered once.
 // drawImage of a gradient sprite is far cheaper than per-cell gradients
@@ -45,8 +45,8 @@ function buildGasSprites() {
     const cctx = c.getContext("2d")!;
     const half = GAS_SPRITE_PX / 2;
     const grad = cctx.createRadialGradient(half, half, 0, half, half, half);
-    grad.addColorStop(0, `rgba(${r},${g},${b},0.7)`);
-    grad.addColorStop(0.45, `rgba(${r},${g},${b},0.28)`);
+    grad.addColorStop(0, `rgba(${r},${g},${b},0.5)`);
+    grad.addColorStop(0.4, `rgba(${r},${g},${b},0.2)`);
     grad.addColorStop(1, `rgba(${r},${g},${b},0)`);
     cctx.fillStyle = grad;
     cctx.fillRect(0, 0, GAS_SPRITE_PX, GAS_SPRITE_PX);
@@ -287,13 +287,6 @@ function drawFrame(s: State, mass: Uint16Array) {
   const toCx = (x: number) => half + (x + 0.5 - center) * scale;
   const toCy = (y: number) => half + (center - y - 0.5) * scale;
 
-  // Circular world boundary, matching the sim's confinement disk.
-  ctx.beginPath();
-  ctx.arc(half, half, (size / 2 - 1) * scale, 0, Math.PI * 2);
-  ctx.strokeStyle = "rgba(120, 135, 165, 0.18)";
-  ctx.lineWidth = 1.2 / camera.zoom;
-  ctx.stroke();
-
   // Gas: soft nebular sprites, alpha-accumulating where dense.
   const softR = size / 2 - 1;
   const fadeEndSq = softR * FADE_END * (softR * FADE_END);
@@ -311,7 +304,9 @@ function drawFrame(s: State, mass: Uint16Array) {
     if (radSq > fadeEndSq) continue;
     const t = Math.log(m + 1) * invLogMax;
     const bi = Math.min(buckets - 1, Math.floor(t * buckets));
-    const footprint = Math.max(2, (0.5 + t * rMax * 1.4) * 4);
+    // Fuzz overflows the cell on purpose - a cell's cloud bleeds well
+    // into its neighborhood and the overlaps blend into nebulae.
+    const footprint = Math.max(5, (0.5 + t * rMax * 1.4) * 8);
     ctx.globalAlpha = radSq > softSq ? 0.3 : 1.0;
     ctx.drawImage(
       gasSprites[bi],

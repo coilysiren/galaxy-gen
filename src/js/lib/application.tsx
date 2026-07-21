@@ -499,15 +499,22 @@ export function Interface() {
               <span data-testid="stat-sn">sn: {snCount}</span>
             </div>
 
-            <p
-              className="mt-5 text-[0.7rem] leading-relaxed tracking-widest uppercase text-[color:var(--color-plum-400)]"
+            <div
+              className="mt-5 space-y-1.5 text-[0.65rem] tracking-widest uppercase text-[color:var(--color-plum-400)]"
               data-testid="keyboard-hints"
             >
-              keys: <kbd>space</kbd> play/pause · <kbd>↑</kbd>/<kbd>↓</kbd> dt ×{DT_STEP}/÷
-              {DT_STEP} · <kbd>r</kbd> reset dt
-              <br />
-              mouse: drag pan · wheel zoom · double-click reset view
-            </p>
+              <div>
+                <kbd>space</kbd> play/pause
+              </div>
+              <div>
+                <kbd>↑</kbd>/<kbd>↓</kbd> dt ×{DT_STEP} / ÷{DT_STEP}
+              </div>
+              <div>
+                <kbd>r</kbd> reset dt
+              </div>
+              <div>drag pan · wheel zoom</div>
+              <div>double-click reset view</div>
+            </div>
 
             {!wasmReady && (
               <p className="mt-4 text-xs tracking-widest uppercase text-[color:var(--color-plum-400)]">
