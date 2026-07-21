@@ -18,7 +18,7 @@ RUN apt-get update \
  && rm -rf /var/lib/apt/lists/*
 
 # Pinned upstream binaryen release. Keep the version in sync with
-# .github/workflows/action.yml and build-and-publish.yml.
+# .github/workflows/action.yml.
 RUN VER=version_119 \
  && curl -sSL "https://github.com/WebAssembly/binaryen/releases/download/${VER}/binaryen-${VER}-x86_64-linux.tar.gz" -o /tmp/binaryen.tgz \
  && tar -xzf /tmp/binaryen.tgz -C /usr/local --strip-components=1 \
@@ -54,18 +54,15 @@ ENV SENTRY_DSN=${SENTRY_DSN}
 RUN npm run build
 
 # -----------------------------------------------------------------------------
-# Stage 2: pure data image - the built bundle + its Caddyfile, nothing to run.
+# Stage 2: unprivileged nginx serving the built bundle.
 # -----------------------------------------------------------------------------
-# The runtime is a *stock, unmodified* caddy:2-alpine in the Deployment (see
-# deploy/main.yml). This image carries only the payload: an initContainer runs
-# it and copies /dist + /Caddyfile into a shared emptyDir the caddy container
-# then serves. So the asset bundle and its server config roll atomically per
-# git-sha while the serving layer stays byte-for-byte upstream caddy.
-#
-# Base is busybox (not scratch) because the initContainer needs `sh`/`cp` to
-# move the payload into the volume. Swap to `FROM scratch` + a `volumes[].image`
-# mount once kai-server is on k8s 1.33+ (ImageVolume GA). See galaxy-gen#22.
-FROM busybox:1.37 AS runtime
+# Self-contained serving image on the coilyco-bridge/deploy static-site
+# precedent (atlas, factory-game): nginx-unprivileged, uid 101, listens on
+# 8080, TLS terminated upstream by traefik + cert-manager. Built at rollout by
+# deploy's services/galaxy-gen/scripts/rollout.sh over this repo's git
+# context - replaces the busybox data bundle + initContainer + stock caddy
+# shape (galaxy-gen#22, retired with the in-repo deploy surface).
+FROM nginxinc/nginx-unprivileged:1.27-alpine AS runtime
 
-COPY --from=builder /app/dist /dist
-COPY deploy/Caddyfile /Caddyfile
+COPY nginx.conf /etc/nginx/conf.d/default.conf
+COPY --from=builder /app/dist /usr/share/nginx/html

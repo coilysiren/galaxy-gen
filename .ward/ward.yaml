@@ -6,12 +6,7 @@
 # metacharacters at invocation time, so flags forward verbatim through
 # ward's argv handling.
 
-dns-name: galaxy-gen.coilysiren.me
-email: kai@users.noreply.github.com
-name: coilyco-flight-deck/galaxy-gen
-port: 8080
-tailnet:
-  shortcut: galaxy-gen
+name: coilyco-gaming/galaxy-gen
 
 commands:
   install:
@@ -47,12 +42,9 @@ commands:
   build-docker:
     run: make build-docker
     description: Build the docker image locally with BuildKit cache.
-  publish:
-    run: make publish
-    description: Tag and push the docker image to the in-cluster registry.
-  deploy:
-    run: make deploy
-    description: Build, push, and apply to the cluster
+  run-docker:
+    run: make run-docker
+    description: Serve the locally built image on :8080 (mirrors the k8s Deployment).
 
 # Provider skills this leaf pulls into its git-excluded .agents/skills/ for
 # confined harnesses (OpenClaw on Qwen). Resolved by scripts/pull-capabilities.py
@@ -76,7 +68,7 @@ catalog:
   lifecycle: production
   description: "Procedural galaxy simulation. Rust compiled to WASM, rendered in the browser."
   dependsOn:
-    - forgejo.coilysiren.me/coilysiren/infrastructure
+    - forgejo.coilysiren.me/coilyco-bridge/deploy
 security:
   protected_binaries: []
   sudo:

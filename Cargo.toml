@@ -3,7 +3,7 @@
 [package]
 name = "galaxy_gen_backend"
 description = "{ rust => wasm => js } galaxy generation simulation"
-repository = "https://forgejo.coilysiren.me/coilyco-flight-deck/galaxy-gen"
+repository = "https://forgejo.coilysiren.me/coilyco-gaming/galaxy-gen"
 version = "0.0.1"
 authors = ["Kai Siren"]
 license = "AGPL-3.0-or-later"

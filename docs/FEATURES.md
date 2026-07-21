@@ -47,7 +47,7 @@ Canvas (not SVG) renderer: single `<canvas>` per frame; SVG `setAttribute` was a
 - ESLint flat + Prettier over `src/` + `e2e/`. TS noEmit typecheck. Rust `clippy -D warnings`, `cargo fmt`.
 - Playwright E2E boots dev server, asserts UI shell, init, seed cell count, tick advancement, mass redistribution, WebGPU path when `navigator.gpu` is present.
 - CI: GH Actions `rust` / `js` / `e2e` jobs on push/PR to `main`. E2E uploads HTML report on failure.
-- Sentry browser SDK in `src/js/index.js` (`SENTRY_DSN`-driven). Served on k3s on `kai-server` at `galaxy-gen.coilysiren.me` by a **stock, unmodified `caddy:2-alpine`** - the built image (`Dockerfile` stage 2) is a pure busybox data bundle (`/dist` + `/Caddyfile`), and an initContainer copies that payload into shared emptyDirs the caddy container serves. Bundle and Caddyfile roll atomically per git-sha. Caddyfile + k8s manifest under `deploy/`. Swap to a `volumes[].image` mount once kai-server is on k8s 1.33+. See galaxy-gen#22. CI runs tests on push and PR, while deploys happen through the pull-side updater or the local `ward exec deploy` fallback. The host/infra prerequisites are walked through in [deploy.md](deploy.md).
+- Sentry browser SDK in `src/js/index.js` (`SENTRY_DSN`-driven). Served on k3s on `kai-server` at `galaxy-gen.coilysiren.me` by **unprivileged nginx** (`Dockerfile` stage 2: `nginxinc/nginx-unprivileged` + `nginx.conf`, wasm MIME + immutable caching for hashed bundles). The deploy surface lives in coilyco-bridge/deploy `services/galaxy-gen/` (chart, namespace, rollout, public ingress), which builds this repo's Dockerfile over the git context at rollout - no in-repo manifests and no publish CI. This retired the busybox-data-bundle + initContainer + stock-caddy shape (galaxy-gen#22) and the old envsubst manifest under `deploy/`. CI here runs tests on push and PR.
 
 ## Known scope-shape signals
 
@@ -57,7 +57,6 @@ README lists nine inspirational sibling projects; consult when evaluating scope 
 
 - [README.md](../README.md) - human-facing intro.
 - [AGENTS.md](../AGENTS.md) - agent-facing operating rules.
-- [deploy.md](deploy.md) - deploy paths + host/infra prerequisites.
 - [.ward/ward.yaml](../.ward/ward.yaml) - allowlisted commands.
 
 Cross-reference convention from agentic-os#59.

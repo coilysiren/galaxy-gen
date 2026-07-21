@@ -64,7 +64,7 @@ GitHub Actions (`.github/workflows/action.yml`) runs three jobs on PR to `main`:
 
 ## Deploy
 
-Push to `main` runs the in-cluster Forgejo pipeline (`.forgejo/workflows/build-publish-deploy.yml`): `cargo test` only. The built image is a **pure busybox data bundle** (`Dockerfile` stage 2 = `/dist` + `/Caddyfile`, nothing to run); the runtime is a **stock, unmodified `caddy:2-alpine`** in `deploy/main.yml`, fed by an initContainer that copies the bundle into shared emptyDirs. The `coilysiren-galaxy-gen` container `set image` rolls is now that initContainer (the serving container never changes). See galaxy-gen#22. The full WASM + webpack build is covered by the local deploy path, while browser e2e + tsc stay on GitHub PR CI (the in-cluster runner can't reach the Playwright browser CDN). Redeploys happen through the pull-side updater, with `ward exec deploy` as the manual fallback. Both deploy paths and their host prerequisites are documented in `docs/deploy.md`. See coilysiren/galaxy-gen#17, coilysiren/backend#25, coilysiren/infrastructure#168, #171.
+The deploy surface lives in the deploy monorepo - [coilyco-bridge/deploy](https://forgejo.coilysiren.me/coilyco-bridge/deploy) `services/galaxy-gen/` (chart, namespace, values, rollout, public ingress; deploy#173). This repo carries **no manifests and no publish CI**: the deploy repo's `rollout.sh` builds this repo's `Dockerfile` over the git context (`galaxy-gen.git#main`) on kai-server and pushes it to the in-cluster registry. `Dockerfile` stage 2 is **unprivileged nginx** (`nginxinc/nginx-unprivileged` + `nginx.conf`), which retired the busybox-data-bundle + initContainer + stock-caddy shape (galaxy-gen#22) and the legacy `coilysiren-galaxy-gen` namespace. Push to `main` here runs the in-cluster Forgejo pipeline (`.forgejo/workflows/build-publish-deploy.yml`): `cargo test` only; browser e2e + tsc stay on GitHub PR CI (the in-cluster runner can't reach the Playwright browser CDN). A deploy-repo push under `services/galaxy-gen/**` auto-rolls the site; never add deploy manifests back here (deploy-repo boundary rule).
 
 ---
 
@@ -76,7 +76,6 @@ Route every dev command through ward, which reads [`.ward/ward.yaml`](.ward/ward
 
 - [README.md](README.md) - human-facing intro.
 - [docs/FEATURES.md](docs/FEATURES.md) - inventory of what ships today.
-- [.ward/ward.yaml](.ward/ward.yaml) - allowlisted commands.
 - [.ward/ward.yaml](.ward/ward.yaml) - allowlisted commands (`ward exec`).
 
 Cross-reference convention from agentic-os#59.

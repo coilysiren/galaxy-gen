@@ -66,11 +66,12 @@ External contributors are welcome. The pre-commit pipeline includes the ward loc
 ## Deployment
 
 Deployed to [galaxy-gen.coilysiren.me](https://galaxy-gen.coilysiren.me).
-Served through a stock Caddy on k3s on `kai-server`. A push to `main` runs CI
-tests only. Redeploys happen through the pull-side updater, with
-[`ward exec deploy`](docs/deploy-local.md) as the manual fallback. See
-[docs/deploy.md](docs/deploy.md) for the current deploy paths and host
-prerequisites.
+The deploy surface lives in the deploy monorepo
+([coilyco-bridge/deploy](https://forgejo.coilysiren.me/coilyco-bridge/deploy),
+`services/galaxy-gen/`), which builds this repo's Dockerfile over the git
+context at rollout and serves it with unprivileged nginx on k3s on
+`kai-server`. A push to `main` here runs CI tests only; deploy-repo changes
+under `services/galaxy-gen/**` auto-roll the site.
 
 ## Commands
 
@@ -80,7 +81,6 @@ Dev commands are declared in [`.ward/ward.yaml`](.ward/ward.yaml). Run them as `
 
 - [AGENTS.md](AGENTS.md) - agent-facing operating rules.
 - [docs/FEATURES.md](docs/FEATURES.md) - inventory of what ships today.
-- [docs/deploy.md](docs/deploy.md) - deploy paths + host prerequisites.
 - [.ward/ward.yaml](.ward/ward.yaml) - allowlisted commands.
 
 Cross-reference convention from agentic-os#59.
