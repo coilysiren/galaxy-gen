@@ -456,6 +456,25 @@ function drawFrame(s: State, mass: Uint16Array) {
     }
   }
 
+  // Coherent dust predicate: a cell is dusty only when dense, cold, and
+  // embedded in a thick neighborhood - isolated dense cells stamping
+  // dark specks over the gas was the failure mode this replaces.
+  const isDusty = (i: number, col: number, row: number): boolean => {
+    if (mass[i] < 78) return false;
+    let thick = 0;
+    if (col > 0 && mass[i - 1] >= 55) thick++;
+    if (col < size - 1 && mass[i + 1] >= 55) thick++;
+    if (row > 0 && mass[i - size] >= 55) thick++;
+    if (row < size - 1 && mass[i + size] >= 55) thick++;
+    if (thick < 3) return false;
+    if (rad && radRes > 0) {
+      const fx = Math.min(radRes - 1, (col * radScale) | 0);
+      const fy = Math.min(radRes - 1, (row * radScale) | 0);
+      if (rad[fy * radRes + fx] > GAS_WARM_RAD) return false;
+    }
+    return true;
+  };
+
   // Two gas passes split by a stable per-cell hash: most cells render
   // beneath the stars, a foreground share renders over them so clusters
   // sit INSIDE their clouds instead of on top. Dust comes separately.
@@ -504,7 +523,10 @@ function drawFrame(s: State, mass: Uint16Array) {
       // brightness jitter so the field is cloudy rather than uniform.
       const footprint =
         Math.max(8, (0.5 + t * rMax * 1.4) * 10) * (0.75 + cellJitter(i, 1));
-      const brightness = 0.45 + 0.75 * cellJitter(i, 2);
+      let brightness = 0.45 + 0.75 * cellJitter(i, 2);
+      // Dust darkens by emitting less - absence of glow cannot leave
+      // overlay artifacts the way a multiply stamp can.
+      if (isDusty(i, col, row)) brightness *= 0.45;
       const alpha = (radSq > softSq ? 0.3 : 1.0) * brightness;
       const dx = toCx(col) - footprint / 2;
       const dy = toCy(row) - footprint / 2;
@@ -524,27 +546,22 @@ function drawFrame(s: State, mass: Uint16Array) {
     ctx.globalCompositeOperation = "source-over";
   };
 
-  // Dust lanes: the densest cold, unirradiated cells absorb - a dark
-  // brown multiply layer over the stars, which glow blending can never
-  // do. A jittered subset so lanes are ragged, not walls.
+  // Dust absorption over the star field: broad, faint multiply blobs in
+  // coherent thick-cloud interiors only. The visible dark veining comes
+  // from the gas pass emitting less there; this pass exists to dim
+  // stars shining through thick clouds.
   const renderDust = () => {
     ctx.globalCompositeOperation = "multiply";
     for (let i = 0; i < mass.length; i++) {
-      const m = mass[i];
-      if (m < 78) continue;
-      if (cellJitter(i, 5) < 0.6) continue;
       const col = i % size;
       const row = (i / size) | 0;
+      if (!isDusty(i, col, row)) continue;
+      if (cellJitter(i, 5) < 0.5) continue;
       const rx = col - center;
       const ry = row - center;
       if (rx * rx + ry * ry > softSq) continue;
-      if (rad && radRes > 0) {
-        const fx = Math.min(radRes - 1, (col * radScale) | 0);
-        const fy = Math.min(radRes - 1, (row * radScale) | 0);
-        if (rad[fy * radRes + fx] > GAS_WARM_RAD) continue;
-      }
-      const footprint = Math.max(6, rMax * 7) * (0.7 + 0.6 * cellJitter(i, 6));
-      ctx.globalAlpha = 0.35;
+      const footprint = Math.max(10, rMax * 12) * (0.8 + 0.5 * cellJitter(i, 6));
+      ctx.globalAlpha = 0.16;
       ctx.drawImage(
         dustSprite!,
         toCx(col) - footprint / 2,
