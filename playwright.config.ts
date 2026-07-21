@@ -30,6 +30,10 @@ export default defineConfig({
       name: "chromium",
       use: {
         ...devices["Desktop Chrome"],
+        // Escape hatch for hosts where the bundled-browser CDN download
+        // stalls: PLAYWRIGHT_BROWSER_CHANNEL=chrome runs the system
+        // Chrome instead. CI leaves this unset.
+        channel: process.env.PLAYWRIGHT_BROWSER_CHANNEL || undefined,
         // Enable WebGPU in headless Chromium for compute-shader smoke tests.
         launchOptions: {
           args: [

@@ -48,10 +48,18 @@ module.exports = {
     ignored: ["**/node_modules/**", "!**/node_modules/galaxy_gen_backend/**"],
     aggregateTimeout: 200,
   },
+  snapshot: {
+    // Default managedPaths treat all of node_modules as immutable, which
+    // serves a stale WASM module after a cargo-watch rebuild of pkg/.
+    // Un-manage only the symlinked wasm-pack output.
+    managedPaths: [/^(.+?[\\/]node_modules[\\/])(?!galaxy_gen_backend)/],
+  },
   devServer: {
     hot: true,
     liveReload: true,
-    port: 8080,
+    // 8081, not 8080: a homebrew nginx login service holds 8080 on this
+    // host and grabs it back whenever the dev server restarts.
+    port: 8081,
     host: "127.0.0.1",
     allowedHosts: "all",
     static: {

@@ -32,10 +32,16 @@ build-wasm: ## Compile Rust to WASM via wasm-pack (pkg/).
 build-js-prod: build-wasm ## Production webpack build.
 	npx webpack --config webpack.config.js --mode production
 
+# The trailing `touch` forces a webpack recompile: pkg/ lives under
+# node_modules (symlink) and webpack's watcher does not rebuild the module
+# graph on pkg-only changes, so without it the browser keeps running the
+# previous WASM.
+WASM_WATCH_CMD = wasm-pack build --dev && touch src/js/index.js
+
 dev: ## Run the rust/wasm watcher and webpack-dev-server concurrently with auto-reload.
 	@echo "Starting rust watcher + JS dev server (Ctrl-C stops both)"
 	@trap 'kill 0' INT TERM EXIT; \
-		cargo watch -w src/rust -w Cargo.toml -s "wasm-pack build --dev" & \
+		cargo watch -w src/rust -w Cargo.toml -s "$(WASM_WATCH_CMD)" & \
 		npx webpack serve --open & \
 		wait
 
@@ -43,7 +49,7 @@ dev-js: ## Run only the JS dev server with HMR.
 	npx webpack serve --open
 
 dev-rust: ## Run only the Rust/WASM watcher.
-	cargo watch -w src/rust -w Cargo.toml -s "wasm-pack build --dev"
+	cargo watch -w src/rust -w Cargo.toml -s "$(WASM_WATCH_CMD)"
 
 test-e2e: build-wasm ## Run Playwright end-to-end tests.
 	npm install ./pkg --no-save

@@ -35,7 +35,7 @@ make dev-rust          # cargo watch → wasm-pack build --dev
 make build-js-prod     # production webpack build
 ```
 
-Raw commands: `cargo test`, `cargo clippy -- -D warnings`, `cargo fmt`, `wasm-pack build` (output `pkg/`, gitignored), `npm run dev` (HMR :8080), `npm run test:e2e[:ui]` (Playwright), `npm run lint` / `format`.
+Raw commands: `cargo test`, `cargo clippy -- -D warnings`, `cargo fmt`, `wasm-pack build` (output `pkg/`, gitignored), `npm run dev` (HMR :8081), `npm run test:e2e[:ui]` (Playwright), `npm run lint` / `format`.
 
 ## Conventions
 
