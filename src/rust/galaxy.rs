@@ -104,10 +104,10 @@ impl Scenario {
         match self {
             Scenario::BangRing => ScenarioParams {
                 bang: true,
-                v_flat: 0.9,
+                v_flat: 1.4,
                 halo_core_frac: 0.3,
-                flow_drag: 0.02,
-                flow_support: 1.08,
+                flow_drag: 0.03,
+                flow_support: 1.02,
                 rotation_boost: 0.8,
                 eject_factor: 1.45,
                 eject_target_frac: 0.62,
@@ -124,9 +124,9 @@ impl Scenario {
             },
             Scenario::BangSpiral => ScenarioParams {
                 bang: true,
-                v_flat: 0.9,
+                v_flat: 1.4,
                 halo_core_frac: 0.2,
-                flow_drag: 0.012,
+                flow_drag: 0.02,
                 flow_support: 1.05,
                 rotation_boost: 1.2,
                 eject_factor: 1.45,
@@ -144,9 +144,9 @@ impl Scenario {
             },
             Scenario::IrregularSpiral => ScenarioParams {
                 bang: false,
-                v_flat: 0.9,
+                v_flat: 1.4,
                 halo_core_frac: 0.2,
-                flow_drag: 0.008,
+                flow_drag: 0.015,
                 flow_support: 1.0,
                 rotation_boost: 1.1,
                 eject_factor: 0.0,
@@ -164,9 +164,9 @@ impl Scenario {
             },
             Scenario::IrregularElliptical => ScenarioParams {
                 bang: false,
-                v_flat: 0.7,
+                v_flat: 1.0,
                 halo_core_frac: 0.15,
-                flow_drag: 0.025,
+                flow_drag: 0.035,
                 flow_support: 0.85,
                 rotation_boost: 0.7,
                 eject_factor: 0.0,
@@ -262,7 +262,10 @@ impl Galaxy {
     // See docs/galaxy-rust.md for constant rationale.
     pub const GRAVATIONAL_CONSTANT: f32 = 5.0e-4;
     const SOFTENING_SQ: f32 = 1.0;
-    const MAX_SUBGRID_STEP: f32 = 0.5;
+    /// 1.0 = one cell per tick, the transfer scheme's hard ceiling
+    /// (one cell-hop per axis per tick). Doubled from 0.5 so the gas
+    /// visibly flows - the rotation curve runs right at this cap.
+    const MAX_SUBGRID_STEP: f32 = 1.0;
     /// Integer r² at or below which gravity flips repulsive - a crude
     /// contact-pressure proxy. Without it every same-cell contact is a
     /// perfectly inelastic merge and any bound system ratchets down to a
@@ -309,6 +312,11 @@ impl Galaxy {
     const THETA: f32 = 0.7;
     /// Coarse gravity-field resolution (per axis).
     const FIELD_RES: usize = 64;
+    /// Stars orbit at half the gas pace: the coarse field they read is
+    /// built at quarter strength (v ~ sqrt(a r)), with its halo term
+    /// using the pre-doubled gas curve. Fast pink rivers of gas around
+    /// a slow drifting star population is the intended look.
+    const STAR_FIELD_SCALE: f32 = 0.25;
     /// Softening for the coarse field build (separate from the gas
     /// kernel's SOFTENING_SQ). Large on purpose: the star field is a
     /// mean field. With point-scale softening, stars dive through steep
@@ -1172,13 +1180,16 @@ impl Galaxy {
         let cell = size_f / res as f32;
         let theta_sq = Galaxy::THETA * Galaxy::THETA;
         // Halo centripetal term baked into the field so stars (and star
-        // births, which sample the field for orbital support) live on
-        // the same flat rotation curve as the gas.
+        // births, which sample the field for orbital support) feel the
+        // halo too - but at half the gas curve and quarter total
+        // strength (STAR_FIELD_SCALE), so star orbits run at half the
+        // gas pace.
         let p = self.scenario.params();
         let center = size_f * 0.5;
         let rc = p.halo_core_frac * self.disk_radius();
         let rc2 = rc * rc;
-        let v_flat2 = p.v_flat * p.v_flat;
+        let v_flat_star = p.v_flat * 0.5;
+        let v_flat2 = v_flat_star * v_flat_star;
         for fy in 0..res {
             for fx in 0..res {
                 let wx = (fx as f32 + 0.5) * cell;
@@ -1193,8 +1204,8 @@ impl Galaxy {
                 let hx = wx - center;
                 let hy = wy - center;
                 let ah = v_flat2 / (hx * hx + hy * hy + rc2);
-                self.field_ax[fy * res + fx] = ax - ah * hx;
-                self.field_ay[fy * res + fx] = ay - ah * hy;
+                self.field_ax[fy * res + fx] = (ax - ah * hx) * Galaxy::STAR_FIELD_SCALE;
+                self.field_ay[fy * res + fx] = (ay - ah * hy) * Galaxy::STAR_FIELD_SCALE;
             }
         }
     }
@@ -1977,14 +1988,29 @@ impl Galaxy {
         let mut frac_next_x = vec![0.0f32; self.n];
         let mut frac_next_y = vec![0.0f32; self.n];
 
+        // Pass 1: integrate velocity and record each cell's INTENDED
+        // move. Movement is resolved in a second pass that knows every
+        // resident's intent - resolving in one sequential sweep made a
+        // full destination block its mover even when the resident was
+        // itself leaving this tick, which froze every dense cloud solid
+        // for motion toward higher indices (+x/+y). Bulk cloud motion -
+        // a convoy of full cells advancing together - needs the intent
+        // pass.
+        let mut want_vx = vec![0.0f32; self.n];
+        let mut want_vy = vec![0.0f32; self.n];
+        let mut want_fx = vec![0.0f32; self.n];
+        let mut want_fy = vec![0.0f32; self.n];
+        let mut want_ni = vec![0u32; self.n];
+        let mut want_sx = vec![0i8; self.n];
+        let mut want_sy = vec![0i8; self.n];
         for i in 0..self.n {
-            let m = self.mass[i];
-            if m == 0 {
+            if self.mass[i] == 0 {
                 // Empty cells: clear so stale values don't propagate later.
                 self.vel_x[i] = 0.0;
                 self.vel_y[i] = 0.0;
                 self.frac_x[i] = 0.0;
                 self.frac_y[i] = 0.0;
+                want_ni[i] = i as u32;
                 continue;
             }
 
@@ -2053,32 +2079,81 @@ impl Galaxy {
 
             let new_col = wrap(new_col, size) as u16;
             let new_row = wrap(new_row, size) as u16;
-            let mut ni = self.col_row_to_index(new_col, new_row) as usize;
+            want_vx[i] = vx;
+            want_vy[i] = vy;
+            want_fx[i] = fx;
+            want_fy[i] = fy;
+            want_ni[i] = self.col_row_to_index(new_col, new_row) as u32;
+            want_sx[i] = step_dx as i8;
+            want_sy[i] = step_dy as i8;
+        }
 
-            // Incompressibility: a full destination rejects the transfer.
-            // The mover parks at its cell edge with velocity intact (minus
-            // friction) and flows through when a gap opens. Occupancy =
-            // this tick's arrivals so far, plus the resident mass when the
-            // resident (ni > i, row-major order) has not yet been
-            // re-deposited into scratch. Slightly strict when the resident
-            // is about to vacate - acceptable for a visual sim.
-            let dest_occ = if ni > i {
-                self.scratch_mass[ni].saturating_add(self.mass[ni] as u32)
-            } else {
-                self.scratch_mass[ni]
-            };
-            if ni != i
-                && dest_occ > 0
-                && dest_occ.saturating_add(m as u32) > Galaxy::CELL_MASS_CAP
-            {
+        // Pass 2: resolve admissions iteratively, like a traffic wave.
+        // A mover is admitted only when its destination has room
+        // counting residents CONFIRMED to be leaving - trusting mere
+        // intent is over-permissive in a jam (everyone intends to move,
+        // nobody actually can) and lets whole clouds collapse onto
+        // their leading edge into one mega-blob. Iterating unwinds a
+        // convoy from its free end: the front car pulls away, the next
+        // fills the gap. Incompressibility semantics are unchanged - a
+        // genuinely full destination still parks the mover at its cell
+        // edge with velocity intact.
+        const RESOLVE_ITERATIONS: usize = 3;
+        // 0 = pending, 1 = moving (admitted), 2 = staying.
+        let mut resolved = vec![0u8; self.n];
+        let mut arrivals = vec![0u32; self.n];
+        for i in 0..self.n {
+            if self.mass[i] == 0 || want_ni[i] as usize == i {
+                resolved[i] = 2;
+            }
+        }
+        for _ in 0..RESOLVE_ITERATIONS {
+            let mut progress = false;
+            for i in 0..self.n {
+                if resolved[i] != 0 {
+                    continue;
+                }
+                let m = self.mass[i] as u32;
+                let ni = want_ni[i] as usize;
+                let resident = if resolved[ni] == 1 {
+                    0
+                } else {
+                    self.mass[ni] as u32
+                };
+                let dest_occ = arrivals[ni].saturating_add(resident);
+                if dest_occ == 0 || dest_occ.saturating_add(m) <= Galaxy::CELL_MASS_CAP {
+                    resolved[i] = 1;
+                    arrivals[ni] = arrivals[ni].saturating_add(m);
+                    progress = true;
+                }
+            }
+            if !progress {
+                break;
+            }
+        }
+
+        for i in 0..self.n {
+            let m = self.mass[i];
+            if m == 0 {
+                continue;
+            }
+            let mut vx = want_vx[i];
+            let mut vy = want_vy[i];
+            let mut fx = want_fx[i];
+            let mut fy = want_fy[i];
+            let mut ni = want_ni[i] as usize;
+
+            if resolved[i] == 0 {
+                // Unresolved after iteration: blocked. Park at the cell
+                // edge, velocity intact.
                 ni = i;
                 vx *= Galaxy::BLOCKED_FRICTION;
                 vy *= Galaxy::BLOCKED_FRICTION;
-                if step_dx != 0 {
-                    fx = 0.49 * step_dx as f32;
+                if want_sx[i] != 0 {
+                    fx = 0.49 * want_sx[i] as f32;
                 }
-                if step_dy != 0 {
-                    fy = 0.49 * step_dy as f32;
+                if want_sy[i] != 0 {
+                    fy = 0.49 * want_sy[i] as f32;
                 }
             }
 
@@ -2745,10 +2820,10 @@ mod tests_golden {
     #[test]
     fn test_golden_mass_field_per_scenario() {
         for (mode, seed, expected) in [
-            (Scenario::BangRing, 7u64, 17911606875363938511u64),
-            (Scenario::BangSpiral, 7, 3563014910407052367),
-            (Scenario::IrregularSpiral, 42, 15472081426853866250),
-            (Scenario::IrregularElliptical, 42, 10258086257833143952),
+            (Scenario::BangRing, 7u64, 18067255989933722781u64),
+            (Scenario::BangSpiral, 7, 9722024055075967181),
+            (Scenario::IrregularSpiral, 42, 18393590699964816686),
+            (Scenario::IrregularElliptical, 42, 13495946556133575458),
         ] {
             let mut g = Galaxy::new(50, 0).seed_with_mode_seeded(25, mode, seed);
             for _ in 0..100 {
