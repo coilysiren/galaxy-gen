@@ -8,16 +8,182 @@ use crate::events::{Event, EventQueue};
 use crate::process;
 use crate::stars::{Stars, NO_CLUSTER};
 
-/// Initial-condition presets. See `seed_with_mode`. Every mode seeds a
-/// circular disk with orbital rotation baked in.
+/// Scenario presets: a hardcoded `start => end-shape` pair. The name is
+/// the promise - "bang => ring" seeds a central explosion whose physics
+/// parameters are tuned so the gas vaguely resembles a ring at t ~= 1000
+/// for most seeds. See `seed_with_mode` and `ScenarioParams`.
 #[wasm_bindgen]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum InitialCondition {
-    /// Uniform random mass across the disk, circular-orbit velocity.
-    Uniform = 0,
-    /// Central explosion: mass concentrated, outward radial velocity plus
-    /// the shared disk rotation.
-    Bang = 1,
+pub enum Scenario {
+    /// Central explosion; ejecta circularize near their turnaround
+    /// radius into a rotating ring with a hollow core.
+    BangRing = 0,
+    /// Central explosion with a two-lobed ejection; differential
+    /// rotation winds the lobes into spiral arms.
+    BangSpiral = 1,
+    /// Clumpy smoke-noise disk with a seeded two-arm density wave that
+    /// shear maintains as a pinwheel.
+    IrregularSpiral = 2,
+    /// Clumpy smoke-noise cloud with weak rotation and high dispersion
+    /// that relaxes into a smooth centrally concentrated spheroid.
+    IrregularElliptical = 3,
+}
+
+/// Per-scenario physics targets. The start half of a scenario picks the
+/// seeder (`bang`); the end half is carried by the rotation curve and
+/// relaxation constants that steer 1000 ticks of evolution. Values are
+/// hardcoded per variant - noise only textures a scenario, so the end
+/// shape is sturdy across seeds.
+pub struct ScenarioParams {
+    /// Bang core seeder (true) vs irregular smoke seeder (false).
+    pub bang: bool,
+    /// Flat-rotation-curve speed of the static halo potential. The halo
+    /// stands in for dark matter: gas self-gravity alone cannot hold a
+    /// flat curve, and without one the disk either freezes or falls in.
+    pub v_flat: f32,
+    /// Rotation-curve turnover radius as a fraction of the disk radius:
+    /// v_c(r) = v_flat * r / sqrt(r^2 + rc^2).
+    pub halo_core_frac: f32,
+    /// Relaxation rate of gas velocity toward the local circular flow.
+    /// This replaces plain drag: dissipation circularizes instead of
+    /// stopping, which is what keeps the big clouds rotating at t=1000.
+    pub flow_drag: f32,
+    /// Fraction of v_c the flow target carries. 1.0 holds orbits where
+    /// they are; below 1.0 the gas is chronically under-supported and
+    /// inspirals while rotating - the elliptical's concentration knob.
+    pub flow_support: f32,
+    /// Seed-time spin multiplier on the self-gravity circular velocity.
+    pub rotation_boost: f32,
+    /// Bang: ejection speed as a multiple of the speed needed to climb
+    /// from the core to `eject_target_frac` against self-gravity AND the
+    /// halo potential (the halo well is deep - naive v_esc stalls).
+    pub eject_factor: f32,
+    /// Bang: intended turnaround radius as a fraction of disk_r. The
+    /// flow drag then circularizes ejecta near it - the ring-radius knob.
+    pub eject_target_frac: f32,
+    /// Bang: core radius as a fraction of world size.
+    pub core_radius_frac: f32,
+    /// Bang: per-cell core fill as a multiple of the seed-mass knob.
+    /// Deliberately UNDER the collapse density threshold: a dense core
+    /// converts to stars before its ejecta travel anywhere, so the bang
+    /// seeds a wide thin core whose cells only reach star-forming
+    /// density where they pile up at the target radius.
+    pub core_fill_scale: f32,
+    /// Bang: m=2 azimuthal modulation depth on the ejection speed - the
+    /// two fast lobes become the spiral arms.
+    pub eject_lobes: f32,
+    /// Bang: tangential tilt of the ejection direction, radians from
+    /// radial. Direction is immune to the per-axis movement clamp, so
+    /// this curls arms even while speed is capped - the spiral's
+    /// signature. Also smears the diagonal grid artifact.
+    pub eject_swirl: f32,
+    /// Irregular: amplitude of the seeded two-arm density wave.
+    pub spiral_amp: f32,
+    /// Irregular: power-law contrast of the smoke field (clumpiness).
+    pub smoke_contrast: f32,
+    /// Irregular: exponential radial density envelope scale as a
+    /// fraction of disk_r; 0 = flat disk. The elliptical seeds its
+    /// central concentration here - real ellipticals are light-profile
+    /// concentrated, not dynamically collapsed on this timescale.
+    pub radial_scale_frac: f32,
+    /// Irregular: seeder mass multiplier - rebalances scenarios whose
+    /// envelope would otherwise seed a dim galaxy.
+    pub seed_gain: f32,
+    /// Isotropic velocity jitter at seed time (pressure support for the
+    /// elliptical - it puffs the cloud instead of letting it pancake).
+    pub vel_dispersion: f32,
+}
+
+impl Scenario {
+    pub fn params(self) -> ScenarioParams {
+        match self {
+            Scenario::BangRing => ScenarioParams {
+                bang: true,
+                v_flat: 0.9,
+                halo_core_frac: 0.3,
+                flow_drag: 0.02,
+                flow_support: 1.08,
+                rotation_boost: 0.8,
+                eject_factor: 1.45,
+                eject_target_frac: 0.62,
+                core_radius_frac: 0.24,
+                core_fill_scale: 3.0,
+                eject_lobes: 0.0,
+                eject_swirl: 0.15,
+                spiral_amp: 0.0,
+                smoke_contrast: 1.8,
+                radial_scale_frac: 0.0,
+                seed_gain: 1.0,
+                vel_dispersion: 0.0,
+            },
+            Scenario::BangSpiral => ScenarioParams {
+                bang: true,
+                v_flat: 0.9,
+                halo_core_frac: 0.2,
+                flow_drag: 0.012,
+                flow_support: 1.0,
+                rotation_boost: 1.2,
+                eject_factor: 1.3,
+                eject_target_frac: 0.55,
+                core_radius_frac: 0.2,
+                core_fill_scale: 3.0,
+                eject_lobes: 0.35,
+                eject_swirl: 0.6,
+                spiral_amp: 0.0,
+                smoke_contrast: 1.8,
+                radial_scale_frac: 0.0,
+                seed_gain: 1.0,
+                vel_dispersion: 0.0,
+            },
+            Scenario::IrregularSpiral => ScenarioParams {
+                bang: false,
+                v_flat: 0.9,
+                halo_core_frac: 0.2,
+                flow_drag: 0.008,
+                flow_support: 1.0,
+                rotation_boost: 1.1,
+                eject_factor: 0.0,
+                eject_target_frac: 0.0,
+                core_radius_frac: 0.0,
+                core_fill_scale: 0.0,
+                eject_lobes: 0.0,
+                eject_swirl: 0.0,
+                spiral_amp: Galaxy::SPIRAL_AMP,
+                smoke_contrast: 1.8,
+                radial_scale_frac: 0.0,
+                seed_gain: 1.0,
+                vel_dispersion: 0.0,
+            },
+            Scenario::IrregularElliptical => ScenarioParams {
+                bang: false,
+                v_flat: 0.5,
+                halo_core_frac: 0.5,
+                flow_drag: 0.015,
+                flow_support: 0.8,
+                rotation_boost: 0.7,
+                eject_factor: 0.0,
+                eject_target_frac: 0.0,
+                core_radius_frac: 0.0,
+                core_fill_scale: 0.0,
+                eject_lobes: 0.0,
+                eject_swirl: 0.0,
+                spiral_amp: 0.0,
+                smoke_contrast: 1.0,
+                radial_scale_frac: 0.35,
+                seed_gain: 2.5,
+                vel_dispersion: 0.35,
+            },
+        }
+    }
+
+    pub fn from_u32(v: u32) -> Scenario {
+        match v {
+            0 => Scenario::BangRing,
+            1 => Scenario::BangSpiral,
+            3 => Scenario::IrregularElliptical,
+            _ => Scenario::IrregularSpiral,
+        }
+    }
 }
 
 #[wasm_bindgen]
@@ -78,6 +244,9 @@ pub struct Galaxy {
     /// event id that last boosted each cell, 0 = organic. Lets an induced
     /// CloudCollapse carry its true parent.
     heat_parent: Vec<u64>,
+    /// Active scenario - fixes the halo rotation curve and flow-drag
+    /// constants every tick, not just at seed time.
+    scenario: Scenario,
 }
 
 impl Galaxy {
@@ -85,7 +254,6 @@ impl Galaxy {
     pub const GRAVATIONAL_CONSTANT: f32 = 5.0e-4;
     const SOFTENING_SQ: f32 = 1.0;
     const MAX_SUBGRID_STEP: f32 = 0.5;
-    const DRAG_COEFF: f32 = 0.001;
     /// Integer r² at or below which gravity flips repulsive - a crude
     /// contact-pressure proxy. Without it every same-cell contact is a
     /// perfectly inelastic merge and any bound system ratchets down to a
@@ -101,8 +269,8 @@ impl Galaxy {
     /// flip: in a co-rotating region a blocked cell is in traffic, not a
     /// head-on hit, and reflecting it thermalizes the disk's rotation
     /// within a few hundred ticks. 1.0 - a jammed core is blocked nearly
-    /// every tick, so any per-block bleed spins it down fast. DRAG_COEFF
-    /// is the energy sink instead.
+    /// every tick, so any per-block bleed spins it down fast. The
+    /// per-scenario flow relaxation is the energy sink instead.
     const BLOCKED_FRICTION: f32 = 1.0;
     /// Spring stiffness of the circular world boundary for GAS. Beyond
     /// the disk radius (size/2 - 1) cells feel a gentle inward pull
@@ -170,14 +338,12 @@ impl Galaxy {
     /// billows saturate, THEN shape with the power law.
     const SMOKE_STRETCH: f32 = 3.2;
     const SMOKE_CENTER: f32 = 0.44;
-    const SMOKE_CONTRAST: f32 = 1.8;
     const SMOKE_GAIN: f32 = 2.6;
     /// Radial fraction where the seed density starts feathering toward
     /// zero at the disk rim - no cookie-cutter edge on the clouds.
     const EDGE_FEATHER_START: f32 = 0.55;
     const SPIRAL_AMP: f32 = 0.55;
     const SPIRAL_PITCH: f32 = 4.0;
-    const ROTATION_BOOST: f32 = 1.1;
 
     // Cloud-collapse tuning. A cell must stay at or above the density
     // fraction of CELL_MASS_CAP and below the radiation resist level for
@@ -311,29 +477,30 @@ impl Galaxy {
             next_cluster_id: 0,
             next_star_id: 1,
             heat_parent: vec![0; n],
+            scenario: Scenario::IrregularSpiral,
         }
     }
 
-    /// Uniform-mode seed. Preserved for backwards-compatibility with the
-    /// JS `Frontend.seed(mass)` call.
+    /// Default-scenario seed. Preserved for backwards-compatibility with
+    /// the JS `Frontend.seed(mass)` call.
     pub fn seed(&self, additional: u16) -> Galaxy {
-        self.seed_with_mode(additional, InitialCondition::Uniform)
+        self.seed_with_mode(additional, Scenario::IrregularSpiral)
     }
 
-    /// Seed with a named initial condition. Tuning constants assume
-    /// default UI params (size=250, seed_mass=25).
-    pub fn seed_with_mode(&self, additional: u16, mode: InitialCondition) -> Galaxy {
+    /// Seed with a named scenario. Tuning constants assume default UI
+    /// params (size=250, seed_mass=25).
+    pub fn seed_with_mode(&self, additional: u16, mode: Scenario) -> Galaxy {
         let seed: u64 = rand::rng().random();
         self.seed_with_mode_seeded(additional, mode, seed)
     }
 
     /// Reproducible [`seed_with_mode`]: same `(additional, mode, seed)`
     /// gives byte-identical state, enabling `?seed=...` URL sharing for
-    /// every initial condition, not just Uniform.
+    /// every scenario.
     pub fn seed_with_mode_seeded(
         &self,
         additional: u16,
-        mode: InitialCondition,
+        mode: Scenario,
         seed: u64,
     ) -> Galaxy {
         let mut rng = StdRng::seed_from_u64(seed);
@@ -345,10 +512,11 @@ impl Galaxy {
     fn seed_mode_kernel(
         &self,
         additional: u16,
-        mode: InitialCondition,
+        mode: Scenario,
         master_seed: u64,
         rng: &mut dyn rand::Rng,
     ) -> Galaxy {
+        let p = mode.params();
         let mut mass = self.mass.clone();
         let mut vel_x = vec![0.0f32; self.n];
         let mut vel_y = vec![0.0f32; self.n];
@@ -362,8 +530,8 @@ impl Galaxy {
         let disk_r = self.disk_radius();
         let disk_r2 = disk_r * disk_r;
 
-        match mode {
-            InitialCondition::Uniform => {
+        match p.bang {
+            false => {
                 if additional > 0 {
                     // Smoke field: three fBm stacks (density + two warp
                     // components), each four octaves of smoothstep value
@@ -429,6 +597,12 @@ impl Galaxy {
                         } else {
                             1.0
                         };
+                        // Exponential radial envelope (0 = flat disk).
+                        let envelope = if p.radial_scale_frac > 0.0 {
+                            (-r_frac / p.radial_scale_frac).exp()
+                        } else {
+                            1.0
+                        };
                         let u = (x / size + 0.5).clamp(0.0, 1.0);
                         let v = (y / size + 0.5).clamp(0.0, 1.0);
                         // Domain warp: sample density through a noise
@@ -443,34 +617,36 @@ impl Galaxy {
                             + Galaxy::SMOKE_CENTER)
                             .clamp(0.0, 1.0);
                         let smoke =
-                            stretched.powf(Galaxy::SMOKE_CONTRAST) * Galaxy::SMOKE_GAIN;
+                            stretched.powf(p.smoke_contrast) * Galaxy::SMOKE_GAIN;
                         let r = (x * x + y * y).sqrt().max(1.0);
                         let theta = y.atan2(x);
                         // Two-arm density wave: cos(2 theta - pitch ln r).
                         let arm = 1.0
-                            + Galaxy::SPIRAL_AMP
+                            + p.spiral_amp
                                 * (2.0 * theta - Galaxy::SPIRAL_PITCH * r.ln()
                                     + spiral_phase)
                                     .cos();
                         let m = additional as f32 * 0.5
+                            * p.seed_gain
                             * smoke
                             * arm
                             * edge
+                            * envelope
                             * rng.random_range(0.85f32..1.15);
                         mass[i] = mass[i]
                             .saturating_add(m.round().clamp(0.0, u16::MAX as f32) as u16);
                     }
                 }
             }
-            InitialCondition::Bang => {
+            true => {
                 for m in mass.iter_mut() {
                     *m = 0;
                 }
-                let core_radius = (size * 0.15).max(2.0);
+                let core_radius = (size * p.core_radius_frac).max(2.0);
                 let core_r2 = core_radius * core_radius;
                 // `additional` is the intensity knob (fixed SEED_MASS
                 // constant on the JS side; the URL knob is retired).
-                let core_fill = additional.saturating_mul(6).max(150);
+                let core_fill = ((additional as f32 * p.core_fill_scale) as u16).max(40);
                 for i in 0..self.n {
                     let x = self.xs_i[i] as f32 - cx;
                     let y = self.ys_i[i] as f32 - cy;
@@ -486,16 +662,29 @@ impl Galaxy {
                     } else {
                         1.0
                     };
-                    let fill = core_fill.saturating_add(rng.random_range(0..=core_fill / 2));
+                    let fill = core_fill.saturating_add(rng.random_range(0..=core_fill / 4));
                     mass[i] = (fill as f32 * edge) as u16;
                 }
                 // Ejection speed keyed to the seeded core's own escape
                 // velocity - a fixed speed stops scaling once core mass
                 // grows with size² and the "explosion" jams into a ball.
                 let m_core: f64 = mass.iter().map(|&m| m as f64).sum();
-                let v_esc = (2.0 * Galaxy::GRAVATIONAL_CONSTANT * m_core as f32 / core_radius)
-                    .sqrt();
-                let v_eject = 1.15 * v_esc;
+                // Climb energy to the target radius: self-gravity escape
+                // plus the halo potential difference 2 dPhi = v_flat^2 *
+                // ln((rt^2 + rc^2) / rc^2). Without the halo term the
+                // ejecta stall far short of the intended ring.
+                let v_esc_sq = 2.0 * Galaxy::GRAVATIONAL_CONSTANT * m_core as f32 / core_radius;
+                let rc_b = p.halo_core_frac * disk_r;
+                let rt = p.eject_target_frac * disk_r;
+                let halo_climb_sq =
+                    p.v_flat * p.v_flat * ((rt * rt + rc_b * rc_b) / (rc_b * rc_b)).ln();
+                let v_eject = p.eject_factor * (v_esc_sq + halo_climb_sq).sqrt();
+                // Two-lobed ejection (bang => spiral): the fast lobes
+                // race ahead and differential rotation winds them into
+                // arms. Zero depth gives the symmetric shell the ring
+                // scenario circularizes.
+                let lobe_phase = rng.random_range(0.0f32..std::f32::consts::TAU);
+                let (swirl_cos, swirl_sin) = (p.eject_swirl.cos(), p.eject_swirl.sin());
                 for i in 0..self.n {
                     if mass[i] == 0 {
                         continue;
@@ -503,20 +692,28 @@ impl Galaxy {
                     let x = self.xs_i[i] as f32 - cx;
                     let y = self.ys_i[i] as f32 - cy;
                     let r = (x * x + y * y).sqrt().max(1e-3);
-                    // Radial outward unit vector; slight jitter so the
-                    // shell doesn't stay perfectly symmetric.
-                    let jitter = rng.random_range(-0.1f32..=0.1f32);
-                    vel_x[i] = (x / r) * (v_eject * (1.0 + jitter));
-                    vel_y[i] = (y / r) * (v_eject * (1.0 + jitter));
+                    let theta = y.atan2(x);
+                    let lobes = 1.0 + p.eject_lobes * (2.0 * theta + lobe_phase).cos();
+                    // Ejection direction: radial tilted prograde by the
+                    // swirl angle. Generous speed jitter breaks up the
+                    // diagonal-travel grid artifact.
+                    let jitter = rng.random_range(-0.2f32..=0.2f32);
+                    let speed = v_eject * lobes * (1.0 + jitter);
+                    let (rx, ry) = (x / r, y / r);
+                    let (tx, ty) = (-y / r, x / r);
+                    vel_x[i] = (rx * swirl_cos + tx * swirl_sin) * speed;
+                    vel_y[i] = (ry * swirl_cos + ty * swirl_sin) * speed;
                 }
             }
         }
 
-        // Every mode gets orbital support on top of its mode-specific
-        // velocities: v += sqrt(G·M_enc/r) tangentially, with M_enc
-        // prefix-summed over cells sorted by radius. A hand-tuned linear
-        // ramp under-spins the disk and it free-falls to the center
-        // within a few hundred ticks.
+        // Every scenario gets orbital support on top of its seeder
+        // velocities: v = boost * sqrt(G·M_enc/r + v_c(r)^2) tangentially,
+        // with M_enc prefix-summed over cells sorted by radius and v_c
+        // the halo rotation curve - seeding at the combined equilibrium
+        // speed, not just self-gravity's. A hand-tuned linear ramp
+        // under-spins the disk and it free-falls to the center within a
+        // few hundred ticks.
         let mut order: Vec<usize> = (0..self.n).collect();
         let r2_of = |i: usize, xs: &[i16], ys: &[i16]| {
             let x = xs[i] as f32 - cx;
@@ -526,6 +723,8 @@ impl Galaxy {
         order.sort_by(|&a, &b| {
             r2_of(a, &self.xs_i, &self.ys_i).total_cmp(&r2_of(b, &self.xs_i, &self.ys_i))
         });
+        let rc = p.halo_core_frac * disk_r;
+        let rc2 = rc * rc;
         let mut m_enc: f64 = 0.0;
         for &i in &order {
             m_enc += mass[i] as f64;
@@ -534,14 +733,28 @@ impl Galaxy {
             }
             let x = self.xs_i[i] as f32 - cx;
             let y = self.ys_i[i] as f32 - cy;
-            let r = (x * x + y * y).sqrt();
+            let r2 = x * x + y * y;
+            let r = r2.sqrt();
             if r < 1e-3 {
                 continue;
             }
-            let v = (Galaxy::GRAVATIONAL_CONSTANT * m_enc as f32 / r).sqrt()
-                * Galaxy::ROTATION_BOOST;
+            let vc2_halo = p.v_flat * p.v_flat * r2 / (r2 + rc2);
+            let v = (Galaxy::GRAVATIONAL_CONSTANT * m_enc as f32 / r + vc2_halo).sqrt()
+                * p.rotation_boost;
             vel_x[i] += -y / r * v;
             vel_y[i] += x / r * v;
+        }
+
+        // Isotropic velocity jitter - pressure support that keeps the
+        // elliptical scenario puffed instead of pancaked.
+        if p.vel_dispersion > 0.0 {
+            for i in 0..self.n {
+                if mass[i] == 0 {
+                    continue;
+                }
+                vel_x[i] += rng.random_range(-p.vel_dispersion..=p.vel_dispersion);
+                vel_y[i] += rng.random_range(-p.vel_dispersion..=p.vel_dispersion);
+            }
         }
 
         // Central black hole anchors the nucleus, scaled to seeded mass.
@@ -569,13 +782,14 @@ impl Galaxy {
         g.next_cluster_id = 0;
         g.next_star_id = 1;
         g.heat_parent = vec![0; self.n];
+        g.scenario = mode;
         g
     }
 
     /// Reproducible [`seed`] variant. Same `(additional, seed)` gives
     /// byte-identical state, enabling `?seed=...` URL sharing.
     pub fn seed_with(&self, additional: u16, seed: u64) -> Galaxy {
-        self.seed_with_mode_seeded(additional, InitialCondition::Uniform, seed)
+        self.seed_with_mode_seeded(additional, Scenario::IrregularSpiral, seed)
     }
 
     /// One simulation step: run every due process in registry order, then
@@ -755,15 +969,15 @@ impl Galaxy {
         self.radiation.copy_from_slice(&data[res * 2..]);
     }
 
-    /// Versioned scheduler/event/RNG state: [version=4, tick lo/hi, seed
+    /// Versioned scheduler/event/RNG state: [version=5, tick lo/hi, seed
     /// lo/hi, bh_mass bits, bh_initial bits, radiated f64 bits lo/hi,
-    /// dissipated lo/hi, next_cluster, next_star, n_cells, heat bytes
-    /// packed 4-per-u32, heat_parent lo/hi per cell, then the
+    /// dissipated lo/hi, next_cluster, next_star, scenario, n_cells,
+    /// heat bytes packed 4-per-u32, heat_parent lo/hi per cell, then the
     /// event-queue flat form]. Opaque to JS.
     pub fn sim_state_meta(&self) -> Vec<u32> {
         let heat_words = self.n.div_ceil(4);
-        let mut out = Vec::with_capacity(14 + heat_words + self.n * 2 + 6);
-        out.push(4u32);
+        let mut out = Vec::with_capacity(15 + heat_words + self.n * 2 + 6);
+        out.push(5u32);
         out.push(self.tick_count as u32);
         out.push((self.tick_count >> 32) as u32);
         out.push(self.master_seed as u32);
@@ -777,6 +991,7 @@ impl Galaxy {
         out.push((self.dissipated_total >> 32) as u32);
         out.push(self.next_cluster_id);
         out.push(self.next_star_id);
+        out.push(self.scenario as u32);
         out.push(self.n as u32);
         for chunk in self.collapse_heat.chunks(4) {
             let mut w = 0u32;
@@ -794,7 +1009,7 @@ impl Galaxy {
     }
 
     pub fn restore_sim_state_meta(&mut self, data: &[u32]) {
-        if data.len() < 14 || data[0] != 4 {
+        if data.len() < 15 || data[0] != 5 {
             return;
         }
         self.tick_count = data[1] as u64 | ((data[2] as u64) << 32);
@@ -806,18 +1021,19 @@ impl Galaxy {
         self.dissipated_total = data[9] as u64 | ((data[10] as u64) << 32);
         self.next_cluster_id = data[11];
         self.next_star_id = data[12];
-        let n_cells = data[13] as usize;
+        self.scenario = Scenario::from_u32(data[13]);
+        let n_cells = data[14] as usize;
         if n_cells != self.n {
             return;
         }
         let heat_words = n_cells.div_ceil(4);
-        let parents_at = 14 + heat_words;
+        let parents_at = 15 + heat_words;
         let events_at = parents_at + n_cells * 2;
         if data.len() < events_at {
             return;
         }
         for i in 0..n_cells {
-            let w = data[14 + i / 4];
+            let w = data[15 + i / 4];
             self.collapse_heat[i] = ((w >> (8 * (i % 4))) & 0xFF) as u8;
         }
         for i in 0..n_cells {
@@ -931,6 +1147,14 @@ impl Galaxy {
         let res = Galaxy::FIELD_RES;
         let cell = size_f / res as f32;
         let theta_sq = Galaxy::THETA * Galaxy::THETA;
+        // Halo centripetal term baked into the field so stars (and star
+        // births, which sample the field for orbital support) live on
+        // the same flat rotation curve as the gas.
+        let p = self.scenario.params();
+        let center = size_f * 0.5;
+        let rc = p.halo_core_frac * self.disk_radius();
+        let rc2 = rc * rc;
+        let v_flat2 = p.v_flat * p.v_flat;
         for fy in 0..res {
             for fx in 0..res {
                 let wx = (fx as f32 + 0.5) * cell;
@@ -942,8 +1166,11 @@ impl Galaxy {
                     Galaxy::FIELD_SOFTENING_SQ,
                     Galaxy::GRAVATIONAL_CONSTANT,
                 );
-                self.field_ax[fy * res + fx] = ax;
-                self.field_ay[fy * res + fx] = ay;
+                let hx = wx - center;
+                let hy = wy - center;
+                let ah = v_flat2 / (hx * hx + hy * hy + rc2);
+                self.field_ax[fy * res + fx] = ax - ah * hx;
+                self.field_ay[fy * res + fx] = ay - ah * hy;
             }
         }
     }
@@ -1674,26 +1901,43 @@ impl Galaxy {
     fn apply_acceleration(&mut self, time: f32) {
         let size = self.size as i32;
         let max_step = Galaxy::MAX_SUBGRID_STEP;
-        // dt-scaled drag; one exp per tick, not per cell.
-        let drag = (-Galaxy::DRAG_COEFF * time).exp();
-        // Circular-boundary spring (see CONFINE_STIFFNESS). Applied here,
-        // not in the force kernels, so the CPU, Barnes-Hut, and WebGPU
-        // paths all get it for free.
+        let p = self.scenario.params();
+        // Flow relaxation replaces plain drag: velocity decays toward
+        // the local circular flow u(r) = v_c(r) t_hat, not toward rest.
+        // Same dt-scaled exponential, but the attractor state is a
+        // rotating disk - stillness is no longer where the sim settles.
+        let flow_decay = (-p.flow_drag * time).exp();
+        // Halo rotation curve v_c(r) = v_flat r / sqrt(r^2 + rc^2).
         let center = self.size as f32 * 0.5;
         let disk_r = self.disk_radius();
+        let rc = p.halo_core_frac * disk_r;
+        let rc2 = rc * rc;
+        let v_flat2 = p.v_flat * p.v_flat;
+        // Halo centripetal pull plus the circular-boundary spring (see
+        // CONFINE_STIFFNESS). Applied here, not in the force kernels, so
+        // the CPU, Barnes-Hut, and WebGPU paths all get them for free.
+        // The halo makes the circular flow an actual force equilibrium -
+        // relaxation alone would re-aim velocities it cannot sustain.
         for i in 0..self.n {
             if self.mass[i] == 0 {
                 continue;
             }
             let x = self.xs_i[i] as f32 + self.frac_x[i] - center;
             let y = self.ys_i[i] as f32 + self.frac_y[i] - center;
-            let r = (x * x + y * y).sqrt();
-            if r <= disk_r || r < 1e-3 {
+            let r2 = x * x + y * y;
+            let r = r2.sqrt();
+            if r < 1e-3 {
                 continue;
             }
-            let k = Galaxy::CONFINE_STIFFNESS * (r - disk_r) / r;
-            self.acc_x[i] -= k * x;
-            self.acc_y[i] -= k * y;
+            // a = v_c^2 / r inward = v_flat^2 / (r^2 + rc^2) * r_vec.
+            let ah = v_flat2 / (r2 + rc2);
+            self.acc_x[i] -= ah * x;
+            self.acc_y[i] -= ah * y;
+            if r > disk_r {
+                let k = Galaxy::CONFINE_STIFFNESS * (r - disk_r) / r;
+                self.acc_x[i] -= k * x;
+                self.acc_y[i] -= k * y;
+            }
         }
 
         // Zero scratch; momentum accumulators are local per-tick.
@@ -1720,11 +1964,21 @@ impl Galaxy {
             let mut vx = self.vel_x[i] + self.acc_x[i] * time;
             let mut vy = self.vel_y[i] + self.acc_y[i] * time;
 
-            // Drag: grid-quantized sim overheats at large dt without it.
-            // Must stay weak enough that rotation disks keep their angular
-            // momentum for minutes of wall-clock, not seconds.
-            vx *= drag;
-            vy *= drag;
+            // Relax toward the local circular flow. Doubles as the
+            // energy sink the grid-quantized sim overheats without -
+            // dissipation circularizes orbits instead of stopping them.
+            let x = self.xs_i[i] as f32 + self.frac_x[i] - center;
+            let y = self.ys_i[i] as f32 + self.frac_y[i] - center;
+            let r2 = x * x + y * y;
+            let r = r2.sqrt();
+            let (ux, uy) = if r > 1e-3 {
+                let vc = p.flow_support * p.v_flat * r / (r2 + rc2).sqrt();
+                (-y / r * vc, x / r * vc)
+            } else {
+                (0.0, 0.0)
+            };
+            vx = ux + (vx - ux) * flow_decay;
+            vy = uy + (vy - uy) * flow_decay;
 
             // Sub-grid position update
             let mut fx = self.frac_x[i] + (vx * time).clamp(-max_step, max_step);
@@ -2145,8 +2399,8 @@ mod tests_intial_generation {
 
     #[test]
     fn test_seed_with_mode_seeded_is_reproducible_for_all_modes() {
-        // Invariant for `?seed=...` URL sharing across initial conditions.
-        for mode in [InitialCondition::Uniform, InitialCondition::Bang] {
+        // Invariant for `?seed=...` URL sharing across scenarios.
+        for mode in [Scenario::IrregularSpiral, Scenario::BangSpiral] {
             let a = Galaxy::new(20, 0).seed_with_mode_seeded(25, mode, 7);
             let b = Galaxy::new(20, 0).seed_with_mode_seeded(25, mode, 7);
             assert_eq!(a.mass, b.mass, "mass must be reproducible for {mode:?}");
@@ -2161,7 +2415,7 @@ mod tests_intial_generation {
     fn test_seed_with_mode_uniform_matches_default_seed() {
         // Uniform mode should match the plain `seed()` behaviour (random mass
         // fill, zero velocity).
-        let g = Galaxy::new(10, 0).seed_with_mode(0, InitialCondition::Uniform);
+        let g = Galaxy::new(10, 0).seed_with_mode(0, Scenario::IrregularSpiral);
         assert!(g.vel_x.iter().all(|&v| v == 0.0));
         assert!(g.vel_y.iter().all(|&v| v == 0.0));
     }
@@ -2169,7 +2423,7 @@ mod tests_intial_generation {
     #[test]
     fn test_seed_uniform_produces_tangential_velocity() {
         // Orbital rotation is baked into every mode, uniform included.
-        let g = Galaxy::new(20, 0).seed_with_mode(5, InitialCondition::Uniform);
+        let g = Galaxy::new(20, 0).seed_with_mode(5, Scenario::IrregularSpiral);
         // At least some cells should have nonzero velocity.
         let nonzero_v = g
             .vel_x
@@ -2216,7 +2470,7 @@ mod tests_intial_generation {
 
     #[test]
     fn test_seed_bang_produces_outward_radial_velocity() {
-        let g = Galaxy::new(30, 0).seed_with_mode(1000, InitialCondition::Bang);
+        let g = Galaxy::new(30, 0).seed_with_mode(1000, Scenario::BangSpiral);
         let size = g.size as f32;
         let cx = size * 0.5;
         let cy = size * 0.5;
@@ -2253,7 +2507,7 @@ mod tests_intial_generation {
     fn test_seed_uniform_has_positive_total_angular_momentum() {
         // Net L_z = Σ m_i (x_i v_{y,i} - y_i v_{x,i}) around the grid center
         // must be strongly positive — every mode carries disk rotation.
-        let g = Galaxy::new(30, 0).seed_with_mode(10, InitialCondition::Uniform);
+        let g = Galaxy::new(30, 0).seed_with_mode(10, Scenario::IrregularSpiral);
         let size = g.size as f32;
         let cx = size * 0.5;
         let cy = size * 0.5;
@@ -2369,9 +2623,14 @@ mod tests_intial_generation {
 
     #[test]
     fn test_tick_with_accel_matches_tick_when_forces_are_zero() {
-        // With zero external forces AND zero existing velocity, nothing
-        // moves: mass field must be identical after one tick.
-        let g = Galaxy::new(8, 2).seed(42);
+        // With zero external forces and cells at rest, one tick cannot
+        // transfer mass: the flow relaxation spins cells up toward the
+        // circular flow, but a single tick's drift is far below the
+        // half-cell transfer threshold. (A seeded galaxy no longer
+        // works here - seeding bakes in orbital velocity by design.)
+        let mut g = Galaxy::new(8, 2);
+        g.mass[2 * 8 + 3] = 30;
+        g.mass[5 * 8 + 5] = 40;
         let n = g.n;
         let zeros = vec![0.0f32; n];
 
@@ -2386,29 +2645,41 @@ mod tests_dynamics {
     use super::*;
 
     #[test]
-    fn test_gas_drag_is_dt_scaled_not_flat() {
-        // Direct mechanism guard for the historical flat-0.995 damping
-        // bug, which halved velocities every second of wall clock and
-        // collapsed every initial condition into one blob. A lone moving
-        // cell must decay by exp(-DRAG_COEFF dt) per tick, nothing more.
-        // (The old guard integrated a whole disk and measured global
-        // L_z, which is wrap-noisy and flapped on every seeding change.)
+    fn test_gas_dissipation_relaxes_toward_circular_flow_not_rest() {
+        // Mechanism guard for the rotation reflow: dissipation must pull
+        // velocity toward the local circular flow u(r), NOT toward zero
+        // (the old plain drag froze every galaxy into a static blob by
+        // t=1000). A lone cell at rest spins UP toward prograde
+        // tangential motion, and the gap to the flow closes by exactly
+        // exp(-flow_drag dt) per tick after the halo kick.
         let mut g = Galaxy::new(20, 0);
+        // Cell left of center: x = -5, y = 0 relative to center (10,10).
         let idx = 10 * 20 + 5;
         g.mass[idx] = 50;
-        g.vel_x[idx] = 1.0;
-        let g = g.tick(0.5);
-        let moved = (0..g.n).find(|&i| g.mass[i] == 50).expect("cell must survive");
-        let expected = (-Galaxy::DRAG_COEFF * 0.5f32).exp();
+        let p = g.scenario.params();
+        let disk_r = g.disk_radius();
+        let rc = p.halo_core_frac * disk_r;
+        let r = 5.0f32;
+        // Prograde tangential direction at (-5, 0) is (0, -1) for the
+        // seeded (-y, x) rotation sense... (-y, x)/r with y=0, x=-5 is
+        // (0, -1) scaled - i.e. negative vy.
+        let vc = p.flow_support * p.v_flat * r / (r * r + rc * rc).sqrt();
+        let next = g.tick(0.5);
+        let moved = (0..next.n).find(|&i| next.mass[i] == 50).expect("cell survives");
+        // After one tick from rest: v = a_halo dt + (v0 + a dt - u) part;
+        // radially the halo pulls +x (toward center), tangentially the
+        // relaxation closes the gap from 0 toward -vc by (1 - decay).
+        let decay = (-p.flow_drag * 0.5f32).exp();
+        let expected_vt = -vc * (1.0 - decay);
         assert!(
-            (g.vel_x[moved] - expected).abs() < 1e-4,
-            "drag must be exp(-DRAG dt): expected {expected}, got {}",
-            g.vel_x[moved]
+            (next.vel_y[moved] - expected_vt).abs() < 1e-3,
+            "tangential relaxation must close the gap by 1-exp(-flow_drag dt): expected {expected_vt}, got {}",
+            next.vel_y[moved]
         );
         assert!(
-            g.vel_x[moved] > 0.999,
-            "velocity decayed like the old flat damping: {}",
-            g.vel_x[moved]
+            next.vel_y[moved] < 0.0,
+            "a cell at rest must spin up prograde, got vy={}",
+            next.vel_y[moved]
         );
     }
 }
@@ -2426,32 +2697,34 @@ mod tests_golden {
         h
     }
 
-    /// Golden values pin the mass field after 100 ticks (uniform seed 42
-    /// / bang seed 7, size 50, dt 0.5). Last recaptured for the
-    /// region-noise + spiral-density-wave seeding and the rotation
-    /// boost (both modes share the boosted orbital step). If another
-    /// deliberate change lands, recapture and say so in the commit.
+    /// Golden values pin the mass field after 100 ticks per scenario
+    /// (size 50, dt 0.5). Last recaptured for the scenario reflow: halo
+    /// rotation curve, flow-relaxation drag, and per-scenario seeders.
+    /// If another deliberate change lands, recapture and say so in the
+    /// commit.
     #[test]
-    fn test_golden_uniform_mass_field() {
-        let mut g = Galaxy::new(50, 0).seed_with_mode_seeded(25, InitialCondition::Uniform, 42);
-        for _ in 0..100 {
-            g = g.tick(0.5);
+    fn test_golden_mass_field_per_scenario() {
+        for (mode, seed, expected) in [
+            (Scenario::BangRing, 7u64, 8604008155349799133u64),
+            (Scenario::BangSpiral, 7, 2281957937334672197),
+            (Scenario::IrregularSpiral, 42, 6765464870991323095),
+            (Scenario::IrregularElliptical, 42, 15098862123826047889),
+        ] {
+            let mut g = Galaxy::new(50, 0).seed_with_mode_seeded(25, mode, seed);
+            for _ in 0..100 {
+                g = g.tick(0.5);
+            }
+            assert_eq!(
+                mass_hash(&g),
+                expected,
+                "golden mismatch for {mode:?} (seed {seed})"
+            );
         }
-        assert_eq!(mass_hash(&g), 14237443138247266340);
-    }
-
-    #[test]
-    fn test_golden_bang_mass_field() {
-        let mut g = Galaxy::new(50, 0).seed_with_mode_seeded(25, InitialCondition::Bang, 7);
-        for _ in 0..100 {
-            g = g.tick(0.5);
-        }
-        assert_eq!(mass_hash(&g), 11364040548631278365);
     }
 
     #[test]
     fn test_rng_streams_are_reproducible_and_independent() {
-        let g = Galaxy::new(10, 0).seed_with_mode_seeded(5, InitialCondition::Uniform, 99);
+        let g = Galaxy::new(10, 0).seed_with_mode_seeded(5, Scenario::IrregularSpiral, 99);
         let mut a1 = g.rng_stream(1);
         let mut a2 = g.rng_stream(1);
         let mut b = g.rng_stream(2);
@@ -2473,7 +2746,7 @@ mod tests_stars_dynamics {
 
     #[test]
     fn test_star_at_rest_falls_toward_the_disk_center() {
-        let mut g = Galaxy::new(50, 0).seed_with_mode_seeded(25, InitialCondition::Uniform, 42);
+        let mut g = Galaxy::new(50, 0).seed_with_mode_seeded(25, Scenario::IrregularSpiral, 42);
         g.spawn_star(35.0, 25.0, 0.0, 0.0, 10.0);
         let r0 = (g.stars.pos_x[0] - 25.0).hypot(g.stars.pos_y[0] - 25.0);
         for _ in 0..40 {
@@ -2488,7 +2761,7 @@ mod tests_stars_dynamics {
 
     #[test]
     fn test_ejected_star_stays_inside_hard_clip_and_rejoins_disk() {
-        let mut g = Galaxy::new(50, 0).seed_with_mode_seeded(25, InitialCondition::Uniform, 42);
+        let mut g = Galaxy::new(50, 0).seed_with_mode_seeded(25, Scenario::IrregularSpiral, 42);
         g.spawn_star(25.0, 25.0, 6.0, 0.0, 10.0);
         let soft = 24.0f32;
         let hard = soft * Galaxy::HARD_CLIP_FACTOR;
@@ -2524,7 +2797,7 @@ mod tests_stars_dynamics {
 
     #[test]
     fn test_star_render_data_shape() {
-        let mut g = Galaxy::new(20, 0).seed_with_mode_seeded(5, InitialCondition::Uniform, 1);
+        let mut g = Galaxy::new(20, 0).seed_with_mode_seeded(5, Scenario::IrregularSpiral, 1);
         g.spawn_star(10.0, 10.0, 0.1, 0.0, 42.0);
         g.spawn_star(5.0, 5.0, 0.0, 0.1, 7.0);
         assert_eq!(g.star_count(), 2);
@@ -2538,7 +2811,7 @@ mod tests_stars_dynamics {
     fn test_sim_state_round_trip_preserves_star_evolution() {
         // The worker boundary contract: exporting gas + star + meta state
         // and rehydrating must continue the exact same trajectory.
-        let mut a = Galaxy::new(30, 0).seed_with_mode_seeded(10, InitialCondition::Uniform, 9);
+        let mut a = Galaxy::new(30, 0).seed_with_mode_seeded(10, Scenario::IrregularSpiral, 9);
         a.spawn_star(20.0, 15.0, 0.0, 0.4, 30.0);
         a.spawn_star(10.0, 15.0, 0.0, -0.4, 60.0);
         for _ in 0..5 {
@@ -2573,7 +2846,7 @@ mod tests_causal_loop {
 
     #[test]
     fn test_stars_form_unattended_from_cold_gas() {
-        let mut g = Galaxy::new(50, 0).seed_with_mode_seeded(25, InitialCondition::Uniform, 42);
+        let mut g = Galaxy::new(50, 0).seed_with_mode_seeded(25, Scenario::IrregularSpiral, 42);
         let mut formed_at = None;
         for t in 0..4000 {
             g = g.tick(0.5);
@@ -2592,7 +2865,7 @@ mod tests_causal_loop {
 
     #[test]
     fn test_baryonic_ledger_is_conserved_through_star_formation() {
-        let mut g = Galaxy::new(50, 0).seed_with_mode_seeded(25, InitialCondition::Uniform, 42);
+        let mut g = Galaxy::new(50, 0).seed_with_mode_seeded(25, Scenario::IrregularSpiral, 42);
         let initial = g.baryonic_total();
         for _ in 0..3000 {
             g = g.tick(0.5);
@@ -2617,7 +2890,7 @@ mod tests_causal_loop {
         // nondeterminism. Both depths reach into the star-formation era.
         fn run(n: usize) -> (Vec<f32>, Vec<f32>, u64, [u64; 5]) {
             let mut g =
-                Galaxy::new(50, 0).seed_with_mode_seeded(25, InitialCondition::Uniform, 42);
+                Galaxy::new(50, 0).seed_with_mode_seeded(25, Scenario::IrregularSpiral, 42);
             for _ in 0..n {
                 g = g.tick(0.5);
             }
@@ -2654,7 +2927,7 @@ mod tests_causal_loop {
         // supernovae shock live clouds. Asserts the full ancestry:
         // StarBirth -> CloudCollapse -> ShockWave -> Supernova.
         use std::collections::HashMap;
-        let mut g = Galaxy::new(50, 0).seed_with_mode_seeded(25, InitialCondition::Uniform, 42);
+        let mut g = Galaxy::new(50, 0).seed_with_mode_seeded(25, Scenario::IrregularSpiral, 42);
         for _ in 0..600 {
             g = g.tick(0.5);
         }
@@ -2702,7 +2975,7 @@ mod tests_black_hole {
 
     #[test]
     fn test_capture_swallows_a_central_star_and_ledger_holds() {
-        let mut g = Galaxy::new(50, 0).seed_with_mode_seeded(25, InitialCondition::Uniform, 42);
+        let mut g = Galaxy::new(50, 0).seed_with_mode_seeded(25, Scenario::IrregularSpiral, 42);
         let initial = g.baryonic_total();
         let bh0 = g.bh_mass_value();
         g.spawn_star(25.2, 25.2, 0.0, 0.0, 40.0);
@@ -2723,7 +2996,7 @@ mod tests_black_hole {
         // Small seeded mass -> small hole. dM/dt = -H/M^2 barely leaks
         // while fat and runs away once small - it must fully evaporate,
         // land in the radiated sink, and take the lens with it.
-        let mut g = Galaxy::new(20, 0).seed_with_mode_seeded(2, InitialCondition::Uniform, 7);
+        let mut g = Galaxy::new(20, 0).seed_with_mode_seeded(2, Scenario::IrregularSpiral, 7);
         let bh0 = g.bh_mass_value();
         assert!(bh0 > 0.0 && bh0 < 100.0, "test wants a small hole, got {bh0}");
         let initial = g.baryonic_total();

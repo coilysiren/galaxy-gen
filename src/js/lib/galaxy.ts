@@ -7,10 +7,14 @@ export interface Cell {
   y: number;
 }
 
-/** Mirror of Rust `InitialCondition`. Kept in sync manually. */
-export enum InitialCondition {
-  Uniform = 0,
-  Bang = 1,
+/** Mirror of Rust `Scenario`. Kept in sync manually. A scenario is a
+ * hardcoded `start => end-shape` pair - the seeder plus the physics
+ * constants that steer the run toward its promised shape at t ~= 1000. */
+export enum Scenario {
+  BangRing = 0,
+  BangSpiral = 1,
+  IrregularSpiral = 2,
+  IrregularElliptical = 3,
 }
 
 export type ComputeBackend = "cpu" | "webgpu";
@@ -58,11 +62,11 @@ export class Frontend {
     return this.backend;
   }
 
-  public seed(additionalMass: number, mode: InitialCondition = InitialCondition.Uniform): void {
+  public seed(additionalMass: number, mode: Scenario = Scenario.IrregularSpiral): void {
     this.overrideMass = null;
     const next = this.galaxy.seed_with_mode(
       additionalMass,
-      mode as unknown as wasm.InitialCondition
+      mode as unknown as wasm.Scenario
     );
     this.galaxy.free();
     this.galaxy = next;
@@ -72,12 +76,12 @@ export class Frontend {
   public seedWith(
     additionalMass: number,
     seed: bigint,
-    mode: InitialCondition = InitialCondition.Uniform
+    mode: Scenario = Scenario.IrregularSpiral
   ): void {
     this.overrideMass = null;
     const next = this.galaxy.seed_with_mode_seeded(
       additionalMass,
-      mode as unknown as wasm.InitialCondition,
+      mode as unknown as wasm.Scenario,
       seed
     );
     this.galaxy.free();

@@ -41,9 +41,29 @@ function parseSeed(s: string): bigint | null {
   }
 }
 
+/** URL slug <-> Scenario. The slug names the full start => end pair. */
+const SCENARIO_SLUGS: Array<[string, galaxy.Scenario]> = [
+  ["bang-ring", galaxy.Scenario.BangRing],
+  ["bang-spiral", galaxy.Scenario.BangSpiral],
+  ["irregular-spiral", galaxy.Scenario.IrregularSpiral],
+  ["irregular-elliptical", galaxy.Scenario.IrregularElliptical],
+];
+
+function scenarioFromSlug(slug: string | null): galaxy.Scenario | null {
+  const hit = SCENARIO_SLUGS.find(([s]) => s === slug);
+  return hit ? hit[1] : null;
+}
+
+function scenarioToSlug(sc: galaxy.Scenario): string {
+  const hit = SCENARIO_SLUGS.find(([, v]) => v === sc);
+  return hit ? hit[0] : "irregular-spiral";
+}
+
 interface InitialParams {
   galaxySize: number;
   seed: string;
+  /// `?scenario=<slug>`: start => end pair; part of the permalink.
+  scenario: galaxy.Scenario;
   /// `?lock=1`: generate reuses the seed instead of cycling to a fresh
   /// one on every press.
   seedLocked: boolean;
@@ -58,6 +78,7 @@ function readInitialParams(): InitialParams {
   const defaults: InitialParams = {
     galaxySize: DEFAULT_GALAXY_SIZE,
     seed: "",
+    scenario: galaxy.Scenario.IrregularSpiral,
     seedLocked: false,
     debug: false,
     warpTicks: 0,
@@ -71,6 +92,7 @@ function readInitialParams(): InitialParams {
   return {
     galaxySize: Number.isFinite(sizeN) && sizeN > 0 ? sizeN : defaults.galaxySize,
     seed: seedRaw != null && parseSeed(seedRaw) != null ? seedRaw.trim() : "",
+    scenario: scenarioFromSlug(params.get("scenario")) ?? defaults.scenario,
     seedLocked: lockRaw != null && lockRaw !== "0" && lockRaw !== "false",
     debug: params.has("debug"),
     warpTicks: (() => {
@@ -96,12 +118,14 @@ function patchUrlTick(t: number): void {
 function writeUrlParams(p: {
   galaxySize: number;
   seed: string;
+  scenario: galaxy.Scenario;
   seedLocked: boolean;
 }): void {
   if (typeof window === "undefined") return;
   const params = new URLSearchParams();
   params.set("seed", p.seed);
   params.set("size", p.galaxySize.toString());
+  params.set("scenario", scenarioToSlug(p.scenario));
   if (p.seedLocked) params.set("lock", "1");
   const next = `${window.location.pathname}?${params.toString()}${window.location.hash}`;
   window.history.replaceState(null, "", next);
@@ -119,9 +143,7 @@ export function Interface() {
   const seedLocked = initial.seedLocked;
   const debug = initial.debug;
   const hasGeneratedRef = React.useRef(false);
-  const [initialCondition, setInitialCondition] = React.useState<galaxy.InitialCondition>(
-    galaxy.InitialCondition.Uniform
-  );
+  const [scenario, setScenario] = React.useState<galaxy.Scenario>(initial.scenario);
   const [wasmReady, setWasmReady] = React.useState(false);
   const [initialized, setInitialized] = React.useState(false);
   const [tickCount, setTickCount] = React.useState(0);
@@ -279,11 +301,11 @@ export function Interface() {
     hasGeneratedRef.current = true;
     const parsed = parseSeed(effectiveSeed);
     const next = new galaxy.Frontend(galaxySize);
-    // Reproducible path covers every initial condition.
+    // Reproducible path covers every scenario.
     if (parsed != null) {
-      next.seedWith(SEED_MASS, parsed, initialCondition);
+      next.seedWith(SEED_MASS, parsed, scenario);
     } else {
-      next.seed(SEED_MASS, initialCondition);
+      next.seed(SEED_MASS, scenario);
     }
     galaxyFrontendRef.current = next;
     dataviz.initViz(next);
@@ -304,6 +326,7 @@ export function Interface() {
     writeUrlParams({
       galaxySize,
       seed: effectiveSeed,
+      scenario,
       seedLocked,
     });
     exposeForTests();
@@ -478,20 +501,24 @@ export function Interface() {
                 />
               </label>
               <label className="block">
-                <span className="input-label mb-1 block">Initial Condition</span>
+                <span className="input-label mb-1 block">Scenario</span>
                 <select
                   className="input-field"
-                  name="initialCondition"
-                  data-testid="select-initial-condition"
-                  value={initialCondition}
+                  name="scenario"
+                  data-testid="select-scenario"
+                  value={scenario}
                   onChange={(event) =>
-                    setInitialCondition(parseInt(event.target.value, 10) as galaxy.InitialCondition)
+                    setScenario(parseInt(event.target.value, 10) as galaxy.Scenario)
                   }
                 >
-                  <option value={galaxy.InitialCondition.Uniform}>
-                    uniform (rotating disk)
+                  <option value={galaxy.Scenario.BangRing}>bang → ring</option>
+                  <option value={galaxy.Scenario.BangSpiral}>bang → spiral</option>
+                  <option value={galaxy.Scenario.IrregularSpiral}>
+                    irregular → spiral
                   </option>
-                  <option value={galaxy.InitialCondition.Bang}>bang (central explosion)</option>
+                  <option value={galaxy.Scenario.IrregularElliptical}>
+                    irregular → elliptical
+                  </option>
                 </select>
               </label>
             </div>

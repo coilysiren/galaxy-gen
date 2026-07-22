@@ -402,21 +402,22 @@ test.describe("Galaxy Generator", () => {
     expect(second).toEqual(first);
   });
 
-  test("switching initial condition produces mode-specific seed + ticks", async ({ page }) => {
-    // Sanity: the dropdown has the two modes we expect.
-    const select = page.getByTestId("select-initial-condition");
+  test("switching scenario produces scenario-specific seed + ticks", async ({ page }) => {
+    // Sanity: the dropdown carries the four start => end pairs.
+    const select = page.getByTestId("select-scenario");
     await expect(select).toBeVisible();
     const optionValues = await select.locator("option").evaluateAll((opts) =>
       (opts as HTMLOptionElement[]).map((o) => o.value)
     );
-    expect(optionValues).toEqual(["0", "1"]);
+    expect(optionValues).toEqual(["0", "1", "2", "3"]);
 
-    // Bang must produce a different mass field than Uniform.
+    // A bang start must produce a different mass field than an
+    // irregular start.
     const snapshots: Record<string, number[]> = {};
-    for (const mode of ["0", "1"]) {
+    for (const mode of ["1", "2"]) {
       await select.selectOption(mode);
       await page.getByTestId("btn-init").click();
-      // Advance a few ticks to let the mode-specific velocities take effect.
+      // Advance a few ticks to let scenario velocities take effect.
       for (let i = 0; i < 5; i++) await page.getByTestId("btn-tick").click();
       snapshots[mode] = await page.evaluate(() => {
         const fe: any = (window as any).__galaxyGen.frontend;
@@ -432,14 +433,24 @@ test.describe("Galaxy Generator", () => {
       for (let i = 0; i < a.length; i++) if (a[i] !== b[i]) n++;
       return n;
     };
-    const uniform = snapshots["0"];
-    // Bang concentrates mass centrally; most uniform-filled cells differ.
-    const minDistinctCells = Math.floor(uniform.length * 0.1);
+    const irregular = snapshots["2"];
+    // Bang concentrates mass centrally; most irregular cells differ.
+    const minDistinctCells = Math.floor(irregular.length * 0.1);
     expect(
-      diffCount(uniform, snapshots["1"]),
-      "bang snapshot should differ from uniform",
+      diffCount(irregular, snapshots["1"]),
+      "bang snapshot should differ from irregular",
     ).toBeGreaterThan(minDistinctCells);
     expect(nonzero(snapshots["1"])).toBeGreaterThan(0);
+  });
+
+  test("scenario is part of the URL permalink", async ({ page }) => {
+    await page.getByTestId("select-scenario").selectOption("0");
+    await page.getByTestId("btn-init").click();
+    await expect(page).toHaveURL(/scenario=bang-ring/);
+    // A scenario-bearing URL preselects the dropdown on load.
+    await page.goto("/?scenario=irregular-elliptical");
+    await waitForWasm(page);
+    await expect(page.getByTestId("select-scenario")).toHaveValue("3");
   });
 
   test("run button ticks via the worker and pause resumes state cleanly", async ({ page }) => {

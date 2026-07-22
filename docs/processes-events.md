@@ -29,7 +29,7 @@ One u64 master seed (the `?seed=` URL value). Streams are derived statelessly pe
 
 ## Determinism contract
 
-Same seed + same tick count + same dt sequence -> identical state. Guarded by golden-hash tests in `mod tests_golden` (galaxy.rs) that pin the mass field after 100 ticks for both initial conditions. A deliberate physics change recaptures the goldens and says so in the commit.
+Same seed + same tick count + same dt sequence -> identical state. Guarded by golden-hash tests in `mod tests_golden` (galaxy.rs) that pin the mass field after 100 ticks for every scenario. A deliberate physics change recaptures the goldens and says so in the commit.
 
 ## The causal loop
 

@@ -1,19 +1,29 @@
-//! Native physics probe: seeded runs of every initial condition with
-//! structure metrics at checkpoints. `cargo run --bin debug_sim [ticks]`.
+//! Native physics probe: seeded runs of every scenario with structure
+//! metrics at checkpoints. `cargo run --bin debug_sim [ticks] [size] [seeds]`.
 //! Iterating on sim constants goes through this harness, not the browser -
 //! same kernel, no webpack in the loop.
 
-use galaxy_gen_backend::galaxy::{Galaxy, InitialCondition};
+use galaxy_gen_backend::galaxy::{Galaxy, Scenario};
 use galaxy_gen_backend::process;
 
 struct Metrics {
     nonzero: usize,
-    max: u16,
     total: u64,
-    rms_radius: f64,
-    /// Mass-weighted mean tangential velocity in the r ∈ [5, 12] annulus.
-    /// Wrap-safe rotation signal (global L_z is meaningless on a torus).
-    annulus_vt: f64,
+    /// Mass-weighted mean tangential velocity, r in [0.2, 0.7] disk_r.
+    /// Positive = prograde. The headline "is it still rotating" number.
+    vt: f64,
+    /// vt / mean speed in the same annulus - 1.0 is pure circular flow.
+    rot_support: f64,
+    /// Radius of the peak radial-profile bin, as a fraction of disk_r.
+    /// Ring signature: high r_peak with a low central fraction.
+    r_peak_frac: f64,
+    /// Gas mass fraction inside 0.25 disk_r. Elliptical: high. Ring: low.
+    central_frac: f64,
+    /// m=2 azimuthal Fourier amplitude over the disk - arms/lobes.
+    m2: f64,
+    /// Star population tangential velocity (same annulus) - the stars
+    /// must rotate too, not just the gas.
+    star_vt: f64,
 }
 
 fn metrics(g: &Galaxy, size: u16) -> Metrics {
@@ -22,55 +32,80 @@ fn metrics(g: &Galaxy, size: u16) -> Metrics {
     let vy = g.vel_y();
     let s = size as usize;
     let c = size as f64 * 0.5;
+    let disk_r = size as f64 * 0.5 - 1.0;
 
-    let (mut nonzero, mut max, mut total) = (0usize, 0u16, 0u64);
-    let (mut mx, mut my) = (0f64, 0f64);
+    let (mut nonzero, mut total) = (0usize, 0u64);
+    let (mut vt_num, mut vt_den) = (0f64, 0f64);
+    let mut speed_num = 0f64;
+    let (mut m2_re, mut m2_im, mut m2_den) = (0f64, 0f64, 0f64);
+    let mut central = 0f64;
+    const BINS: usize = 24;
+    let mut profile = [0f64; BINS];
+
     for (i, &m) in mass.iter().enumerate() {
         if m == 0 {
             continue;
         }
         nonzero += 1;
-        max = max.max(m);
         total += m as u64;
-        mx += (i % s) as f64 * m as f64;
-        my += (i / s) as f64 * m as f64;
-    }
-    if total == 0 {
-        return Metrics {
-            nonzero,
-            max,
-            total,
-            rms_radius: 0.0,
-            annulus_vt: 0.0,
-        };
-    }
-    mx /= total as f64;
-    my /= total as f64;
-
-    let mut rms = 0f64;
-    let (mut vt_num, mut vt_den) = (0f64, 0f64);
-    for (i, &m) in mass.iter().enumerate() {
-        if m == 0 {
-            continue;
+        let mf = m as f64;
+        let x = (i % s) as f64 - c;
+        let y = (i / s) as f64 - c;
+        let r = (x * x + y * y).sqrt();
+        let rf = r / disk_r;
+        if rf < 1.0 {
+            profile[(rf * BINS as f64) as usize] += mf;
         }
-        let x = (i % s) as f64;
-        let y = (i / s) as f64;
-        let (dx, dy) = (x - mx, y - my);
-        rms += m as f64 * (dx * dx + dy * dy);
-
-        let (cx, cy) = (x - c, y - c);
-        let r = (cx * cx + cy * cy).sqrt();
-        if (5.0..=12.0).contains(&r) {
-            vt_num += m as f64 * (cx * vy[i] as f64 - cy * vx[i] as f64) / r;
-            vt_den += m as f64;
+        if rf < 0.25 {
+            central += mf;
+        }
+        if r > 3.0 && rf < 1.0 {
+            let theta = y.atan2(x);
+            m2_re += mf * (2.0 * theta).cos();
+            m2_im += mf * (2.0 * theta).sin();
+            m2_den += mf;
+        }
+        if (0.2..=0.7).contains(&rf) {
+            vt_num += mf * (x * vy[i] as f64 - y * vx[i] as f64) / r;
+            speed_num += mf * ((vx[i] as f64).powi(2) + (vy[i] as f64).powi(2)).sqrt();
+            vt_den += mf;
         }
     }
+
+    // Star tangential velocity from the full flat state:
+    // [x, y, vx, vy, ...] per STAR_FLOATS chunk.
+    let star_flat = g.sim_state_stars();
+    let (mut svt_num, mut svt_den) = (0f64, 0f64);
+    for chunk in star_flat.chunks_exact(12) {
+        let x = chunk[0] as f64 - c;
+        let y = chunk[1] as f64 - c;
+        let r = (x * x + y * y).sqrt();
+        let rf = r / disk_r;
+        if (0.2..=0.7).contains(&rf) {
+            svt_num += (x * chunk[3] as f64 - y * chunk[2] as f64) / r;
+            svt_den += 1.0;
+        }
+    }
+
+    let peak_bin = profile
+        .iter()
+        .enumerate()
+        .max_by(|a, b| a.1.total_cmp(b.1))
+        .map(|(i, _)| i)
+        .unwrap_or(0);
     Metrics {
         nonzero,
-        max,
         total,
-        rms_radius: (rms / total as f64).sqrt(),
-        annulus_vt: if vt_den > 0.0 { vt_num / vt_den } else { 0.0 },
+        vt: if vt_den > 0.0 { vt_num / vt_den } else { 0.0 },
+        rot_support: if speed_num > 0.0 { vt_num / speed_num } else { 0.0 },
+        r_peak_frac: (peak_bin as f64 + 0.5) / BINS as f64,
+        central_frac: if total > 0 { central / total as f64 } else { 0.0 },
+        m2: if m2_den > 0.0 {
+            (m2_re * m2_re + m2_im * m2_im).sqrt() / m2_den
+        } else {
+            0.0
+        },
+        star_vt: if svt_den > 0.0 { svt_num / svt_den } else { 0.0 },
     }
 }
 
@@ -78,53 +113,65 @@ fn main() {
     let max_ticks: usize = std::env::args()
         .nth(1)
         .and_then(|a| a.parse().ok())
-        .unwrap_or(4000);
+        .unwrap_or(1000);
     let size: u16 = std::env::args()
         .nth(2)
         .and_then(|a| a.parse().ok())
-        .unwrap_or(50);
-    let checkpoints = [0usize, 100, 500, 1000, 2000, 4000, 8000];
+        .unwrap_or(150);
+    let n_seeds: u64 = std::env::args()
+        .nth(3)
+        .and_then(|a| a.parse().ok())
+        .unwrap_or(1);
+    let checkpoints = [0usize, 250, 500, 1000, 2000, 4000];
 
     for (mode, name) in [
-        (InitialCondition::Uniform, "uniform"),
-        (InitialCondition::Bang, "bang"),
+        (Scenario::BangRing, "bang=>ring"),
+        (Scenario::BangSpiral, "bang=>spiral"),
+        (Scenario::IrregularSpiral, "irregular=>spiral"),
+        (Scenario::IrregularElliptical, "irregular=>elliptical"),
     ] {
-        // Per-process timing profile at the seeded state (native only -
-        // the wasm build has no monotonic clock without JS interop).
-        let probe = Galaxy::new(size, 0).seed_with_mode_seeded(25, mode, 12345);
-        print!("profile[{name}]:");
-        for p in process::registry() {
-            let mut clone = probe.clone();
-            let t0 = std::time::Instant::now();
-            (p.run)(&mut clone, 0.5);
-            print!("  {}={:.2}ms", p.name, t0.elapsed().as_secs_f64() * 1000.0);
-        }
-        println!();
-        let mut g = Galaxy::new(size, 0).seed_with_mode_seeded(25, mode, 12345);
-        println!("--- {name} (size={size}, seed=12345, dt=0.5) ---");
-        let mut done = 0usize;
-        for &cp in checkpoints.iter().filter(|&&c| c <= max_ticks) {
-            while done < cp {
-                g = g.tick(0.5);
-                done += 1;
+        if n_seeds == 1 {
+            // Per-process timing profile at the seeded state (native only -
+            // the wasm build has no monotonic clock without JS interop).
+            let probe = Galaxy::new(size, 0).seed_with_mode_seeded(25, mode, 12345);
+            print!("profile[{name}]:");
+            for p in process::registry() {
+                let mut clone = probe.clone();
+                let t0 = std::time::Instant::now();
+                (p.run)(&mut clone, 0.5);
+                print!("  {}={:.2}ms", p.name, t0.elapsed().as_secs_f64() * 1000.0);
             }
-            let m = metrics(&g, size);
-            println!(
-                "t={cp:5}  nz={:4}  max={:5}  total={:6}  rms_r={:5.1}  vt={:+.3}  stars={:4}  bh={:6.0}  ev(col/birth/sn/shock/diss/cap)={}/{}/{}/{}/{}/{}",
-                m.nonzero,
-                m.max,
-                m.total,
-                m.rms_radius,
-                m.annulus_vt,
-                g.star_count(),
-                g.bh_mass_value(),
-                g.events_executed(0),
-                g.events_executed(1),
-                g.events_executed(2),
-                g.events_executed(3),
-                g.events_executed(4),
-                g.events_executed(5),
-            );
+            println!();
+        }
+        for seed in 12345..12345 + n_seeds {
+            let mut g = Galaxy::new(size, 0).seed_with_mode_seeded(25, mode, seed);
+            println!("--- {name} (size={size}, seed={seed}, dt=0.5) ---");
+            let mut done = 0usize;
+            for &cp in checkpoints.iter().filter(|&&c| c <= max_ticks) {
+                while done < cp {
+                    g = g.tick(0.5);
+                    done += 1;
+                }
+                let m = metrics(&g, size);
+                println!(
+                    "t={cp:5}  nz={:5}  gas={:6}  vt={:+.3}  rot={:+.2}  r_pk={:.2}  ctr={:.2}  m2={:.2}  svt={:+.3}  stars={:5}  ev(col/b/sn/sh/d/cap)={}/{}/{}/{}/{}/{}",
+                    m.nonzero,
+                    m.total,
+                    m.vt,
+                    m.rot_support,
+                    m.r_peak_frac,
+                    m.central_frac,
+                    m.m2,
+                    m.star_vt,
+                    g.star_count(),
+                    g.events_executed(0),
+                    g.events_executed(1),
+                    g.events_executed(2),
+                    g.events_executed(3),
+                    g.events_executed(4),
+                    g.events_executed(5),
+                );
+            }
         }
     }
 }
