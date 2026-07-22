@@ -92,6 +92,11 @@ pub struct ScenarioParams {
     /// Isotropic velocity jitter at seed time (pressure support for the
     /// elliptical - it puffs the cloud instead of letting it pancake).
     pub vel_dispersion: f32,
+    /// In-disk star velocity drag. Stars are collisionless, so a young
+    /// swarm slowly evaporates outward; the elliptical uses a whisper of
+    /// drag to settle its swarm into the central glow instead. Zero for
+    /// disk scenarios - their stars must keep orbiting forever.
+    pub star_drag: f32,
 }
 
 impl Scenario {
@@ -115,16 +120,17 @@ impl Scenario {
                 radial_scale_frac: 0.0,
                 seed_gain: 1.0,
                 vel_dispersion: 0.0,
+                star_drag: 0.0,
             },
             Scenario::BangSpiral => ScenarioParams {
                 bang: true,
                 v_flat: 0.9,
                 halo_core_frac: 0.2,
                 flow_drag: 0.012,
-                flow_support: 1.0,
+                flow_support: 1.05,
                 rotation_boost: 1.2,
-                eject_factor: 1.3,
-                eject_target_frac: 0.55,
+                eject_factor: 1.45,
+                eject_target_frac: 0.7,
                 core_radius_frac: 0.2,
                 core_fill_scale: 3.0,
                 eject_lobes: 0.35,
@@ -134,6 +140,7 @@ impl Scenario {
                 radial_scale_frac: 0.0,
                 seed_gain: 1.0,
                 vel_dispersion: 0.0,
+                star_drag: 0.0,
             },
             Scenario::IrregularSpiral => ScenarioParams {
                 bang: false,
@@ -148,18 +155,19 @@ impl Scenario {
                 core_fill_scale: 0.0,
                 eject_lobes: 0.0,
                 eject_swirl: 0.0,
-                spiral_amp: Galaxy::SPIRAL_AMP,
+                spiral_amp: 0.7,
                 smoke_contrast: 1.8,
                 radial_scale_frac: 0.0,
-                seed_gain: 1.0,
+                seed_gain: 1.5,
                 vel_dispersion: 0.0,
+                star_drag: 0.0,
             },
             Scenario::IrregularElliptical => ScenarioParams {
                 bang: false,
-                v_flat: 0.5,
-                halo_core_frac: 0.5,
-                flow_drag: 0.015,
-                flow_support: 0.8,
+                v_flat: 0.7,
+                halo_core_frac: 0.15,
+                flow_drag: 0.025,
+                flow_support: 0.85,
                 rotation_boost: 0.7,
                 eject_factor: 0.0,
                 eject_target_frac: 0.0,
@@ -168,10 +176,11 @@ impl Scenario {
                 eject_lobes: 0.0,
                 eject_swirl: 0.0,
                 spiral_amp: 0.0,
-                smoke_contrast: 1.0,
-                radial_scale_frac: 0.35,
-                seed_gain: 2.5,
-                vel_dispersion: 0.35,
+                smoke_contrast: 0.9,
+                radial_scale_frac: 0.28,
+                seed_gain: 1.5,
+                vel_dispersion: 0.5,
+                star_drag: 0.0015,
             },
         }
     }
@@ -331,7 +340,7 @@ impl Galaxy {
     // logarithmic-spiral overdensity still seeds the density wave that
     // differential rotation shears into a pinwheel; ROTATION_BOOST
     // spins the disk slightly super-circular so the shear works.
-    const SMOKE_OCTAVE_RES: [usize; 4] = [6, 12, 24, 48];
+    pub(crate) const SMOKE_OCTAVE_RES: [usize; 4] = [6, 12, 24, 48];
     const SMOKE_WARP: f32 = 0.11;
     /// Normalized fBm clusters tightly around its mean - stretch it
     /// (about a slightly dark center) so voids reach true zero and
@@ -580,6 +589,7 @@ impl Galaxy {
                         sum / norm
                     };
 
+                    let mut weights: Vec<(usize, f32)> = Vec::with_capacity(self.n / 3);
                     for i in 0..self.n {
                         let x = self.xs_i[i] as f32 - cx;
                         let y = self.ys_i[i] as f32 - cy;
@@ -626,15 +636,29 @@ impl Galaxy {
                                 * (2.0 * theta - Galaxy::SPIRAL_PITCH * r.ln()
                                     + spiral_phase)
                                     .cos();
-                        let m = additional as f32 * 0.5
-                            * p.seed_gain
-                            * smoke
-                            * arm
-                            * edge
-                            * envelope
-                            * rng.random_range(0.85f32..1.15);
-                        mass[i] = mass[i]
-                            .saturating_add(m.round().clamp(0.0, u16::MAX as f32) as u16);
+                        let w = smoke * arm * edge * envelope * rng.random_range(0.85f32..1.15);
+                        if w > 0.0 {
+                            weights.push((i, w));
+                        }
+                    }
+                    // Normalize to a deterministic total: the fBm draw's
+                    // mean varies +-35% seed to seed, and thin draws lose
+                    // their seeded structure to dissipation long before
+                    // t=1000. Fixing the budget is what makes the end
+                    // shape sturdy across seeds - noise only textures.
+                    let w_sum: f64 = weights.iter().map(|&(_, w)| w as f64).sum();
+                    let target = additional as f64
+                        * 0.5
+                        * p.seed_gain as f64
+                        * 0.53
+                        * (std::f64::consts::PI * (disk_r as f64) * (disk_r as f64));
+                    if w_sum > 0.0 {
+                        let scale = (target / w_sum) as f32;
+                        for &(i, w) in &weights {
+                            let m = w * scale;
+                            mass[i] = mass[i]
+                                .saturating_add(m.round().clamp(0.0, u16::MAX as f32) as u16);
+                        }
                     }
                 }
             }
@@ -1214,6 +1238,7 @@ impl Galaxy {
         let soft_r = self.disk_radius();
         let hard_r = soft_r * Galaxy::HARD_CLIP_FACTOR;
         let halo_drag = (-Galaxy::STAR_HALO_DRAG * time).exp();
+        let disk_drag = (-self.scenario.params().star_drag * time).exp();
         for i in 0..self.stars.len() {
             let px = self.stars.pos_x[i];
             let py = self.stars.pos_y[i];
@@ -1233,6 +1258,9 @@ impl Galaxy {
             if in_halo {
                 vx *= halo_drag;
                 vy *= halo_drag;
+            } else {
+                vx *= disk_drag;
+                vy *= disk_drag;
             }
             self.stars.vel_x[i] = vx;
             self.stars.vel_y[i] = vy;
@@ -1980,9 +2008,21 @@ impl Galaxy {
             vx = ux + (vx - ux) * flow_decay;
             vy = uy + (vy - uy) * flow_decay;
 
-            // Sub-grid position update
-            let mut fx = self.frac_x[i] + (vx * time).clamp(-max_step, max_step);
-            let mut fy = self.frac_y[i] + (vy * time).clamp(-max_step, max_step);
+            // Sub-grid position update. The step cap clamps the VECTOR
+            // norm, not each axis: a per-axis clamp lets diagonal movers
+            // travel sqrt(2) faster than axis-aligned ones, which
+            // funnels every fast transit (bang ejecta) into four
+            // diagonal sectors and shreds rings into a 4-blob pinwheel.
+            let mut dx = vx * time;
+            let mut dy = vy * time;
+            let step_len_sq = dx * dx + dy * dy;
+            if step_len_sq > max_step * max_step {
+                let scale = max_step / step_len_sq.sqrt();
+                dx *= scale;
+                dy *= scale;
+            }
+            let mut fx = self.frac_x[i] + dx;
+            let mut fy = self.frac_y[i] + dy;
 
             let (col, row) = (i as i32 % size, i as i32 / size);
 
@@ -2705,10 +2745,10 @@ mod tests_golden {
     #[test]
     fn test_golden_mass_field_per_scenario() {
         for (mode, seed, expected) in [
-            (Scenario::BangRing, 7u64, 8604008155349799133u64),
-            (Scenario::BangSpiral, 7, 2281957937334672197),
-            (Scenario::IrregularSpiral, 42, 6765464870991323095),
-            (Scenario::IrregularElliptical, 42, 15098862123826047889),
+            (Scenario::BangRing, 7u64, 17911606875363938511u64),
+            (Scenario::BangSpiral, 7, 3563014910407052367),
+            (Scenario::IrregularSpiral, 42, 15472081426853866250),
+            (Scenario::IrregularElliptical, 42, 10258086257833143952),
         ] {
             let mut g = Galaxy::new(50, 0).seed_with_mode_seeded(25, mode, seed);
             for _ in 0..100 {

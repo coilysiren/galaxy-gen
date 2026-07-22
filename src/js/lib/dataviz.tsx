@@ -872,6 +872,10 @@ function drawStars(
   const maxLum = 120 * 120;
   const softR = size / 2 - 1;
   const center = size / 2;
+  // Additive light: overlapping stars brighten instead of occluding,
+  // so a dense swarm (cluster core, elliptical spheroid) reads as a
+  // glow rather than a sprinkle of isolated dots.
+  ctx.globalCompositeOperation = "screen";
   for (let i = 0; i < stars.length; i += 4) {
     // Radial fade into the halo; deep-halo stars do not render.
     const rad = Math.hypot(stars[i] - center, stars[i + 1] - center);
@@ -915,6 +919,7 @@ function drawStars(
     ctx.fill();
     ctx.globalAlpha = 1.0;
   }
+  ctx.globalCompositeOperation = "source-over";
 }
 
 export function resetView() {

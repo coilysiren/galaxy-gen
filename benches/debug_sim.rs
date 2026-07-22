@@ -24,6 +24,9 @@ struct Metrics {
     /// Star population tangential velocity (same annulus) - the stars
     /// must rotate too, not just the gas.
     star_vt: f64,
+    /// Fraction of stars inside 0.3 disk_r - the elliptical is mostly
+    /// a star glow, so its concentration lives here, not in the gas.
+    star_central: f64,
 }
 
 fn metrics(g: &Galaxy, size: u16) -> Metrics {
@@ -76,11 +79,16 @@ fn metrics(g: &Galaxy, size: u16) -> Metrics {
     // [x, y, vx, vy, ...] per STAR_FLOATS chunk.
     let star_flat = g.sim_state_stars();
     let (mut svt_num, mut svt_den) = (0f64, 0f64);
+    let (mut s_central, mut s_total) = (0f64, 0f64);
     for chunk in star_flat.chunks_exact(12) {
         let x = chunk[0] as f64 - c;
         let y = chunk[1] as f64 - c;
         let r = (x * x + y * y).sqrt();
         let rf = r / disk_r;
+        s_total += 1.0;
+        if rf < 0.3 {
+            s_central += 1.0;
+        }
         if (0.2..=0.7).contains(&rf) {
             svt_num += (x * chunk[3] as f64 - y * chunk[2] as f64) / r;
             svt_den += 1.0;
@@ -106,6 +114,7 @@ fn metrics(g: &Galaxy, size: u16) -> Metrics {
             0.0
         },
         star_vt: if svt_den > 0.0 { svt_num / svt_den } else { 0.0 },
+        star_central: if s_total > 0.0 { s_central / s_total } else { 0.0 },
     }
 }
 
@@ -154,7 +163,7 @@ fn main() {
                 }
                 let m = metrics(&g, size);
                 println!(
-                    "t={cp:5}  nz={:5}  gas={:6}  vt={:+.3}  rot={:+.2}  r_pk={:.2}  ctr={:.2}  m2={:.2}  svt={:+.3}  stars={:5}  ev(col/b/sn/sh/d/cap)={}/{}/{}/{}/{}/{}",
+                    "t={cp:5}  nz={:5}  gas={:6}  vt={:+.3}  rot={:+.2}  r_pk={:.2}  ctr={:.2}  m2={:.2}  svt={:+.3}  sctr={:.2}  stars={:5}  ev(col/b/sn/sh/d/cap)={}/{}/{}/{}/{}/{}",
                     m.nonzero,
                     m.total,
                     m.vt,
@@ -163,6 +172,7 @@ fn main() {
                     m.central_frac,
                     m.m2,
                     m.star_vt,
+                    m.star_central,
                     g.star_count(),
                     g.events_executed(0),
                     g.events_executed(1),
