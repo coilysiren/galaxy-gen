@@ -132,9 +132,12 @@ test.describe("Galaxy Generator", () => {
   });
 
   test("webgpu backend ticks produce non-frozen simulation when available", async ({ page }) => {
-    // Skip if Chromium didn't expose navigator.gpu (CPU path is covered above).
-    const hasGpu = await page.evaluate(() => Boolean((navigator as any).gpu));
-    test.skip(!hasGpu, "navigator.gpu not available in this Chromium");
+    // Chromium can expose navigator.gpu without providing an adapter.
+    const hasAdapter = await page.evaluate(async () => {
+      const gpu = (navigator as any).gpu;
+      return Boolean(gpu && (await gpu.requestAdapter()));
+    });
+    test.skip(!hasAdapter, "WebGPU adapter not available in this Chromium");
 
     // Small grid: the WGSL kernel is O(N²) per tick and 60 ticks at the
     // 250 default blows the test timeout.
