@@ -8,12 +8,12 @@ with React + [D3](https://d3js.org/).
 ## Quick start
 
 ```bash
-make install     # cargo build + wasm-pack + npm install + playwright browsers
-make dev         # rust/wasm watcher + webpack-dev-server (dual auto-reload)
-make test        # rust unit tests + Playwright E2E
+ward exec install
+ward exec dev
+ward exec test
 ```
 
-See the [makefile](makefile) for the full set of targets and
+See [.ward/ward.yaml](.ward/ward.yaml) for the full command catalog and
 [AGENTS.md](AGENTS.md) for the conventions.
 
 ## Architecture

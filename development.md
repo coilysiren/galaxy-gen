@@ -28,7 +28,7 @@ The Galaxy is immutable-style — methods like `seed()`, `tick()` return new Gal
 - Rust: `cargo build`, `cargo test`
 - WASM: `wasm-pack build` (previously `wasm-pack init`)
 - JS: webpack 5 with babel (React + TypeScript presets), dev server via `webpack-dev-server`
-- `makefile` has convenience targets but some are outdated (references `wasm-pack init`)
+- Ward exposes the supported multi-step workflows from `.ward/ward.yaml`.
 
 ### CI
 

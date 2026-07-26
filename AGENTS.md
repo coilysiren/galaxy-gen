@@ -25,14 +25,14 @@ Load-bearing files you will touch most often:
 ## Dev Loop
 
 ```bash
-make install           # one-time: cargo build, wasm-pack, npm install, playwright browsers
-make test-rust         # cargo check + cargo test
-make test-e2e          # build WASM + run Playwright headless
-make test              # rust + e2e (full suite)
-make dev               # rust watcher + JS dev server (auto-reload on both sides)
-make dev-js            # JS dev server only (HMR)
-make dev-rust          # cargo watch → wasm-pack build --dev
-make build-js-prod     # production webpack build
+ward exec install
+ward exec test-rust
+ward exec test-e2e
+ward exec test
+ward exec dev
+ward exec dev-js
+ward exec dev-rust
+ward exec build-js-prod
 ```
 
 Raw commands: `cargo test`, `cargo clippy -- -D warnings`, `cargo fmt`, `wasm-pack build` (output `pkg/`, gitignored), `npm run dev` (HMR :8081), `npm run test:e2e[:ui]` (Playwright), `npm run lint` / `format`.
@@ -70,7 +70,7 @@ The deploy surface lives in the deploy monorepo - [coilyco-bridge/deploy](https:
 
 ## Commands
 
-Route every dev command through ward, which reads [`.ward/ward.yaml`](.ward/ward.yaml) (run verbs with `ward exec <verb>`). The lockdown denies bare invocations of the underlying tools (`make`, `cargo`, `wasm-pack`, `npx`, etc.). Add new verbs to that file before invoking them.
+Route every dev command through Ward, which reads [`.ward/ward.yaml`](.ward/ward.yaml). Run verbs with `ward exec <verb>`. The lockdown denies bare invocations of the underlying tools (`cargo`, `wasm-pack`, `npx`, etc.). Add new verbs to that file before invoking them.
 
 ## See also
 

@@ -1,6 +1,5 @@
 # Per-repo command allowlist for galaxy-gen. Ward is the canonical entry
-# point for dev verbs here; each command below delegates to a Make target
-# that wraps cargo / wasm-pack / npx / playwright.
+# point for dev verbs here. Multi-step workflows live in one focused helper.
 #
 # Names follow ward's [a-z0-9-] rule. Argv validation rejects shell
 # metacharacters at invocation time, so flags forward verbatim through
@@ -10,41 +9,47 @@ name: coilyco-gaming/galaxy-gen
 
 commands:
   install:
-    run: make install
+    run: bash scripts/ward-command.sh install
     description: Install Rust, WASM, and JS deps (cargo build + wasm-pack + npm install + playwright install).
   test-rust:
-    run: make test-rust
+    run: bash scripts/ward-command.sh test-rust
     description: cargo check + cargo test.
   build-rust:
-    run: make build-rust
+    run: bash scripts/ward-command.sh build-rust
     description: Build Rust + WASM (debug).
   build-wasm:
-    run: make build-wasm
+    run: bash scripts/ward-command.sh build-wasm
     description: Compile Rust to WASM via wasm-pack (pkg/).
   build-js-prod:
-    run: make build-js-prod
+    run: bash scripts/ward-command.sh build-js-prod
     description: Production webpack build.
   dev:
-    run: make dev
+    run: bash scripts/ward-command.sh dev
     description: Run the rust/wasm watcher and webpack-dev-server concurrently with auto-reload.
   dev-js:
-    run: make dev-js
+    run: bash scripts/ward-command.sh dev-js
     description: Run only the JS dev server with HMR.
   dev-rust:
-    run: make dev-rust
+    run: bash scripts/ward-command.sh dev-rust
     description: Run only the Rust/WASM watcher.
   test-e2e:
-    run: make test-e2e
+    run: bash scripts/ward-command.sh test-e2e
     description: Run Playwright end-to-end tests.
   test-e2e-ui:
-    run: make test-e2e-ui
+    run: bash scripts/ward-command.sh test-e2e-ui
     description: Run Playwright tests in UI mode.
   build-docker:
-    run: make build-docker
+    run: bash scripts/ward-command.sh build-docker
     description: Build the docker image locally with BuildKit cache.
   run-docker:
-    run: make run-docker
+    run: bash scripts/ward-command.sh run-docker
     description: Serve the locally built image on :8080 (mirrors the k8s Deployment).
+  test:
+    run: bash scripts/ward-command.sh test
+    description: Run the Rust and Playwright test suites.
+  precommit:
+    run: pre-commit run --all-files
+    description: Run all pre-commit hooks against every file.
 
 # Provider skills this leaf pulls into its git-excluded .agents/skills/ for
 # confined harnesses (OpenClaw on Qwen). Resolved by scripts/pull-capabilities.py
