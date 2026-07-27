@@ -41,6 +41,9 @@ commands:
   build-docker:
     run: bash scripts/ward-command.sh build-docker
     description: Build the docker image locally with BuildKit cache.
+  image-publish-check:
+    run: bash -n scripts/publish-image.sh
+    description: Parse the trusted Forgejo OCI publisher shell contract.
   run-docker:
     run: bash scripts/ward-command.sh run-docker
     description: Serve the locally built image on :8080 (mirrors the k8s Deployment).

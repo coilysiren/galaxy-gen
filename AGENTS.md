@@ -64,13 +64,28 @@ GitHub Actions (`.github/workflows/action.yml`) runs three jobs on PR to `main`:
 
 ## Deploy
 
-The deploy surface lives in the deploy monorepo - [coilyco-bridge/deploy](https://forgejo.coilysiren.me/coilyco-bridge/deploy) `services/galaxy-gen/` (chart, namespace, values, rollout, public ingress; deploy#173). This repo carries **no manifests and no publish CI**: the deploy repo's `rollout.sh` builds this repo's `Dockerfile` over the git context (`galaxy-gen.git#main`) on kai-server and pushes it to the in-cluster registry. `Dockerfile` stage 2 is **unprivileged nginx** (`nginxinc/nginx-unprivileged` + `nginx.conf`), which retired the busybox-data-bundle + initContainer + stock-caddy shape (galaxy-gen#22) and the legacy `coilysiren-galaxy-gen` namespace. Push to `main` here runs the in-cluster Forgejo pipeline (`.forgejo/workflows/build-publish-deploy.yml`): `cargo test` only; browser e2e + tsc stay on GitHub PR CI (the in-cluster runner can't reach the Playwright browser CDN). A deploy-repo push under `services/galaxy-gen/**` auto-rolls the site; never add deploy manifests back here (deploy-repo boundary rule).
+Source CI owns the image build. A push to `main` first runs the Rust test job,
+then the trusted `deploy` runner publishes the private image as
+`forgejo.coilysiren.me/coilyco-gaming/galaxy-gen:<full-source-sha>`. The runner
+supplies package write authority as `REGISTRY_TOKEN`, and the publisher proves
+the remote immutable manifest after its single-architecture push. Browser e2e
+and tsc stay on GitHub PR CI because the in-cluster runner cannot reach the
+Playwright browser CDN.
+
+The deploy surface remains in
+[coilyco-bridge/deploy](https://forgejo.coilysiren.me/coilyco-bridge/deploy)
+under `services/galaxy-gen/`. That repo owns the chart, namespace, rollout,
+public ingress, and separate read-only `forgejo-registry` pull credential. It
+does not build this source. Never add deploy manifests back here.
 
 ---
 
 ## Commands
 
 Route every dev command through Ward, which reads [`.ward/ward.yaml`](.ward/ward.yaml). Run verbs with `ward exec <verb>`. The lockdown denies bare invocations of the underlying tools (`cargo`, `wasm-pack`, `npx`, etc.). Add new verbs to that file before invoking them.
+
+Run `ward exec image-publish-check` and `ward exec build-docker` when changing
+the Forgejo OCI publisher.
 
 ## See also
 

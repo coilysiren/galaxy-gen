@@ -56,12 +56,11 @@ RUN npm run build
 # -----------------------------------------------------------------------------
 # Stage 2: unprivileged nginx serving the built bundle.
 # -----------------------------------------------------------------------------
-# Self-contained serving image on the coilyco-bridge/deploy static-site
-# precedent (atlas, factory-game): nginx-unprivileged, uid 101, listens on
-# 8080, TLS terminated upstream by traefik + cert-manager. Built at rollout by
-# deploy's services/galaxy-gen/scripts/rollout.sh over this repo's git
-# context - replaces the busybox data bundle + initContainer + stock caddy
-# shape (galaxy-gen#22, retired with the in-repo deploy surface).
+# Self-contained serving image on the shared static-site precedent:
+# nginx-unprivileged, uid 101, listens on 8080, TLS terminated upstream by
+# traefik + cert-manager. Source Forgejo CI builds and publishes this image.
+# It replaces the busybox data bundle + initContainer + stock caddy shape
+# (galaxy-gen#22, retired with the in-repo deploy surface).
 FROM nginxinc/nginx-unprivileged:1.27-alpine AS runtime
 
 COPY nginx.conf /etc/nginx/conf.d/default.conf

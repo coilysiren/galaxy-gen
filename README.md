@@ -68,10 +68,19 @@ External contributors are welcome. The pre-commit pipeline includes the ward loc
 Deployed to [galaxy-gen.coilysiren.me](https://galaxy-gen.coilysiren.me).
 The deploy surface lives in the deploy monorepo
 ([coilyco-bridge/deploy](https://forgejo.coilysiren.me/coilyco-bridge/deploy),
-`services/galaxy-gen/`), which builds this repo's Dockerfile over the git
-context at rollout and serves it with unprivileged nginx on k3s on
-`kai-server`. A push to `main` here runs CI tests only; deploy-repo changes
-under `services/galaxy-gen/**` auto-roll the site.
+`services/galaxy-gen/`), which serves the source-owned image with unprivileged
+nginx on k3s. A push to `main` first tests the Rust core, then publishes the
+private image as
+`forgejo.coilysiren.me/coilyco-gaming/galaxy-gen:<full-source-sha>`. The deploy
+repo owns the separate read-only `forgejo-registry` pull credential, chart,
+rollout, and public ingress.
+
+Validate the local image and publisher through Ward:
+
+```bash
+ward exec image-publish-check
+ward exec build-docker
+```
 
 ## Commands
 
