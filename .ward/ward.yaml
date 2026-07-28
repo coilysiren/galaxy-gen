@@ -11,6 +11,9 @@ commands:
   install:
     run: bash scripts/ward-command.sh install
     description: Install Rust, WASM, and JS deps (cargo build + wasm-pack + npm install + playwright install).
+  deps-sync:
+    run: bash scripts/ward-command.sh deps-sync
+    description: Refresh package-lock.json after an intentional package.json change.
   test-rust:
     run: bash scripts/ward-command.sh test-rust
     description: cargo check + cargo test.

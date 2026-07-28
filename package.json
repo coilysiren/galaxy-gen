@@ -59,9 +59,6 @@
     "webpack-cli": "^7.0.2",
     "webpack-dev-server": "^5.2.3"
   },
-  "dependencies": {
-    "@sentry/browser": "^10.50.0"
-  },
   "overrides": {
     "uuid": "^14.0.0"
   }

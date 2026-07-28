@@ -24,6 +24,9 @@ case "${1:-}" in
     npm install
     npx playwright install chromium
     ;;
+  deps-sync)
+    npm install --package-lock-only
+    ;;
   test-rust)
     test_rust
     ;;
@@ -70,7 +73,6 @@ case "${1:-}" in
       --platform linux/amd64 \
       --progress plain \
       --build-arg BUILDKIT_INLINE_CACHE=1 \
-      --build-arg "SENTRY_DSN=${SENTRY_DSN:-}" \
       --cache-from "${image}:latest" \
       -t "${image}:${git_hash}" \
       -t "${image}:latest" \

@@ -1,5 +1,4 @@
 const CopyWebpackPlugin = require("copy-webpack-plugin");
-const webpack = require("webpack");
 const path = require("path");
 
 module.exports = {
@@ -37,10 +36,6 @@ module.exports = {
         { from: "src/js/favicon.svg" },
       ],
     }),
-    // Bake SENTRY_DSN at build time; browser has no later env hook.
-    new webpack.DefinePlugin({
-      "process.env.SENTRY_DSN": JSON.stringify(process.env.SENTRY_DSN || ""),
-    }),
   ],
   mode: "development",
   devtool: "eval-cheap-module-source-map",
@@ -49,9 +44,8 @@ module.exports = {
     aggregateTimeout: 200,
   },
   snapshot: {
-    // Default managedPaths treat all of node_modules as immutable, which
-    // serves a stale WASM module after a cargo-watch rebuild of pkg/.
-    // Un-manage only the symlinked wasm-pack output.
+    // Exclude the symlinked wasm-pack output from the otherwise immutable
+    // node_modules tree so cargo-watch rebuilds do not serve stale WASM.
     managedPaths: [/^(.+?[\\/]node_modules[\\/])(?!galaxy_gen_backend)/],
   },
   devServer: {
