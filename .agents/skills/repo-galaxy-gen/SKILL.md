@@ -5,7 +5,7 @@ description: Procedural galaxy simulation - Rust compiled to WASM, rendered in t
 
 # repo-galaxy-gen
 
-Pointer to `~/projects/coilysiren/galaxy-gen/`.
+Pointer to `~/projects/coilyco-gaming/galaxy-gen/`.
 
 - [`README.md`](../../../README.md) - what it is, quickstart, layout.
 - [`AGENTS.md`](../../../AGENTS.md) - agent-facing operating context for the repo.
