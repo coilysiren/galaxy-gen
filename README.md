@@ -1,5 +1,7 @@
 # galaxy-gen
 
+[![Galaxy Generator interface showing an irregular galaxy evolving into a spiral](docs/project-galaxy-gen.gif)](https://galaxy-gen.coilysiren.me)
+
 `{ rust → wasm → js }` galaxy generation simulation. Gravitational physics
 (Newton's law on a cell grid) computed in Rust, compiled to WebAssembly via
 [wasm-pack](https://github.com/rustwasm/wasm-pack), rendered in the browser
