@@ -39,7 +39,7 @@ The central black hole acts directly on gas as well as stars. Weak nuclear visco
 
 ## Web Worker tick loop (`src/js/lib/tick-worker.ts`)
 
-Physics off the main thread; worker owns its own `Galaxy` WASM instance. Zero-copy state transfer in/out. Render snapshots include gas sub-cell offsets, so the main-thread canvas preserves continuous physical motion instead of showing only integer cell hops. Live `dt` updates mid-run. Tick rate capped at 30/s. Graceful degradation when `Worker` is unavailable.
+Physics off the main thread; worker owns its own `Galaxy` WASM instance. Zero-copy state transfer in/out. Render snapshots include gas sub-cell offsets, so the main-thread canvas preserves continuous physical motion instead of showing only integer cell hops. Live `dt` updates mid-run. Tick rate capped at 20/s - the cap sets the render rate too, since the main thread draws once per snapshot. Graceful degradation when `Worker` is unavailable.
 
 ## WebGPU backend (`src/js/lib/webgpu.ts`)
 

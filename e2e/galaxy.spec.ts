@@ -4,6 +4,10 @@ import { test, expect, Page } from "@playwright/test";
 // constant so changing the shipped default is a single edit here too.
 const DEFAULT_SIZE = 500;
 
+// One quasar pulse cycle plus margin, so the sampler sees a peak and a
+// trough. QUASAR_PULSE_PERIOD 56 ticks / MAX_TICKS_PER_SEC 20.
+const PULSE_SAMPLE_MS = (56 / 20) * 1000 * 1.25;
+
 async function waitForWasm(page: Page) {
   await expect(page.getByTestId("app")).toHaveAttribute("data-wasm-ready", "true", {
     timeout: 30_000,
@@ -156,10 +160,10 @@ test.describe("Galaxy Generator", () => {
       null,
       { timeout: 20_000 }
     );
-    const pulseRange = await page.evaluate(async () => {
+    const pulseRange = await page.evaluate(async (windowMs) => {
       let min = 1;
       let max = 0;
-      const deadline = performance.now() + 2200;
+      const deadline = performance.now() + windowMs;
       while (performance.now() < deadline) {
         const pulse = Number(document.querySelector("#dataviz")?.getAttribute("data-quasar-pulse"));
         min = Math.min(min, pulse);
@@ -167,7 +171,7 @@ test.describe("Galaxy Generator", () => {
         await new Promise((resolve) => setTimeout(resolve, 25));
       }
       return { min, max };
-    });
+    }, PULSE_SAMPLE_MS);
     await page.getByTestId("btn-run").click();
     await expect(page.getByTestId("btn-run")).toHaveText("play");
     await expect(page.getByTestId("stat-quasar")).toHaveText("100%");

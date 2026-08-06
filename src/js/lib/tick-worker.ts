@@ -45,7 +45,16 @@ let scheduled = false;
 
 // Tick-rate ceiling. Uncapped, small grids run thousands of ticks/sec and
 // the sim evolves faster than anyone can watch.
-const MAX_TICKS_PER_SEC = 30;
+//
+// 20 rather than 30 because the cap sets the RENDER rate too: the main
+// thread draws once per snapshot, so every tick the worker emits is a
+// canvas frame someone has to pay for. 20 is a rate the worker sustains
+// at 500x500 even on a freshly seeded grid, where gas fills every cell
+// and Barnes-Hut is at its worst - so the sim advances at one steady
+// pace for a whole run instead of sagging at the start and speeding up
+// as gas collapses. It also leaves the main thread a third more
+// headroom per frame. See docs/perf-rewrite.md.
+const MAX_TICKS_PER_SEC = 20;
 const MIN_TICK_INTERVAL_MS = 1000 / MAX_TICKS_PER_SEC;
 
 function scheduleLoop(delayMs = 0) {

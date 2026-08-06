@@ -28,9 +28,9 @@ The ring uses scenario-owned collapse density and probability values. Cells outs
 
 The native probe reports four pitch-independent ring measurements:
 
-* `ring` is the visible gas mass fraction within 0.12 disk radii of the target.
-* `hollow` is the visible gas fraction outside the inner core.
-* `rcov` is the fraction of twelve annular sectors containing enough cells and mass.
-* `rw` is the mass-weighted radial RMS distance from the target, in disk radii.
+- `ring` is the visible gas mass fraction within 0.12 disk radii of the target.
+- `hollow` is the visible gas fraction outside the inner core.
+- `rcov` is the fraction of twelve annular sectors containing enough cells and mass.
+- `rw` is the mass-weighted radial RMS distance from the target, in disk radii.
 
 Acceptance combines all four with an occupied-cell floor. Seed 42 at size 50 must remain concentrated, hollow, azimuthally covered, narrow, resolved, and actively star-forming throughout ticks 1400 through 1500. Browser verification uses the same deterministic seed and tick links at a larger rendered size.

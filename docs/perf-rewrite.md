@@ -1182,8 +1182,8 @@ got - it could only make the sim evolve more slowly. Everything the
 viewer perceives as a hitch happens on the main thread, and the main
 thread was doing exactly one thing: drawing the canvas.
 
-Measured on Chrome with real GPU, seed 424242, at the sim's own tick cap
-of 30/s:
+Measured on Chrome with real GPU, seed 424242, at the sim's tick cap of
+30/s (the cap this work later lowered to 20 - see the closing section):
 
 | case       |  fps | p50 frame | p99 frame | janked frames |
 | ---------- | ---: | --------: | --------: | ------------: |
@@ -1314,11 +1314,11 @@ moved to 500.
 
 ## What is still on the table
 
-- **The fresh phase at 500 runs the sim at ~21 ticks/s, not the 30 cap.**
-  A just-seeded galaxy has gas in every cell, so the Barnes-Hut active
-  set is at its largest; the worker tick is ~27ms. It recovers to the cap
-  as gas collapses. Gravity is ~78% of that tick (`ward exec perf-profile`
-  attributes it), so this is where SIMD or an FMM would pay.
+- **Gravity is ~78% of the worker tick** (`ward exec perf-profile`
+  attributes it), and a freshly seeded 500 grid is its worst case: gas
+  fills every cell, so the Barnes-Hut active set is at its largest and
+  the tick runs ~30ms. That is what set the tick cap below. SIMD or an
+  FMM is where the next win lives.
 - **250 fresh still janks ~5% of frames.** A full grid of gas is the
   renderer's worst case at any size, and 250 renders more frames per
   second than 500 does, so it has less headroom per frame.
@@ -1334,3 +1334,32 @@ ward exec test-perf             # render frame + live pacing, real GPU
 
 `test-perf` needs the system Chrome. Running the perf specs under the
 default Playwright config measures SwiftShader, not your GPU.
+
+## Coda — the tick cap sets the render rate
+
+One knob was still mismatched. The worker capped itself at 30 ticks/s,
+and the main thread draws once per snapshot, so that cap was really a
+render-rate cap wearing a physics hat. At 500x500 the worker could not
+hold 30 during the opening of a run - a freshly seeded grid has gas in
+every cell - so the sim advanced at ~21 ticks/s early and sped up to ~28
+as gas collapsed. Visible as a run that quietly accelerates.
+
+Lowering the cap to 20 is a rate the worker sustains at 500x500 even at
+its worst, so a run advances at one steady pace from seed to maturity,
+and the main thread keeps a third more headroom per frame:
+
+| case       | ticks/s @ 30 cap | ticks/s @ 20 cap | jank @ 20 cap |
+| ---------- | ---------------: | ---------------: | ------------: |
+| 250 fresh  |             27.3 |             19.0 |   37/572 (6%) |
+| 250 mature |             27.5 |             18.7 |    1/716 (0%) |
+| 500 fresh  |             21.5 |             18.5 |    0/717 (0%) |
+| 500 mature |             27.5 |             18.5 |    0/720 (0%) |
+
+The cost is real and worth stating plainly: the galaxy evolves a third
+slower in wall-clock time.
+
+Note what this did _not_ fix. A freshly seeded 250 grid still drops ~6%
+of frames, because that jank is per-frame render cost in the full-gas
+phase, not render frequency - every one of its 62,500 blocks holds gas,
+which is the renderer's worst case at any size. Fewer frames per second
+means proportionally fewer expensive frames, not cheaper ones.
