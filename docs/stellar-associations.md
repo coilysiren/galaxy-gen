@@ -33,12 +33,28 @@ Release only clears `cluster_id`. Position, velocity, mass, age, lifecycle stage
 
 ## Rendering and state
 
-The full persisted star record remains the existing 14-float layout. Worker render snapshots add `clusterId` as the sixth value in each star record. JS reads the shared `STAR_RENDER_FLOATS` constant instead of duplicating the stride.
+The full persisted star record remains the existing 15-float layout. Worker
+render snapshots carry `clusterId` and age as the sixth and seventh values.
+JS reads the shared `STAR_RENDER_FLOATS` constant instead of duplicating the
+stride.
 
-The renderer groups still-bound members by id and derives one low-alpha radial glow from their weighted center and RMS spread. Groups with fewer than four visible members or a broad stream-like spread receive no glow. Clearing the physics id therefore removes the glow naturally.
+New main-sequence stars begin as dim embedded sources beneath both gas passes.
+Between age 12 and 72 they smoothstep into the exposed stellar layer as their
+faster natal cloud moves ahead. Association glow uses the same reveal weight,
+so an IMF batch does not appear as an instantaneous bright spray. Later
+lifecycle stages stay fully visible even though their age clocks reset.
+
+The renderer groups visible, still-bound members by id and derives one
+low-alpha radial glow from their weighted center and RMS spread. Groups with
+fewer than four visible members or a broad stream-like spread receive no glow.
+Clearing the physics id therefore removes the glow naturally.
 
 There is no serialized association object. `cluster_id` and `next_cluster_id` already round-trip in the star and meta buffers. The UI reports the cumulative number of distinct associations formed, not the number of `StarBirth` events.
 
 ## Validation
 
-Rust tests cover nearby joining, distinct distant formation, suppressed radial inheritance, prograde support, momentum-neutral binding, tidal release, and the six-float render contract. The native `ward exec debug-sim -- <ticks> <size> <seed-count> <start-seed>` probe accepts an exact URL seed for deterministic tuning before browser inspection.
+Rust tests cover nearby joining, distinct distant formation, suppressed radial
+inheritance, prograde support, momentum-neutral binding, tidal release, and
+the seven-float render contract. The native
+`ward exec debug-sim -- <ticks> <size> <seed-count> <start-seed>` probe
+accepts an exact URL seed for deterministic tuning before browser inspection.

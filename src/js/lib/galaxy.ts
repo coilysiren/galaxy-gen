@@ -20,7 +20,7 @@ export enum Scenario {
 export type ComputeBackend = "cpu" | "webgpu";
 
 export const isWebGPUAvailable = _isWebGPUAvailable;
-export const STAR_RENDER_FLOATS = 6;
+export const STAR_RENDER_FLOATS = 7;
 
 /** JS wrapper over WASM Galaxy. See `TickWorker` for the worker integration. */
 export class Frontend {
@@ -153,7 +153,7 @@ export class Frontend {
     return this.galaxy.star_count();
   }
 
-  /** Renderer packing: [x, y, luminosity, colorIndex, stage, clusterId]. */
+  /** Renderer packing: [x, y, luminosity, colorIndex, stage, clusterId, age]. */
   public starRenderArray(): Float32Array {
     return this.overrideStars ?? this.galaxy.star_render_data();
   }

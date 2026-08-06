@@ -650,9 +650,13 @@ function drawFrame(s: State, mass: Uint16Array) {
     ctx.globalCompositeOperation = "source-over";
   };
 
+  // Newborn main-sequence stars begin beneath the entire cloud field.
+  // As their natal gas moves ahead, age cross-fades them into the normal
+  // exposed layer instead of revealing an instantaneous pellet spray.
+  drawStars(s, toCx, toCy, "embedded");
   renderGas(false);
   drawAssociations(s, toCx, toCy);
-  drawStars(s, toCx, toCy);
+  drawStars(s, toCx, toCy, "exposed");
   // Dust sits under the foreground gas: it still dims the star field,
   // but the glow layer re-softens it so lanes read as embedded darkness
   // rather than holes punched in the clouds.
@@ -835,9 +839,8 @@ function blastRadius(mass: number, age: number): number {
 /// not the composition, and a busy epoch overlaps many shells.
 const BLAST_LIFE = 42;
 
-// Event flashes: supernova blast waves and star-birth glints. Duration
-// and brightness are render exaggerations of instantaneous events -
-// nothing here is sim state.
+// Event flashes are render exaggerations of instantaneous events.
+// Nothing here is simulation state.
 function drawTransients(s: State, toCx: (x: number) => number, toCy: (y: number) => number) {
   const t = s.lastTransients;
   if (!t || t.length === 0) return;
@@ -884,27 +887,6 @@ function drawTransients(s: State, toCx: (x: number) => number, toCy: (y: number)
         ctx.arc(px, py, (1.2 + heft * 1.5 + age * 0.15) * scale * 0.45, 0, Math.PI * 2);
         ctx.fill();
       }
-    } else if (kind === 1 && age < 18) {
-      // Star birth: a quick mint-green sparkle with tiny spikes. No real
-      // astro analog - and green on purpose: no star is ever green, so
-      // the birth marker cannot be confused with a bright cluster star.
-      const life = 1 - age / 18;
-      const budget = Math.min(mag / 250, 1);
-      const r = (0.5 + 0.6 * budget) * scale * (0.7 + 0.5 * (1 - life));
-      const a = 0.85 * life * life;
-      ctx.strokeStyle = `rgba(140,240,190,${(a * 0.7).toFixed(3)})`;
-      ctx.lineWidth = 0.6;
-      const spike = r * 2.6 * life;
-      ctx.beginPath();
-      ctx.moveTo(px - spike, py);
-      ctx.lineTo(px + spike, py);
-      ctx.moveTo(px, py - spike);
-      ctx.lineTo(px, py + spike);
-      ctx.stroke();
-      ctx.fillStyle = `rgba(185,255,220,${a.toFixed(3)})`;
-      ctx.beginPath();
-      ctx.arc(px, py, r, 0, Math.PI * 2);
-      ctx.fill();
     } else if (kind === 4 && age < 60) {
       // Planetary nebula: a slow, cool envelope around the exposed dwarf.
       const life = 1 - age / 60;
@@ -1008,6 +990,21 @@ type AssociationGlow = {
   y2: number;
 };
 
+const BIRTH_REVEAL_START = 12;
+const BIRTH_REVEAL_END = 72;
+const EMBEDDED_STAR_OPACITY = 0.22;
+
+function birthReveal(stars: Float32Array, i: number): number {
+  // Lifecycle transitions reset age, so only main-sequence stars use
+  // the natal-cloud reveal. Giants and remnants remain fully visible.
+  if (Math.round(stars[i + 4]) !== 0) return 1;
+  const t = Math.min(
+    1,
+    Math.max(0, (stars[i + 6] - BIRTH_REVEAL_START) / (BIRTH_REVEAL_END - BIRTH_REVEAL_START))
+  );
+  return t * t * (3 - 2 * t);
+}
+
 // Bound associations get one shared, restrained pool of unresolved light.
 // The glow is derived entirely from member positions and disappears as the
 // physics strips cluster ids, so a dissolving association naturally turns
@@ -1020,7 +1017,9 @@ function drawAssociations(s: State, toCx: (x: number) => number, toCy: (y: numbe
     const cluster = Math.round(stars[i + 5]);
     // Rust's u32::MAX sentinel rounds to 2^32 in f32.
     if (cluster >= 4_000_000_000) continue;
-    const weight = 1 + Math.pow(Math.max(0, stars[i + 2]), 0.18);
+    const reveal = birthReveal(stars, i);
+    if (reveal <= 0.02) continue;
+    const weight = reveal * (1 + Math.pow(Math.max(0, stars[i + 2]), 0.18));
     const x = stars[i];
     const y = stars[i + 1];
     const a = associations.get(cluster) ?? {
@@ -1031,7 +1030,7 @@ function drawAssociations(s: State, toCx: (x: number) => number, toCy: (y: numbe
       x2: 0,
       y2: 0,
     };
-    a.count++;
+    a.count += reveal;
     a.weight += weight;
     a.x += weight * x;
     a.y += weight * y;
@@ -1076,7 +1075,12 @@ function drawAssociations(s: State, toCx: (x: number) => number, toCy: (y: numbe
 // are bare points of their class color; the bright minority get a tight
 // glow; only the rare giants (top of the luminosity range) earn
 // diffraction spikes.
-function drawStars(s: State, toCx: (x: number) => number, toCy: (y: number) => number) {
+function drawStars(
+  s: State,
+  toCx: (x: number) => number,
+  toCy: (y: number) => number,
+  layer: "embedded" | "exposed"
+) {
   const stars = s.lastStars;
   if (!stars || stars.length === 0) return;
   const { ctx, size } = s;
@@ -1088,9 +1092,12 @@ function drawStars(s: State, toCx: (x: number) => number, toCy: (y: number) => n
   // glow rather than a sprinkle of isolated dots.
   ctx.globalCompositeOperation = "screen";
   for (let i = 0; i < stars.length; i += galaxy.STAR_RENDER_FLOATS) {
+    const reveal = birthReveal(stars, i);
+    const layerOpacity = layer === "embedded" ? (1 - reveal) * EMBEDDED_STAR_OPACITY : reveal;
+    if (layerOpacity <= 0.01) continue;
     // Radial fade into the halo; deep-halo stars do not render.
     const rad = Math.hypot(stars[i] - center, stars[i + 1] - center);
-    const fade = radialFade(rad, softR);
+    const fade = radialFade(rad, softR) * layerOpacity;
     if (fade <= 0.02) continue;
     const px = toCx(stars[i] - 0.5);
     const py = toCy(stars[i + 1] - 0.5);

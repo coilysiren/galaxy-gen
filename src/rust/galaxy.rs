@@ -1020,8 +1020,8 @@ impl Galaxy {
         self.stars.len()
     }
 
-    /// Renderer packing: [x, y, luminosity, color_index, stage, cluster_id]
-    /// per star.
+    /// Renderer packing:
+    /// [x, y, luminosity, color_index, stage, cluster_id, age] per star.
     pub fn star_render_data(&self) -> Vec<f32> {
         self.stars.render_data()
     }
@@ -1101,7 +1101,6 @@ impl Galaxy {
             }
             let (kind, cell) = match ev.kind {
                 crate::events::EventKind::Supernova => (2.0f32, ev.target),
-                crate::events::EventKind::StarBirth => (1.0f32, ev.target),
                 crate::events::EventKind::GammaRayBurst => (3.0f32, ev.target),
                 crate::events::EventKind::PlanetaryNebula => (4.0f32, ev.target),
                 crate::events::EventKind::TypeIaSupernova => (5.0f32, ev.target),
@@ -4404,11 +4403,13 @@ mod tests_stars_dynamics {
         let mut g = Galaxy::new(20, 0).seed_with_mode_seeded(5, Scenario::IrregularSpiral, 1);
         g.spawn_star(10.0, 10.0, 0.1, 0.0, 42.0);
         g.spawn_star(5.0, 5.0, 0.0, 0.1, 7.0);
+        g.stars.age[0] = 12.5;
         assert_eq!(g.star_count(), 2);
         let rd = g.star_render_data();
         assert_eq!(rd.len(), 2 * crate::stars::RENDER_FLOATS);
         assert_eq!(rd[0], 10.0);
-        assert!(rd[2] > rd[8], "heavier star must be more luminous");
+        assert_eq!(rd[6], 12.5, "render snapshot must carry stellar age");
+        assert!(rd[2] > rd[9], "heavier star must be more luminous");
         assert!(rd[5] >= 4_000_000_000.0, "debug stars have no association");
     }
 

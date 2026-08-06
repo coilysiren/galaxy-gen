@@ -628,12 +628,18 @@ test.describe("Galaxy Generator", () => {
     const after = await page.evaluate(() => {
       const fe: any = (window as any).__galaxyGen.frontend;
       const stars = fe.starRenderArray() as Float32Array;
-      return { count: fe.starCount(), sample: Array.from(stars.slice(0, 4)) };
+      return {
+        count: fe.starCount(),
+        stride: stars.length / fe.starCount(),
+        sample: Array.from(stars.slice(0, 7)),
+      };
     });
     expect(after.count).toBe(2);
+    expect(after.stride).toBe(7);
     // Stars moved from their spawn points but stayed in-world.
     expect(after.sample[0]).toBeGreaterThan(0);
     expect(after.sample[0]).toBeLessThan(50);
+    expect(after.sample[6]).toBeGreaterThan(0);
   });
 
   test("changing galaxy size changes cell count after re-init", async ({ page }) => {
