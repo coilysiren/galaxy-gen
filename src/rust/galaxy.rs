@@ -622,9 +622,9 @@ impl Galaxy {
     const HAWKING_COEFF: f32 = 12_000.0;
 
     // Quasar lifecycle. The age floor admits early well-fed nuclei, while
-    // the 1.5x growth gate keeps modest accretion from igniting. The brief
+    // the 1.2x growth gate keeps modest accretion from igniting. The brief
     // active phase ejects gas in discrete pulses.
-    const QUASAR_GROWTH_TRIGGER: f32 = 1.50;
+    const QUASAR_GROWTH_TRIGGER: f32 = 1.20;
     const QUASAR_RATE_TRIGGER: f32 = 0.00025;
     const QUASAR_EARLIEST_TICK: u64 = 1_000;
     const QUASAR_ACCRETION_EMA_KEEP: f32 = 0.92;
@@ -6396,15 +6396,15 @@ mod tests_black_hole {
             g
         };
 
-        let mut too_early = eligible_hole(999, 1.5);
+        let mut too_early = eligible_hole(999, 1.2);
         too_early.process_bh_accretion(0.5);
         assert_eq!(too_early.quasar_episode_count(), 0);
 
-        let mut too_small = eligible_hole(1_000, 1.49);
+        let mut too_small = eligible_hole(1_000, 1.19);
         too_small.process_bh_accretion(0.5);
         assert_eq!(too_small.quasar_episode_count(), 0);
 
-        let mut g = eligible_hole(1_000, 1.5);
+        let mut g = eligible_hole(1_000, 1.2);
         g.process_bh_accretion(0.5);
         assert_eq!(g.quasar_episode_count(), 1);
         assert_eq!(g.quasar_ticks_remaining, Galaxy::QUASAR_DURATION);
