@@ -41,6 +41,12 @@ struct Metrics {
     /// Fraction of stars inside 0.3 disk_r - the elliptical is mostly
     /// a star glow, so its concentration lives here, not in the gas.
     star_central: f64,
+    /// Resolved stellar spheroid measurements.
+    spheroid_concentration: f64,
+    spheroid_smoothness: f64,
+    spheroid_axis_ratio: f64,
+    spheroid_extent: f64,
+    spheroid_rotational_support: f64,
 }
 
 fn metrics(g: &Galaxy, size: u16) -> Metrics {
@@ -151,6 +157,11 @@ fn metrics(g: &Galaxy, size: u16) -> Metrics {
         } else {
             0.0
         },
+        spheroid_concentration: g.spheroid_concentration() as f64,
+        spheroid_smoothness: g.spheroid_smoothness() as f64,
+        spheroid_axis_ratio: g.spheroid_axis_ratio() as f64,
+        spheroid_extent: g.spheroid_extent() as f64,
+        spheroid_rotational_support: g.spheroid_rotational_support() as f64,
     }
 }
 
@@ -172,7 +183,7 @@ fn main() {
         .and_then(|a| a.parse().ok())
         .unwrap_or(12345);
     let checkpoints = [
-        0usize, 250, 500, 900, 1000, 1100, 1200, 1500, 2000, 3000, 4000,
+        0usize, 250, 500, 900, 1000, 1100, 1200, 1500, 2000, 3000, 4000, 5000,
     ];
 
     for (mode, name) in [
@@ -205,7 +216,7 @@ fn main() {
                 }
                 let m = metrics(&g, size);
                 println!(
-                    "t={cp:5}  nz={:5}  gas={:6}  vt={:+.3}  rot={:+.2}  r_pk={:.2}  ctr={:.2}  m2={:.2}  spi={:.2}  cov={:.2}  ring={:.2}  hollow={:.2}  rcov={:.2}  rw={:.2}  svt={:+.3}  sctr={:.2}  stars={:5}  mixed={:5}  ev(col/b/sn/sh/d/cap/nsm/grb/pn/ia)={}/{}/{}/{}/{}/{}/{}/{}/{}/{}",
+                    "t={cp:5}  nz={:5}  gas={:6}  vt={:+.3}  rot={:+.2}  r_pk={:.2}  ctr={:.2}  m2={:.2}  spi={:.2}  cov={:.2}  ring={:.2}  hollow={:.2}  rcov={:.2}  rw={:.2}  svt={:+.3}  sctr={:.2}  econ={:.2}  esm={:.2}  axis={:.2}  ext={:.2}  erot={:.2}  stars={:5}  mixed={:5}  ev(col/b/sn/sh/d/cap/nsm/grb/pn/ia)={}/{}/{}/{}/{}/{}/{}/{}/{}/{}",
                     m.nonzero,
                     m.total,
                     m.vt,
@@ -221,6 +232,11 @@ fn main() {
                     m.ring_width,
                     m.star_vt,
                     m.star_central,
+                    m.spheroid_concentration,
+                    m.spheroid_smoothness,
+                    m.spheroid_axis_ratio,
+                    m.spheroid_extent,
+                    m.spheroid_rotational_support,
                     g.star_count(),
                     g.phase_mixed_count(),
                     g.events_executed(0),

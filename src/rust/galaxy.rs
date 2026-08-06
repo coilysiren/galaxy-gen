@@ -227,14 +227,14 @@ impl Scenario {
                 eject_swirl: 0.0,
                 spiral_amp: 0.0,
                 spiral_wave_strength: 0.0,
-                gas_pressure: 0.0,
+                gas_pressure: 0.35,
                 spiral_arm_transport: 0.0,
                 spiral_pattern_step: 0.0,
                 ring_wave_strength: 0.0,
                 ring_radius_frac: 0.0,
                 ring_transport: 0.0,
-                collapse_density_fraction: 0.75,
-                collapse_chance: 0.35,
+                collapse_density_fraction: 0.4,
+                collapse_chance: 0.2,
                 smoke_contrast: 0.9,
                 radial_scale_frac: 0.28,
                 seed_gain: 1.5,
@@ -1493,6 +1493,33 @@ impl Galaxy {
         self.ring_structure().3
     }
 
+    /// Fraction of resolved stellar mass inside 0.35 disk radii.
+    pub fn spheroid_concentration(&self) -> f32 {
+        self.spheroid_structure().0
+    }
+
+    /// One minus the strongest low-order angular Fourier mode. Higher values
+    /// distinguish a smooth spheroid from surviving clumps, bars, and arms.
+    pub fn spheroid_smoothness(&self) -> f32 {
+        self.spheroid_structure().1
+    }
+
+    /// Projected minor-to-major axis ratio from the stellar inertia tensor.
+    pub fn spheroid_axis_ratio(&self) -> f32 {
+        self.spheroid_structure().2
+    }
+
+    /// Mass-weighted stellar RMS radius in units of the disk radius.
+    pub fn spheroid_extent(&self) -> f32 {
+        self.spheroid_structure().3
+    }
+
+    /// Net stellar rotation divided by RMS speed. Pressure-supported systems
+    /// approach zero, while a cold rotating disk approaches one.
+    pub fn spheroid_rotational_support(&self) -> f32 {
+        self.spheroid_structure().4
+    }
+
     fn spiral_structure(&self) -> (f32, f32) {
         const BINS: usize = 8;
         let center = self.size as f32 * 0.5;
@@ -1618,6 +1645,102 @@ impl Galaxy {
             (1.0 - core / total) as f32,
             covered as f32 / SECTORS as f32,
             (radial_variance / total).sqrt() as f32,
+        )
+    }
+
+    fn spheroid_structure(&self) -> (f32, f32, f32, f32, f32) {
+        const HARMONICS: usize = 4;
+        let center = self.size as f32 * 0.5;
+        let disk_r = self.disk_radius();
+        let mut total = 0.0f64;
+        let mut central = 0.0f64;
+        let mut weighted_x = 0.0f64;
+        let mut weighted_y = 0.0f64;
+        let mut radius_sq = 0.0f64;
+        let mut tangential = 0.0f64;
+        let mut speed_sq = 0.0f64;
+        let mut harmonic_re = [0.0f64; HARMONICS];
+        let mut harmonic_im = [0.0f64; HARMONICS];
+        for i in 0..self.stars.len() {
+            let mass = self.stars.mass[i] as f64;
+            if mass <= 0.0 {
+                continue;
+            }
+            let x = self.stars.pos_x[i] - center;
+            let y = self.stars.pos_y[i] - center;
+            let r = (x * x + y * y).sqrt();
+            if r > disk_r {
+                continue;
+            }
+            total += mass;
+            weighted_x += mass * x as f64;
+            weighted_y += mass * y as f64;
+            radius_sq += mass * (r * r) as f64;
+            if r <= disk_r * 0.35 {
+                central += mass;
+            }
+            if r > 1e-3 {
+                let theta = y.atan2(x);
+                for harmonic in 1..=HARMONICS {
+                    let phase = theta * harmonic as f32;
+                    harmonic_re[harmonic - 1] += mass * phase.cos() as f64;
+                    harmonic_im[harmonic - 1] += mass * phase.sin() as f64;
+                }
+                tangential +=
+                    mass * ((x * self.stars.vel_y[i] - y * self.stars.vel_x[i]) / r) as f64;
+            }
+            speed_sq += mass
+                * (self.stars.vel_x[i] * self.stars.vel_x[i]
+                    + self.stars.vel_y[i] * self.stars.vel_y[i]) as f64;
+        }
+        if total <= 0.0 {
+            return (0.0, 0.0, 0.0, 0.0, 0.0);
+        }
+
+        let centroid_x = weighted_x / total;
+        let centroid_y = weighted_y / total;
+        let mut moment_xx = 0.0f64;
+        let mut moment_yy = 0.0f64;
+        let mut moment_xy = 0.0f64;
+        for i in 0..self.stars.len() {
+            let mass = self.stars.mass[i] as f64;
+            let center_x = self.stars.pos_x[i] as f64 - center as f64;
+            let center_y = self.stars.pos_y[i] as f64 - center as f64;
+            if mass <= 0.0 || center_x * center_x + center_y * center_y > (disk_r * disk_r) as f64 {
+                continue;
+            }
+            let x = center_x - centroid_x;
+            let y = center_y - centroid_y;
+            moment_xx += mass * x * x;
+            moment_yy += mass * y * y;
+            moment_xy += mass * x * y;
+        }
+        let trace = moment_xx + moment_yy;
+        let discriminant = ((moment_xx - moment_yy).powi(2) + 4.0 * moment_xy.powi(2)).sqrt();
+        let major = ((trace + discriminant) * 0.5).max(0.0);
+        let minor = ((trace - discriminant) * 0.5).max(0.0);
+        let axis_ratio = if major > 0.0 {
+            (minor / major).sqrt()
+        } else {
+            0.0
+        };
+        let strongest_mode = harmonic_re
+            .iter()
+            .zip(harmonic_im.iter())
+            .map(|(&re, &im)| (re * re + im * im).sqrt() / total)
+            .fold(0.0f64, f64::max);
+        let mean_tangential = (tangential / total).abs();
+        let rms_speed = (speed_sq / total).sqrt();
+        (
+            (central / total) as f32,
+            (1.0 - strongest_mode).clamp(0.0, 1.0) as f32,
+            axis_ratio as f32,
+            ((radius_sq / total).sqrt() / disk_r as f64) as f32,
+            if rms_speed > 0.0 {
+                (mean_tangential / rms_speed).clamp(0.0, 1.0) as f32
+            } else {
+                0.0
+            },
         )
     }
 
@@ -4606,12 +4729,10 @@ mod tests_intial_generation {
     }
 
     #[test]
-    fn test_tick_with_accel_matches_tick_when_forces_are_zero() {
-        // With zero external forces and cells at rest, one tick cannot
-        // transfer mass: the flow relaxation spins cells up toward the
-        // circular flow, but a single tick's drift is far below the
-        // half-cell transfer threshold. (A seeded galaxy no longer
-        // works here - seeding bakes in orbital velocity by design.)
+    fn test_tick_with_accel_keeps_scenario_pressure_when_external_forces_are_zero() {
+        // External acceleration replaces gravity only. Scenario-owned
+        // pressure must still redistribute an isolated dense cell while
+        // preserving the total mass ledger.
         let mut g = Galaxy::new(8, 2);
         g.scenario = Scenario::IrregularElliptical;
         g.mass[2 * 8 + 3] = 30;
@@ -4621,7 +4742,11 @@ mod tests_intial_generation {
 
         let no_force = g.tick_with_accel(0.5, &zeros, &zeros);
 
-        assert_eq!(no_force.mass, g.mass);
+        assert_ne!(no_force.mass, g.mass);
+        assert_eq!(
+            no_force.mass.iter().map(|&mass| mass as u64).sum::<u64>(),
+            g.mass.iter().map(|&mass| mass as u64).sum::<u64>()
+        );
     }
 }
 
@@ -4851,6 +4976,149 @@ mod tests_dynamics {
     }
 
     #[test]
+    fn test_irregular_elliptical_relaxes_into_a_resolved_pressure_supported_spheroid() {
+        let mut g = Galaxy::new(50, 0).seed_with_mode_seeded(25, Scenario::IrregularElliptical, 42);
+        let mut start_births = None;
+        let mut start_mixed = None;
+        let mut min_concentration = (f32::INFINITY, 0);
+        let mut max_concentration = (0.0f32, 0);
+        let mut min_smoothness = (f32::INFINITY, 0);
+        let mut min_axis_ratio = (f32::INFINITY, 0);
+        let mut min_extent = (f32::INFINITY, 0);
+        let mut max_extent = (0.0f32, 0);
+        let mut max_rotation = (0.0f32, 0);
+        let mut min_gas_cells = (usize::MAX, 0);
+        let mut min_stars = (usize::MAX, 0);
+        let mut max_spiral = (0.0f32, 0);
+        let mut max_ring = (0.0f32, 0);
+        for tick in 1..=1000 {
+            g = g.tick(0.5);
+            if tick < 900 {
+                continue;
+            }
+            let concentration = g.spheroid_concentration();
+            let smoothness = g.spheroid_smoothness();
+            let axis_ratio = g.spheroid_axis_ratio();
+            let extent = g.spheroid_extent();
+            let rotation = g.spheroid_rotational_support();
+            let gas_cells = g.mass.iter().filter(|&&mass| mass > 0).count();
+            let stars = g.stars.len();
+            let spiral = g.spiral_coherence();
+            let ring = g.ring_concentration();
+            start_births
+                .get_or_insert(g.events_executed(crate::events::EventKind::StarBirth as u32));
+            start_mixed.get_or_insert(g.phase_mixed_count);
+            if concentration < min_concentration.0 {
+                min_concentration = (concentration, tick);
+            }
+            if concentration > max_concentration.0 {
+                max_concentration = (concentration, tick);
+            }
+            if smoothness < min_smoothness.0 {
+                min_smoothness = (smoothness, tick);
+            }
+            if axis_ratio < min_axis_ratio.0 {
+                min_axis_ratio = (axis_ratio, tick);
+            }
+            if extent < min_extent.0 {
+                min_extent = (extent, tick);
+            }
+            if extent > max_extent.0 {
+                max_extent = (extent, tick);
+            }
+            if rotation > max_rotation.0 {
+                max_rotation = (rotation, tick);
+            }
+            if gas_cells < min_gas_cells.0 {
+                min_gas_cells = (gas_cells, tick);
+            }
+            if stars < min_stars.0 {
+                min_stars = (stars, tick);
+            }
+            if spiral > max_spiral.0 {
+                max_spiral = (spiral, tick);
+            }
+            if ring > max_ring.0 {
+                max_ring = (ring, tick);
+            }
+        }
+        assert!(
+            min_concentration.0 >= 0.45 && max_concentration.0 <= 0.85,
+            "stellar concentration ranged from {:?} to {:?}",
+            min_concentration,
+            max_concentration
+        );
+        assert!(
+            min_smoothness.0 >= 0.7,
+            "smoothness low at {min_smoothness:?}"
+        );
+        assert!(
+            min_axis_ratio.0 >= 0.65,
+            "axis ratio low at {min_axis_ratio:?}"
+        );
+        assert!(
+            min_extent.0 >= 0.3 && max_extent.0 <= 0.65,
+            "stellar extent ranged from {:?} to {:?}",
+            min_extent,
+            max_extent
+        );
+        assert!(max_rotation.0 <= 0.6, "rotation high at {max_rotation:?}");
+        assert!(
+            min_gas_cells.0 >= 150,
+            "gas unresolved at {min_gas_cells:?}"
+        );
+        assert!(
+            min_stars.0 >= 500,
+            "stellar body unresolved at {min_stars:?}"
+        );
+        assert!(
+            max_spiral.0 <= 0.35,
+            "spiral signature high at {max_spiral:?}"
+        );
+        assert!(max_ring.0 <= 0.25, "ring signature high at {max_ring:?}");
+        assert!(
+            g.events_executed(crate::events::EventKind::StarBirth as u32)
+                > start_births.expect("tick 900 birth checkpoint"),
+            "star formation must continue while the spheroid settles"
+        );
+        assert!(
+            g.phase_mixed_count > start_mixed.expect("tick 900 phase-mix checkpoint"),
+            "the stellar body must continue phase-mixing"
+        );
+    }
+
+    #[test]
+    fn test_spheroid_metrics_distinguish_a_resolved_body_from_a_bar_and_point_mass() {
+        let mut spheroid = Galaxy::new(40, 0);
+        let center = 20.0;
+        for index in 0..16 {
+            let angle = std::f32::consts::TAU * index as f32 / 16.0;
+            spheroid.spawn_star(
+                center + 8.0 * angle.cos(),
+                center + 8.0 * angle.sin(),
+                0.0,
+                0.0,
+                5.0,
+            );
+        }
+        assert!(spheroid.spheroid_smoothness() > 0.95);
+        assert!(spheroid.spheroid_axis_ratio() > 0.95);
+        assert!(spheroid.spheroid_extent() > 0.3);
+
+        let mut bar = Galaxy::new(40, 0);
+        for offset in [-8.0, -6.0, -4.0, -2.0, 2.0, 4.0, 6.0, 8.0] {
+            bar.spawn_star(center + offset, center, 0.0, 0.0, 10.0);
+        }
+        assert!(bar.spheroid_smoothness() < 0.05);
+        assert!(bar.spheroid_axis_ratio() < 0.05);
+
+        let mut point_mass = Galaxy::new(40, 0);
+        point_mass.spawn_star(center, center, 0.0, 0.0, 80.0);
+        assert!(point_mass.spheroid_concentration() > 0.95);
+        assert!(point_mass.spheroid_extent() < 0.01);
+    }
+
+    #[test]
     fn test_ring_remains_hollow_resolved_and_star_forming_for_100_ticks() {
         let mut g = Galaxy::new(50, 0).seed_with_mode_seeded(25, Scenario::BangRing, 42);
         let mut start_births = None;
@@ -4986,24 +5254,30 @@ mod tests_dynamics {
         // seeded (-y, x) rotation sense... (-y, x)/r with y=0, x=-5 is
         // (0, -1) scaled - i.e. negative vy.
         let vc = p.flow_support * p.v_flat * r / (r * r + rc * rc).sqrt();
-        let next = g.tick(0.5);
-        let moved = (0..next.n)
-            .find(|&i| next.mass[i] == 50)
-            .expect("cell survives");
+        g.process_gravity(0.5);
+        g.process_integrate_gas(0.5);
+        let total_mass = g.mass.iter().map(|&mass| mass as f32).sum::<f32>();
+        let actual_vt = g
+            .mass
+            .iter()
+            .enumerate()
+            .map(|(i, &mass)| mass as f32 * g.vel_y[i])
+            .sum::<f32>()
+            / total_mass;
         // After one tick from rest: v = a_halo dt + (v0 + a dt - u) part;
         // radially the halo pulls +x (toward center), tangentially the
         // relaxation closes the gap from 0 toward -vc by (1 - decay).
         let decay = (-p.flow_drag * 0.5f32).exp();
         let expected_vt = -vc * (1.0 - decay);
         assert!(
-            (next.vel_y[moved] - expected_vt).abs() < 1e-3,
+            (actual_vt - expected_vt).abs() < 1e-3,
             "tangential relaxation must close the gap by 1-exp(-flow_drag dt): expected {expected_vt}, got {}",
-            next.vel_y[moved]
+            actual_vt
         );
         assert!(
-            next.vel_y[moved] < 0.0,
+            actual_vt < 0.0,
             "a cell at rest must spin up prograde, got vy={}",
-            next.vel_y[moved]
+            actual_vt
         );
     }
 }
@@ -5048,7 +5322,7 @@ mod tests_golden {
                 10864616295652119511u64,
                 11971691907940808674,
                 4260859134213941995,
-                4274638675712473258,
+                16074849645298020283,
             ]
         );
     }
