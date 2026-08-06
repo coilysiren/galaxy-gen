@@ -47,6 +47,10 @@ struct Metrics {
     spheroid_axis_ratio: f64,
     spheroid_extent: f64,
     spheroid_rotational_support: f64,
+    bh_growth: f64,
+    bh_accretion_rate: f64,
+    quasar_activity: f64,
+    quasar_episodes: u32,
 }
 
 fn metrics(g: &Galaxy, size: u16) -> Metrics {
@@ -162,6 +166,10 @@ fn metrics(g: &Galaxy, size: u16) -> Metrics {
         spheroid_axis_ratio: g.spheroid_axis_ratio() as f64,
         spheroid_extent: g.spheroid_extent() as f64,
         spheroid_rotational_support: g.spheroid_rotational_support() as f64,
+        bh_growth: g.bh_growth_factor() as f64,
+        bh_accretion_rate: g.bh_accretion_rate() as f64,
+        quasar_activity: g.quasar_activity() as f64,
+        quasar_episodes: g.quasar_episode_count(),
     }
 }
 
@@ -182,16 +190,24 @@ fn main() {
         .nth(4)
         .and_then(|a| a.parse().ok())
         .unwrap_or(12345);
+    let scenario_filter: Option<usize> = std::env::args().nth(5).and_then(|a| a.parse().ok());
     let checkpoints = [
-        0usize, 250, 500, 900, 1000, 1100, 1200, 1500, 2000, 3000, 4000, 5000,
+        0usize, 250, 500, 900, 1000, 1100, 1200, 1500, 2000, 2300, 2400, 2500, 2600, 2700, 3000,
+        4000, 5000,
     ];
 
-    for (mode, name) in [
+    for (scenario_index, (mode, name)) in [
         (Scenario::BangRing, "bang=>ring"),
         (Scenario::BangSpiral, "bang=>spiral"),
         (Scenario::IrregularSpiral, "irregular=>spiral"),
         (Scenario::IrregularElliptical, "irregular=>elliptical"),
-    ] {
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        if scenario_filter.is_some_and(|filter| filter != scenario_index) {
+            continue;
+        }
         if n_seeds == 1 {
             // Per-process timing profile at the seeded state (native only -
             // the wasm build has no monotonic clock without JS interop).
@@ -216,7 +232,7 @@ fn main() {
                 }
                 let m = metrics(&g, size);
                 println!(
-                    "t={cp:5}  nz={:5}  gas={:6}  vt={:+.3}  rot={:+.2}  r_pk={:.2}  ctr={:.2}  m2={:.2}  spi={:.2}  cov={:.2}  ring={:.2}  hollow={:.2}  rcov={:.2}  rw={:.2}  svt={:+.3}  sctr={:.2}  econ={:.2}  esm={:.2}  axis={:.2}  ext={:.2}  erot={:.2}  stars={:5}  mixed={:5}  ev(col/b/sn/sh/d/cap/nsm/grb/pn/ia)={}/{}/{}/{}/{}/{}/{}/{}/{}/{}",
+                    "t={cp:5}  nz={:5}  gas={:6}  vt={:+.3}  rot={:+.2}  r_pk={:.2}  ctr={:.2}  m2={:.2}  spi={:.2}  cov={:.2}  ring={:.2}  hollow={:.2}  rcov={:.2}  rw={:.2}  svt={:+.3}  sctr={:.2}  econ={:.2}  esm={:.2}  axis={:.2}  ext={:.2}  erot={:.2}  bh={:.2}  q={:.2}  qep={}  qrate={:.5}  stars={:5}  mixed={:5}  ev(col/b/sn/sh/d/cap/nsm/grb/pn/ia/q)={}/{}/{}/{}/{}/{}/{}/{}/{}/{}/{}",
                     m.nonzero,
                     m.total,
                     m.vt,
@@ -237,6 +253,10 @@ fn main() {
                     m.spheroid_axis_ratio,
                     m.spheroid_extent,
                     m.spheroid_rotational_support,
+                    m.bh_growth,
+                    m.quasar_activity,
+                    m.quasar_episodes,
+                    m.bh_accretion_rate,
                     g.star_count(),
                     g.phase_mixed_count(),
                     g.events_executed(0),
@@ -249,6 +269,7 @@ fn main() {
                     g.events_executed(7),
                     g.events_executed(8),
                     g.events_executed(9),
+                    g.events_executed(10),
                 );
             }
         }

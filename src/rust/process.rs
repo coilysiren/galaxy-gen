@@ -92,6 +92,21 @@ static REGISTRY: &[ProcessDescriptor] = &[
         run: Galaxy::process_gas_pressure,
     },
     ProcessDescriptor {
+        // Persisted active-galactic-nucleus state drives opposed gas
+        // acceleration and radiation before the gas integration step.
+        name: "quasar_feedback",
+        reads: &[StateKey::GasMass, StateKey::GasAccel, StateKey::BlackHole],
+        writes: &[
+            StateKey::GasAccel,
+            StateKey::RadiationField,
+            StateKey::BlackHole,
+        ],
+        requires_fresh: &[StateKey::GasAccel],
+        cadence: 1,
+        phase_offset: 0,
+        run: Galaxy::process_quasar_feedback,
+    },
+    ProcessDescriptor {
         // Offset 1 so the field exists from the first tick after seeding
         // instead of three ticks of zero-field star drift.
         name: "gravity_field",
@@ -325,6 +340,7 @@ mod tests_graph {
                 "spiral_density_wave",
                 "ring_density_wave",
                 "gas_pressure",
+                "quasar_feedback",
                 "gravity_field",
                 "integrate_gas",
                 "integrate_stars",

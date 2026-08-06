@@ -166,6 +166,7 @@ export function Interface() {
   const [phaseMixedCount, setPhaseMixedCount] = React.useState(0);
   const [bhFactor, setBhFactor] = React.useState(1);
   const [gasPct, setGasPct] = React.useState(100);
+  const [quasarActivity, setQuasarActivity] = React.useState(0);
   // Seed-time baselines for the popsci ratios.
   const initialBhRef = React.useRef(1);
 
@@ -201,6 +202,9 @@ export function Interface() {
     bhMass: number;
     gasColdFraction: number;
     lensScale: number;
+    quasarActivity: number;
+    quasarAxis: number;
+    quasarEpisodes: number;
   } | null>(null);
   const renderedTickIdRef = React.useRef<number>(-1);
 
@@ -340,6 +344,7 @@ export function Interface() {
     setPhaseMixedCount(0);
     setBhFactor(1);
     setGasPct(100);
+    setQuasarActivity(0);
     initialBhRef.current = Math.max(1, next.bhMass());
     const warp = pendingWarpRef.current;
     pendingWarpRef.current = 0;
@@ -386,6 +391,7 @@ export function Interface() {
     setPhaseMixedCount(fe.phaseMixedCount());
     setBhFactor(fe.bhMass() / initialBhRef.current);
     setGasPct(100 * fe.gasColdFraction());
+    setQuasarActivity(fe.quasarActivity());
   };
 
   // Fast-forward to a target tick in chunks that yield to the event
@@ -423,6 +429,11 @@ export function Interface() {
       galaxyFrontendRef.current.setOverrideMetallicity(snap.metallicity);
       galaxyFrontendRef.current.setOverrideLensScale(snap.lensScale);
       galaxyFrontendRef.current.setOverrideStellarHaloMass(snap.stellarHaloMass);
+      galaxyFrontendRef.current.setOverrideQuasar(
+        snap.quasarActivity,
+        snap.quasarAxis,
+        snap.quasarEpisodes
+      );
       dataviz.updateData(galaxyFrontendRef.current, snap.tickId);
       setStarCount(snap.stars.length / galaxy.STAR_RENDER_FLOATS);
       setSnCount(snap.snCount);
@@ -437,6 +448,7 @@ export function Interface() {
       setPhaseMixedCount(snap.phaseMixedCount);
       setBhFactor(snap.bhMass / initialBhRef.current);
       setGasPct(100 * snap.gasColdFraction);
+      setQuasarActivity(snap.quasarActivity);
 
       fpsSamplesRef.current.push(performance.now());
       const cutoff = performance.now() - 1000;
@@ -490,7 +502,10 @@ export function Interface() {
           stellarHaloMass,
           bhMass,
           gasColdFraction,
-          lensScale
+          lensScale,
+          quasarActivity,
+          quasarAxis,
+          quasarEpisodes
         ) => {
           latestSnapshotRef.current = {
             mass,
@@ -516,6 +531,9 @@ export function Interface() {
             bhMass,
             gasColdFraction,
             lensScale,
+            quasarActivity,
+            quasarAxis,
+            quasarEpisodes,
           };
         }
       );
@@ -652,6 +670,14 @@ export function Interface() {
                   <td>black hole</td>
                   <td className="text-right">×{bhFactor.toFixed(2)}</td>
                 </tr>
+                {quasarActivity > 0 && (
+                  <tr>
+                    <td>quasar</td>
+                    <td className="text-right" data-testid="stat-quasar">
+                      {(quasarActivity * 100).toFixed(0)}%
+                    </td>
+                  </tr>
+                )}
                 <tr>
                   <td>gas reservoir</td>
                   <td className="text-right">{gasPct.toFixed(0)}%</td>

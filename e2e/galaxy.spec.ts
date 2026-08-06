@@ -136,6 +136,45 @@ test.describe("Galaxy Generator", () => {
     expect(frame2).toEqual(frame);
   });
 
+  test("the reference seed ignites and renders a quasar near tick 2500", async ({ page }) => {
+    await page.goto(
+      "/?seed=409007255426557616&size=50&scenario=irregular-elliptical&t=2400&lock=1"
+    );
+    await waitForWasm(page);
+    await expect(page.getByTestId("stat-ticks")).toHaveText("2400", {
+      timeout: 45_000,
+    });
+    await expect(page.getByTestId("stat-quasar")).toHaveCount(0);
+
+    await page.getByTestId("btn-run").click();
+    await page.waitForFunction(
+      () => Number(document.querySelector('[data-testid="stat-ticks"]')?.textContent) >= 2500,
+      null,
+      { timeout: 20_000 }
+    );
+    await page.getByTestId("btn-run").click();
+    await expect(page.getByTestId("btn-run")).toHaveText("play");
+    await expect(page.getByTestId("stat-quasar")).toHaveText("100%");
+
+    const rendered = await page.locator("#dataviz").evaluate((host) => {
+      const activity = Number(host.getAttribute("data-quasar-activity"));
+      const axis = Number(host.getAttribute("data-quasar-axis"));
+      const canvas = host.querySelector("canvas") as HTMLCanvasElement;
+      const ctx = canvas.getContext("2d")!;
+      const pixels = ctx.getImageData(0, 0, canvas.width, canvas.height).data;
+      let litPixels = 0;
+      for (let i = 0; i < pixels.length; i += 4) {
+        if (pixels[i] + pixels[i + 1] + pixels[i + 2] > 45) litPixels++;
+      }
+      return { activity, axis, litPixels };
+    });
+
+    expect(rendered.activity).toBeGreaterThan(0.95);
+    expect(rendered.axis).toBeGreaterThanOrEqual(0);
+    expect(rendered.axis).toBeLessThanOrEqual(Math.PI);
+    expect(rendered.litPixels).toBeGreaterThan(100);
+  });
+
   test("ticks actually redistribute mass (sim is not frozen)", async ({ page }) => {
     await page.getByTestId("btn-init").click();
 

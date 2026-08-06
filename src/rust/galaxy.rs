@@ -324,6 +324,13 @@ pub struct Galaxy {
     /// Seed-time black hole mass; the renderer scales the lens depth by
     /// sqrt(bh_mass / bh_mass_initial).
     bh_mass_initial: f32,
+    /// Smoothed gas mass swallowed per accretion scan.
+    bh_accretion_ema: f32,
+    /// Persisted active-galactic-nucleus duty-cycle state.
+    quasar_ticks_remaining: u32,
+    quasar_cooldown: u32,
+    quasar_axis: f32,
+    quasar_episodes: u32,
     /// Mass lost to Hawking radiation - the irreversible ledger sink.
     radiated_total: f64,
     /// Heavy elements carried into the central black hole.
@@ -614,6 +621,22 @@ impl Galaxy {
     const BH_CAPTURE_MAX_SPEED: f32 = 0.8;
     const HAWKING_COEFF: f32 = 12_000.0;
 
+    // Quasar lifecycle. The growth threshold puts the size-250 reference
+    // seed's first ignition near tick 2500. A long episode keeps that
+    // nucleus active through its supplied tick-5262 checkpoint.
+    const QUASAR_GROWTH_TRIGGER: f32 = 1.20;
+    const QUASAR_RATE_TRIGGER: f32 = 0.00025;
+    const QUASAR_EARLIEST_TICK: u64 = 2_400;
+    const QUASAR_ACCRETION_EMA_KEEP: f32 = 0.92;
+    const QUASAR_DURATION: u32 = 3_000;
+    const QUASAR_COOLDOWN: u32 = 1_200;
+    const QUASAR_FADE_IN: f32 = 80.0;
+    const QUASAR_FADE_OUT: f32 = 240.0;
+    const QUASAR_JET_ACCEL: f32 = 0.055;
+    const QUASAR_JET_LENGTH_FRAC: f32 = 1.15;
+    const QUASAR_JET_OPENING: f32 = 0.16;
+    const QUASAR_RADIATION_DEPOSIT: f32 = 14.0;
+
     // RNG stream ids (see rng_stream).
     const RNG_COLLAPSE_WATCH: u64 = 1;
     const RNG_STAR_BIRTH: u64 = 2;
@@ -672,6 +695,11 @@ impl Galaxy {
             stars: Stars::new(),
             bh_mass: 0.0,
             bh_mass_initial: 0.0,
+            bh_accretion_ema: 0.0,
+            quasar_ticks_remaining: 0,
+            quasar_cooldown: 0,
+            quasar_axis: 0.0,
+            quasar_episodes: 0,
             radiated_total: 0.0,
             bh_metal_mass: 0.0,
             radiated_metal_mass: 0.0,
@@ -999,6 +1027,11 @@ impl Galaxy {
         g.stars = Stars::new();
         g.bh_mass = total_mass as f32 * Galaxy::BH_MASS_FRACTION;
         g.bh_mass_initial = g.bh_mass;
+        g.bh_accretion_ema = 0.0;
+        g.quasar_ticks_remaining = 0;
+        g.quasar_cooldown = 0;
+        g.quasar_axis = 0.0;
+        g.quasar_episodes = 0;
         g.radiated_total = 0.0;
         g.bh_metal_mass = g.bh_mass as f64 * Galaxy::INITIAL_METALLICITY as f64;
         g.radiated_metal_mass = 0.0;
@@ -1060,6 +1093,7 @@ impl Galaxy {
         next.process_spiral_density_wave(time);
         next.process_ring_density_wave(time);
         next.process_gas_pressure(time);
+        next.process_quasar_feedback(time);
         next.apply_acceleration(time);
         next
     }
@@ -1185,6 +1219,43 @@ impl Galaxy {
         self.bh_mass
     }
 
+    pub fn bh_growth_factor(&self) -> f32 {
+        if self.bh_mass_initial <= 0.0 {
+            0.0
+        } else {
+            self.bh_mass / self.bh_mass_initial
+        }
+    }
+
+    /// Current quasar brightness and feedback strength in [0, 1].
+    pub fn quasar_activity(&self) -> f32 {
+        if self.quasar_ticks_remaining == 0 {
+            return 0.0;
+        }
+        let age = Galaxy::QUASAR_DURATION.saturating_sub(self.quasar_ticks_remaining) as f32;
+        let fade_in = (age / Galaxy::QUASAR_FADE_IN).clamp(0.0, 1.0);
+        let fade_out =
+            (self.quasar_ticks_remaining as f32 / Galaxy::QUASAR_FADE_OUT).clamp(0.0, 1.0);
+        fade_in.min(fade_out)
+    }
+
+    pub fn quasar_axis_value(&self) -> f32 {
+        self.quasar_axis
+    }
+
+    pub fn quasar_episode_count(&self) -> u32 {
+        self.quasar_episodes
+    }
+
+    /// Smoothed accretion mass per scan, normalized by seeded hole mass.
+    pub fn bh_accretion_rate(&self) -> f32 {
+        if self.bh_mass_initial <= 0.0 {
+            0.0
+        } else {
+            self.bh_accretion_ema / self.bh_mass_initial
+        }
+    }
+
     /// Authoritative simulation tick, continuous across worker
     /// pause/resume (it rides the meta state). f64 because wasm-bindgen
     /// maps u64 to BigInt and every consumer wants a plain number.
@@ -1251,6 +1322,7 @@ impl Galaxy {
             7 => GammaRayBurst,
             8 => PlanetaryNebula,
             9 => TypeIaSupernova,
+            10 => QuasarIgnition,
             _ => CloudDissipate,
         };
         self.events.executed_count(k)
@@ -1293,16 +1365,17 @@ impl Galaxy {
         }
     }
 
-    /// Versioned scheduler/event/RNG state: [version=7, tick lo/hi, seed
+    /// Versioned scheduler/event/RNG state: [version=8, tick lo/hi, seed
     /// lo/hi, bh_mass bits, bh_initial bits, radiated f64 bits lo/hi,
     /// halo-gas lo/hi, stellar-halo f64 lo/hi, phase-mixed lo/hi,
     /// next_cluster, next_star, next_binary, scenario, five composition
-    /// ledger f64 values, n_cells, heat bytes
+    /// ledger f64 values, n_cells, accretion EMA, quasar ticks, cooldown,
+    /// axis, episodes, heat bytes
     /// packed 4-per-u32, heat_parent lo/hi per cell, then events].
     pub fn sim_state_meta(&self) -> Vec<u32> {
         let heat_words = self.n.div_ceil(4);
-        let mut out = Vec::with_capacity(30 + heat_words + self.n * 2 + 6);
-        out.push(7u32);
+        let mut out = Vec::with_capacity(35 + heat_words + self.n * 2 + 6);
+        out.push(8u32);
         out.push(self.tick_count as u32);
         out.push((self.tick_count >> 32) as u32);
         out.push(self.master_seed as u32);
@@ -1335,6 +1408,11 @@ impl Galaxy {
             out.push((bits >> 32) as u32);
         }
         out.push(self.n as u32);
+        out.push(self.bh_accretion_ema.to_bits());
+        out.push(self.quasar_ticks_remaining);
+        out.push(self.quasar_cooldown);
+        out.push(self.quasar_axis.to_bits());
+        out.push(self.quasar_episodes);
         for chunk in self.collapse_heat.chunks(4) {
             let mut w = 0u32;
             for (k, &b) in chunk.iter().enumerate() {
@@ -1351,7 +1429,7 @@ impl Galaxy {
     }
 
     pub fn restore_sim_state_meta(&mut self, data: &[u32]) {
-        if data.len() < 30 || data[0] != 7 {
+        if data.len() < 30 || (data[0] != 7 && data[0] != 8) {
             return;
         }
         self.tick_count = data[1] as u64 | ((data[2] as u64) << 32);
@@ -1375,14 +1453,32 @@ impl Galaxy {
         if n_cells != self.n {
             return;
         }
+        let heat_at = if data[0] == 8 {
+            if data.len() < 35 {
+                return;
+            }
+            self.bh_accretion_ema = f32::from_bits(data[30]);
+            self.quasar_ticks_remaining = data[31];
+            self.quasar_cooldown = data[32];
+            self.quasar_axis = f32::from_bits(data[33]);
+            self.quasar_episodes = data[34];
+            35
+        } else {
+            self.bh_accretion_ema = 0.0;
+            self.quasar_ticks_remaining = 0;
+            self.quasar_cooldown = 0;
+            self.quasar_axis = 0.0;
+            self.quasar_episodes = 0;
+            30
+        };
         let heat_words = n_cells.div_ceil(4);
-        let parents_at = 30 + heat_words;
+        let parents_at = heat_at + heat_words;
         let events_at = parents_at + n_cells * 2;
         if data.len() < events_at {
             return;
         }
         for i in 0..n_cells {
-            let w = data[30 + i / 4];
+            let w = data[heat_at + i / 4];
             self.collapse_heat[i] = ((w >> (8 * (i % 4))) & 0xFF) as u8;
         }
         for i in 0..n_cells {
@@ -3080,6 +3176,76 @@ impl Galaxy {
         }
     }
 
+    /// Drive two opposed, radiation-bright gas outflows while the active
+    /// galactic nucleus is lit. Gas stays on the existing integrator and
+    /// dissipation paths, so displaced and heated mass remains accounted.
+    pub(crate) fn process_quasar_feedback(&mut self, _time: f32) {
+        if self.quasar_ticks_remaining == 0 {
+            self.quasar_cooldown = self.quasar_cooldown.saturating_sub(1);
+            return;
+        }
+
+        let activity = self.quasar_activity();
+        let axis_x = self.quasar_axis.cos();
+        let axis_y = self.quasar_axis.sin();
+        let center = self.size as f32 * 0.5;
+        let length = self.disk_radius() * Galaxy::QUASAR_JET_LENGTH_FRAC;
+        if activity > 0.0 {
+            for i in 0..self.n {
+                if self.mass[i] == 0 {
+                    continue;
+                }
+                let x = self.xs_i[i] as f32 + self.frac_x[i] - center;
+                let y = self.ys_i[i] as f32 + self.frac_y[i] - center;
+                let along = x * axis_x + y * axis_y;
+                let distance = along.abs();
+                if distance > length {
+                    continue;
+                }
+                let lateral = (-x * axis_y + y * axis_x).abs();
+                let width = 1.5 + distance * Galaxy::QUASAR_JET_OPENING;
+                if lateral > width {
+                    continue;
+                }
+                let collimation = (1.0 - lateral / width).powi(2);
+                let taper = 0.35 + 0.65 * (1.0 - distance / length);
+                let direction = if along < 0.0 { -1.0 } else { 1.0 };
+                let acceleration =
+                    Galaxy::QUASAR_JET_ACCEL * activity * collimation * taper * direction;
+                self.acc_x[i] += axis_x * acceleration;
+                self.acc_y[i] += axis_y * acceleration;
+            }
+
+            let res = Galaxy::FIELD_RES;
+            let field_cell = self.size as f32 / res as f32;
+            for fy in 0..res {
+                for fx in 0..res {
+                    let x = (fx as f32 + 0.5) * field_cell - center;
+                    let y = (fy as f32 + 0.5) * field_cell - center;
+                    let along = x * axis_x + y * axis_y;
+                    let distance = along.abs();
+                    if distance > length {
+                        continue;
+                    }
+                    let lateral = (-x * axis_y + y * axis_x).abs();
+                    let width = 2.5 + distance * Galaxy::QUASAR_JET_OPENING * 1.45;
+                    if lateral > width {
+                        continue;
+                    }
+                    let collimation = (1.0 - lateral / width).powi(2);
+                    let taper = 0.45 + 0.55 * (1.0 - distance / length);
+                    self.radiation[fy * res + fx] +=
+                        Galaxy::QUASAR_RADIATION_DEPOSIT * activity * collimation * taper;
+                }
+            }
+        }
+
+        self.quasar_ticks_remaining -= 1;
+        if self.quasar_ticks_remaining == 0 {
+            self.quasar_cooldown = Galaxy::QUASAR_COOLDOWN;
+        }
+    }
+
     /// The black hole feeds: a fraction of nearby core gas accretes each
     /// run, and stars inside the capture radius are marked for capture
     /// (the swallow itself is a BlackHoleCapture event next tick).
@@ -3087,6 +3253,7 @@ impl Galaxy {
         if self.bh_mass <= 0.0 {
             return;
         }
+        let mass_before = self.bh_mass;
         let center = self.size as f32 * 0.5;
         let elapsed = time * 8.0;
         let p = self.scenario.params();
@@ -3138,6 +3305,41 @@ impl Galaxy {
             let metals = self.remove_cell_mass_with_metals(i, take);
             self.bh_mass += take as f32;
             self.bh_metal_mass += metals as f64;
+        }
+
+        let accreted = (self.bh_mass - mass_before).max(0.0);
+        let keep = Galaxy::QUASAR_ACCRETION_EMA_KEEP;
+        self.bh_accretion_ema = self.bh_accretion_ema * keep + accreted * (1.0 - keep);
+        let growth = if self.bh_mass_initial > 0.0 {
+            self.bh_mass / self.bh_mass_initial
+        } else {
+            0.0
+        };
+        if self.quasar_ticks_remaining == 0
+            && self.quasar_cooldown == 0
+            && self.tick_count >= Galaxy::QUASAR_EARLIEST_TICK
+            && growth >= Galaxy::QUASAR_GROWTH_TRIGGER
+            && self.bh_accretion_rate() >= Galaxy::QUASAR_RATE_TRIGGER
+        {
+            let mut hash = self.master_seed
+                ^ (self.quasar_episodes as u64 + 1).wrapping_mul(0x9E37_79B9_7F4A_7C15);
+            hash ^= hash >> 30;
+            hash = hash.wrapping_mul(0xBF58_476D_1CE4_E5B9);
+            hash ^= hash >> 27;
+            hash = hash.wrapping_mul(0x94D0_49BB_1331_11EB);
+            hash ^= hash >> 31;
+            self.quasar_axis = (hash as u32 as f32 / u32::MAX as f32) * std::f32::consts::PI;
+            self.quasar_ticks_remaining = Galaxy::QUASAR_DURATION;
+            self.quasar_episodes += 1;
+            let center_cell = (self.size as u32 / 2) * self.size as u32 + self.size as u32 / 2;
+            self.events.emit(
+                self.tick_count,
+                crate::events::EventKind::QuasarIgnition,
+                crate::events::NO_REF,
+                center_cell,
+                self.bh_accretion_rate(),
+                crate::events::NO_PARENT,
+            );
         }
 
         let cap_sq = Galaxy::BH_CAPTURE_RADIUS * Galaxy::BH_CAPTURE_RADIUS;
@@ -3223,6 +3425,7 @@ impl Galaxy {
                 crate::events::EventKind::GammaRayBurst => self.handle_gamma_ray_burst(&ev),
                 crate::events::EventKind::PlanetaryNebula => self.handle_planetary_nebula(&ev),
                 crate::events::EventKind::TypeIaSupernova => self.handle_type_ia_supernova(&ev),
+                crate::events::EventKind::QuasarIgnition => {}
             }
             self.events.record_executed(ev);
         }
@@ -6106,6 +6309,65 @@ mod tests_black_hole {
             "the inner nucleus must still leak inward"
         );
     }
+
+    #[test]
+    fn test_quasar_feedback_drives_opposed_heated_jets_without_breaking_ledgers() {
+        let mut g = Galaxy::new(40, 0);
+        let center = 20usize;
+        let left = center * 40 + center - 6;
+        let right = center * 40 + center + 6;
+        let off_axis = (center + 6) * 40 + center;
+        for cell in [left, right, off_axis] {
+            g.mass[cell] = 40;
+            g.metal_mass[cell] = 4.0;
+        }
+        g.quasar_axis = 0.0;
+        g.quasar_ticks_remaining = Galaxy::QUASAR_DURATION - 100;
+        g.quasar_episodes = 1;
+        let baryons = g.baryonic_total();
+        let metals = g.tracked_metal_total();
+
+        g.process_quasar_feedback(0.5);
+
+        assert!(g.acc_x[left] < 0.0, "the negative jet must push left");
+        assert!(g.acc_x[right] > 0.0, "the positive jet must push right");
+        assert_eq!(g.acc_y[left], 0.0);
+        assert_eq!(g.acc_y[right], 0.0);
+        assert_eq!(g.acc_x[off_axis], 0.0);
+        assert!(
+            g.radiation_at_cell(right) > g.radiation_at_cell(off_axis),
+            "the ionization cone must heat its axis more strongly"
+        );
+        assert_eq!(g.baryonic_total(), baryons);
+        assert_eq!(g.tracked_metal_total(), metals);
+    }
+
+    #[test]
+    fn test_reference_seed_ignites_its_first_quasar_near_tick_2500() {
+        let mut g = Galaxy::new(50, 0).seed_with_mode_seeded(
+            25,
+            Scenario::IrregularElliptical,
+            409_007_255_426_557_616,
+        );
+        let baryons = g.baryonic_total();
+        let metals = g.tracked_metal_total();
+        for _ in 0..2400 {
+            g = g.tick(0.5);
+        }
+        assert_eq!(g.quasar_episode_count(), 0);
+        assert_eq!(g.quasar_activity(), 0.0);
+
+        for _ in 2400..2500 {
+            g = g.tick(0.5);
+        }
+        assert_eq!(g.quasar_episode_count(), 1);
+        assert!(g.quasar_activity() > 0.95);
+        assert_eq!(g.events.executed_count(EventKind::QuasarIgnition), 1);
+        assert!(g.quasar_axis_value().is_finite());
+        assert!((0.0..=std::f32::consts::PI).contains(&g.quasar_axis_value()));
+        assert!((g.baryonic_total() - baryons).abs() < 1.0);
+        assert!((g.tracked_metal_total() - metals - g.metal_produced_total).abs() < 0.02);
+    }
 }
 
 #[cfg(test)]
@@ -6115,7 +6377,12 @@ mod tests_state_transfer {
     #[test]
     fn roundtrips_mass_and_velocity() {
         // Seed + tick a galaxy to get non-trivial vel/frac state.
-        let g = Galaxy::new(8, 1).seed(5).tick(1.0).tick(1.0);
+        let mut g = Galaxy::new(8, 1).seed(5).tick(1.0).tick(1.0);
+        g.bh_accretion_ema = 3.5;
+        g.quasar_ticks_remaining = Galaxy::QUASAR_DURATION - 100;
+        g.quasar_cooldown = 17;
+        g.quasar_axis = 0.7;
+        g.quasar_episodes = 2;
 
         let mass = g.mass();
         let vx = g.vel_x();
@@ -6140,6 +6407,11 @@ mod tests_state_transfer {
         assert_eq!(rehydrated.vel_y, vy);
         assert_eq!(rehydrated.frac_x, fx);
         assert_eq!(rehydrated.frac_y, fy);
+        assert_eq!(rehydrated.bh_accretion_ema, g.bh_accretion_ema);
+        assert_eq!(rehydrated.quasar_ticks_remaining, g.quasar_ticks_remaining);
+        assert_eq!(rehydrated.quasar_cooldown, g.quasar_cooldown);
+        assert_eq!(rehydrated.quasar_axis, g.quasar_axis);
+        assert_eq!(rehydrated.quasar_episodes, g.quasar_episodes);
 
         // Ticking the fully rehydrated galaxy should produce the same next
         // state. Gas arrays alone no longer suffice because the live black
@@ -6149,6 +6421,8 @@ mod tests_state_transfer {
         assert_eq!(next_orig.mass, next_rehyd.mass);
         assert_eq!(next_orig.vel_x, next_rehyd.vel_x);
         assert_eq!(next_orig.vel_y, next_rehyd.vel_y);
+        assert_eq!(next_orig.radiation, next_rehyd.radiation);
+        assert_eq!(next_orig.sim_state_meta(), next_rehyd.sim_state_meta());
     }
 }
 

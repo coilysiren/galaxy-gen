@@ -36,6 +36,9 @@ export class Frontend {
   private overrideMetallicity: Float32Array | null = null;
   private overrideLensScale: number | null = null;
   private overrideStellarHaloMass: number | null = null;
+  private overrideQuasarActivity: number | null = null;
+  private overrideQuasarAxis: number | null = null;
+  private overrideQuasarEpisodes: number | null = null;
   // CPU uses `Galaxy.tick`; WebGPU uses `tick_with_accel` after WGSL forces.
   private backend: ComputeBackend = "cpu";
   private gpuBackend: WebGPUForceBackend | null = null;
@@ -73,6 +76,9 @@ export class Frontend {
     this.overrideFracY = null;
     this.overrideMetallicity = null;
     this.overrideStellarHaloMass = null;
+    this.overrideQuasarActivity = null;
+    this.overrideQuasarAxis = null;
+    this.overrideQuasarEpisodes = null;
     const next = this.galaxy.seed_with_mode(additionalMass, mode as unknown as wasm.Scenario);
     this.galaxy.free();
     this.galaxy = next;
@@ -89,6 +95,9 @@ export class Frontend {
     this.overrideFracY = null;
     this.overrideMetallicity = null;
     this.overrideStellarHaloMass = null;
+    this.overrideQuasarActivity = null;
+    this.overrideQuasarAxis = null;
+    this.overrideQuasarEpisodes = null;
     const next = this.galaxy.seed_with_mode_seeded(
       additionalMass,
       mode as unknown as wasm.Scenario,
@@ -105,6 +114,9 @@ export class Frontend {
     this.overrideStars = null;
     this.overrideMetallicity = null;
     this.overrideStellarHaloMass = null;
+    this.overrideQuasarActivity = null;
+    this.overrideQuasarAxis = null;
+    this.overrideQuasarEpisodes = null;
     const next = this.galaxy.tick(timeModifier);
     this.galaxy.free();
     this.galaxy = next;
@@ -122,6 +134,9 @@ export class Frontend {
       this.overrideFracY = null;
       this.overrideMetallicity = null;
       this.overrideStellarHaloMass = null;
+      this.overrideQuasarActivity = null;
+      this.overrideQuasarAxis = null;
+      this.overrideQuasarEpisodes = null;
       const mass = this.galaxy.mass();
       const { acc_x, acc_y } = await this.gpuBackend.computeAccelerations(mass, this.galaxySize);
       const next = this.galaxy.tick_with_accel(timeModifier, acc_x, acc_y);
@@ -259,6 +274,24 @@ export class Frontend {
     this.overrideStellarHaloMass = v;
   }
 
+  public quasarActivity(): number {
+    return this.overrideQuasarActivity ?? this.galaxy.quasar_activity();
+  }
+
+  public quasarAxis(): number {
+    return this.overrideQuasarAxis ?? this.galaxy.quasar_axis_value();
+  }
+
+  public quasarEpisodes(): number {
+    return this.overrideQuasarEpisodes ?? this.galaxy.quasar_episode_count();
+  }
+
+  public setOverrideQuasar(activity: number, axis: number, episodes: number): void {
+    this.overrideQuasarActivity = activity;
+    this.overrideQuasarAxis = axis;
+    this.overrideQuasarEpisodes = episodes;
+  }
+
   /** Debug/test spawn; production stars come from StarBirth events. */
   public spawnStar(x: number, y: number, vx: number, vy: number, mass: number): number {
     this.overrideStars = null;
@@ -319,6 +352,9 @@ export class Frontend {
     this.overrideStars = null;
     this.overrideMetallicity = null;
     this.overrideStellarHaloMass = null;
+    this.overrideQuasarActivity = null;
+    this.overrideQuasarAxis = null;
+    this.overrideQuasarEpisodes = null;
   }
 
   /** Point renderer at worker-produced mass buffer. Skips WASM round-trip. */
@@ -380,7 +416,10 @@ export class TickWorker {
     stellarHaloMass: number,
     bhMass: number,
     gasColdFraction: number,
-    lensScale: number
+    lensScale: number,
+    quasarActivity: number,
+    quasarAxis: number,
+    quasarEpisodes: number
   ) => void;
   private stopResolver: ((state: StoppedState | null) => void) | null = null;
 
@@ -408,7 +447,10 @@ export class TickWorker {
       stellarHaloMass: number,
       bhMass: number,
       gasColdFraction: number,
-      lensScale: number
+      lensScale: number,
+      quasarActivity: number,
+      quasarAxis: number,
+      quasarEpisodes: number
     ) => void
   ) {
     if (typeof Worker === "undefined") {
@@ -450,7 +492,10 @@ export class TickWorker {
         msg.stellarHaloMass,
         msg.bhMass,
         msg.gasColdFraction,
-        msg.lensScale
+        msg.lensScale,
+        msg.quasarActivity,
+        msg.quasarAxis,
+        msg.quasarEpisodes
       );
     } else if (msg.type === "stopped") {
       if (!this.stopResolver) return;

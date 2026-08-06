@@ -26,9 +26,11 @@ pub enum EventKind {
     PlanetaryNebula = 8,
     /// A white-dwarf binary underwent thermonuclear disruption.
     TypeIaSupernova = 9,
+    /// Sustained central accretion ignited an active galactic nucleus.
+    QuasarIgnition = 10,
 }
 
-pub const EVENT_KIND_COUNT: usize = 10;
+pub const EVENT_KIND_COUNT: usize = 11;
 
 /// No-source / no-target / no-parent sentinels.
 pub const NO_REF: u32 = u32::MAX;
@@ -241,6 +243,7 @@ fn kind_from_u32(v: u32) -> EventKind {
         7 => EventKind::GammaRayBurst,
         8 => EventKind::PlanetaryNebula,
         9 => EventKind::TypeIaSupernova,
+        10 => EventKind::QuasarIgnition,
         _ => EventKind::CloudDissipate,
     }
 }
@@ -297,19 +300,21 @@ mod tests_event_queue {
         q.emit(9, EventKind::ShockWave, 5, 77, -3.5, 1);
         q.emit(9, EventKind::GammaRayBurst, 9, 42, 18.0, 2);
         q.emit_with_aux(9, EventKind::TypeIaSupernova, 10, 43, 8.0, 11.0, 3);
+        q.emit(9, EventKind::QuasarIgnition, NO_REF, 44, 1.0, NO_PARENT);
         let flat = q.to_flat();
         let mut back = EventQueue::from_flat(&flat);
         let due = back.take_due(10);
-        assert_eq!(due.len(), 4);
+        assert_eq!(due.len(), 5);
         assert_eq!(due[0].kind, EventKind::Supernova);
         assert_eq!(due[1].payload, -3.5);
         assert_eq!(due[1].parent, 1);
         assert_eq!(due[2].kind, EventKind::GammaRayBurst);
         assert_eq!(due[3].kind, EventKind::TypeIaSupernova);
         assert_eq!(due[3].aux, 11.0);
+        assert_eq!(due[4].kind, EventKind::QuasarIgnition);
         // Emission after restore continues the id sequence.
         let id = back.emit(10, EventKind::CloudCollapse, 0, NO_REF, 0.0, NO_PARENT);
-        assert_eq!(id, 5);
+        assert_eq!(id, 6);
     }
 
     #[test]

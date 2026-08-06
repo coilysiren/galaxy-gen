@@ -22,6 +22,7 @@ Deterministic queued-event model:
 - execution order is stable (tick, seq), where seq is emission order within the emitting tick; ids are globally monotonic
 - each event carries kind, source, target, two scalar payloads, and a causal parent id, so a `StarBirth` can carry mass plus composition while a supernova-induced birth remains traceable through `ShockWave` to the `Supernova` that caused it
 - a bounded ring of executed events feeds instrumentation counters and renderer transients - a supernova flash is the renderer's reading of a Supernova event, never authoritative state
+- `QuasarIgnition` records the discrete start and its accretion rate, while serialized quasar duration, cooldown, and axis remain authoritative for long-lived physics and rendering
 
 ## RNG service
 
@@ -33,9 +34,11 @@ Same seed + same tick count + same dt sequence -> identical state. Guarded by go
 
 ## The causal loop
 
-Registry order (also the golden-ordering test): gravity, spiral_density_wave, ring_density_wave, gas_pressure, gravity_field, integrate_gas, integrate_stars, radiation_field, collapse_watch, stellar_halo, stellar_aging, bh_accretion, bh_evaporation, gas_dissipation, gas_fountain. Motion runs every tick, fields every 4 ticks, and lifecycle rules every 8-16 ticks.
+Registry order (also the golden-ordering test): gravity, spiral_density_wave, ring_density_wave, gas_pressure, quasar_feedback, gravity_field, integrate_gas, integrate_stars, radiation_field, collapse_watch, stellar_halo, stellar_aging, bh_accretion, bh_evaporation, gas_dissipation, gas_fountain. Motion runs every tick, fields every 4 ticks, and lifecycle rules every 8-16 ticks.
 
 The loop, end to end: gas clumps under gravity -> scenario density waves gather gas into spiral lanes or an annulus, while the elliptical scenario assembles without a wave -> gas pressure and conservative transport keep the reservoir resolved -> dense, cool cells accumulate collapse heat -> CloudCollapse consumes gas into a birth budget -> StarBirth joins or creates a temporary stellar association whose masses sum exactly to the budget -> stars deposit radiation, which resists further collapse and lifts hot gas out of the visible disk -> the galactic fountain cools halo gas back into moving disk filaments while its cold share follows a deterministic 40-60% limit cycle -> stellar_aging retires light stars to temporary remnants and detonates heavy ones -> Supernova returns about 80% of the star's mass to nearby gas, leaves a neutron star, and emits ShockWave -> the shock boosts collapse heat around the blast and preserves causal parentage for any induced CloudCollapse and StarBirth.
+
+The black-hole branch closes another feedback loop: nuclear viscosity delivers low-angular-momentum gas -> `bh_accretion` grows the hole and smooths its feeding rate -> sustained growth emits `QuasarIgnition` and starts persisted active-nucleus state -> `quasar_feedback` accelerates opposed gas cones and writes ionizing radiation before gas integration -> `gas_dissipation` lifts irradiated material into the hot halo -> `gas_fountain` can later return that same accounted mass to the disk. The renderer reads the persisted activity and axis, not the one-tick ignition event. See [quasar-feedback.md](quasar-feedback.md).
 
 `spiral_density_wave` and `ring_density_wave` write their scenario force to gas acceleration only. `gas_pressure` follows as the shared isothermal density-gradient response, including for the wave-free elliptical scenario. None alters the coarse field consumed by stars. The following `integrate_gas` process applies conservative neighbor pressure flux and bounded cold-gas transport down an active arm or annular potential when present. Mass, heavy elements, and linear momentum remain closed across these transfers. See [spiral-density-waves.md](spiral-density-waves.md), [ring-density-waves.md](ring-density-waves.md), and [elliptical-relaxation.md](elliptical-relaxation.md).
 
@@ -55,5 +58,6 @@ Conservation: the baryonic ledger (cold gas + hot halo gas + resolved stars + di
 - [spiral-density-waves.md](spiral-density-waves.md) - persistent arm physics and morphology checks
 - [ring-density-waves.md](ring-density-waves.md) - annular gas physics and morphology checks
 - [elliptical-relaxation.md](elliptical-relaxation.md) - spheroid assembly and morphology checks
+- [quasar-feedback.md](quasar-feedback.md) - active-nucleus ignition, bipolar feedback, and reference-seed acceptance
 - [tick-worker.md](tick-worker.md) - worker message protocol
 - [FEATURES.md](FEATURES.md) - capability inventory

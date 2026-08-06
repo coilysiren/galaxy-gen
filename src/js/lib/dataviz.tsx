@@ -190,6 +190,8 @@ interface State {
   lastMetallicity: Float32Array | null;
   lastLensScale: number;
   lastStellarHaloMass: number;
+  lastQuasarActivity: number;
+  lastQuasarAxis: number;
   cleanup: () => void;
 }
 
@@ -204,6 +206,8 @@ function publishView(s: State) {
   host.setAttribute("data-cam-ty", camera.ty.toFixed(2));
   host.setAttribute("data-cam-zoom", camera.zoom.toFixed(4));
   host.setAttribute("data-frame-angle", frameAngle(s).toFixed(6));
+  host.setAttribute("data-quasar-activity", s.lastQuasarActivity.toFixed(4));
+  host.setAttribute("data-quasar-axis", s.lastQuasarAxis.toFixed(6));
   host.setAttribute("data-frame-rate", s.frameAngularRate.toFixed(8));
 }
 
@@ -421,6 +425,8 @@ export function initViz(
     lastMetallicity: null,
     lastLensScale: 1,
     lastStellarHaloMass: 0,
+    lastQuasarActivity: 0,
+    lastQuasarAxis: 0,
     cleanup,
   };
   publishView(state);
@@ -433,7 +439,6 @@ export function initData(galaxyFrontend: galaxy.Frontend) {
 export function updateData(galaxyFrontend: galaxy.Frontend, simTick?: number) {
   if (!state) return;
   if (simTick != null) state.simTick = simTick;
-  publishView(state);
   const mass = galaxyFrontend.massArray();
   // Copy so zoom/pan interactions after the sim stops still have data
   // to redraw from.
@@ -446,6 +451,9 @@ export function updateData(galaxyFrontend: galaxy.Frontend, simTick?: number) {
   state.lastMetallicity = galaxyFrontend.metallicityArray().slice();
   state.lastLensScale = galaxyFrontend.lensScale();
   state.lastStellarHaloMass = galaxyFrontend.stellarHaloMass();
+  state.lastQuasarActivity = galaxyFrontend.quasarActivity();
+  state.lastQuasarAxis = galaxyFrontend.quasarAxis();
+  publishView(state);
   drawFrame(state, state.lastMass);
 }
 
@@ -669,11 +677,86 @@ function drawFrame(s: State, mass: Uint16Array) {
   renderDust();
   renderGas(true);
   drawTransients(s, toCx, toCy);
+  drawQuasar(s, toCx, toCy);
 
   ctx.restore();
 
   applyShockShimmer(s);
   applyBlackHoleLens(s);
+}
+
+// An active nucleus is long-lived simulation state, not an event flash.
+// Its seed-stable axis matches the two physical gas/radiation cones.
+function drawQuasar(s: State, toCx: (x: number) => number, toCy: (y: number) => number) {
+  const activity = s.lastQuasarActivity;
+  if (activity <= 0) return;
+
+  const { ctx, size, scale } = s;
+  const center = size / 2;
+  const cx = toCx(center - 0.5);
+  const cy = toCy(center - 0.5);
+  const ux = Math.cos(s.lastQuasarAxis);
+  const uy = -Math.sin(s.lastQuasarAxis);
+  const px = -uy;
+  const py = ux;
+  const length = size * 0.58 * scale;
+  const coneWidth = size * (0.045 + activity * 0.035) * scale;
+  const pulse = 0.94 + 0.06 * Math.sin(s.simTick * 0.19);
+
+  ctx.save();
+  ctx.globalCompositeOperation = "screen";
+  for (const direction of [-1, 1]) {
+    const dx = ux * direction;
+    const dy = uy * direction;
+    const ex = cx + dx * length;
+    const ey = cy + dy * length;
+    const cone = ctx.createLinearGradient(cx, cy, ex, ey);
+    cone.addColorStop(0, `rgba(255,246,230,${(0.62 * activity).toFixed(3)})`);
+    cone.addColorStop(0.18, `rgba(190,215,255,${(0.3 * activity).toFixed(3)})`);
+    cone.addColorStop(0.72, `rgba(102,154,238,${(0.13 * activity).toFixed(3)})`);
+    cone.addColorStop(1, "rgba(92,128,220,0)");
+    ctx.fillStyle = cone;
+    ctx.beginPath();
+    ctx.moveTo(cx + px * 2 * scale, cy + py * 2 * scale);
+    ctx.lineTo(ex + px * coneWidth, ey + py * coneWidth);
+    ctx.lineTo(ex - px * coneWidth, ey - py * coneWidth);
+    ctx.lineTo(cx - px * 2 * scale, cy - py * 2 * scale);
+    ctx.closePath();
+    ctx.fill();
+
+    const beam = ctx.createLinearGradient(cx, cy, ex, ey);
+    beam.addColorStop(0, `rgba(255,255,248,${(0.98 * activity).toFixed(3)})`);
+    beam.addColorStop(0.55, `rgba(214,238,255,${(0.72 * activity).toFixed(3)})`);
+    beam.addColorStop(1, "rgba(150,205,255,0)");
+    ctx.strokeStyle = beam;
+    ctx.lineWidth = Math.max(1.5, scale * 1.25 * activity * pulse);
+    ctx.beginPath();
+    ctx.moveTo(cx, cy);
+    ctx.lineTo(ex, ey);
+    ctx.stroke();
+
+    const lobeRadius = Math.max(5, coneWidth * 0.32);
+    const lobe = ctx.createRadialGradient(ex, ey, 0, ex, ey, lobeRadius);
+    lobe.addColorStop(0, `rgba(224,241,255,${(0.35 * activity).toFixed(3)})`);
+    lobe.addColorStop(0.45, `rgba(124,184,245,${(0.16 * activity).toFixed(3)})`);
+    lobe.addColorStop(1, "rgba(96,130,220,0)");
+    ctx.fillStyle = lobe;
+    ctx.beginPath();
+    ctx.arc(ex, ey, lobeRadius, 0, TAU);
+    ctx.fill();
+  }
+
+  const glareRadius = scale * (8 + 15 * activity) * pulse;
+  const glare = ctx.createRadialGradient(cx, cy, 0, cx, cy, glareRadius);
+  glare.addColorStop(0, `rgba(255,255,248,${(0.98 * activity).toFixed(3)})`);
+  glare.addColorStop(0.16, `rgba(255,236,205,${(0.82 * activity).toFixed(3)})`);
+  glare.addColorStop(0.48, `rgba(220,178,255,${(0.34 * activity).toFixed(3)})`);
+  glare.addColorStop(1, "rgba(120,150,245,0)");
+  ctx.fillStyle = glare;
+  ctx.beginPath();
+  ctx.arc(cx, cy, glareRadius, 0, TAU);
+  ctx.fill();
+  ctx.restore();
 }
 
 // Refractive shimmer at each young blast front: an annulus-clipped

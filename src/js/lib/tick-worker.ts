@@ -101,6 +101,9 @@ function runOneTick() {
     bhMass: galaxy.bh_mass_value(),
     gasColdFraction: galaxy.gas_cold_fraction(),
     lensScale: galaxy.bh_lens_scale(),
+    quasarActivity: galaxy.quasar_activity(),
+    quasarAxis: galaxy.quasar_axis_value(),
+    quasarEpisodes: galaxy.quasar_episode_count(),
   };
   (self as unknown as Worker).postMessage(payload, [
     mass.buffer,
