@@ -152,13 +152,30 @@ test.describe("Galaxy Generator", () => {
       null,
       { timeout: 20_000 }
     );
+    const pulseRange = await page.evaluate(async () => {
+      let min = 1;
+      let max = 0;
+      const deadline = performance.now() + 2200;
+      while (performance.now() < deadline) {
+        const pulse = Number(document.querySelector("#dataviz")?.getAttribute("data-quasar-pulse"));
+        min = Math.min(min, pulse);
+        max = Math.max(max, pulse);
+        await new Promise((resolve) => setTimeout(resolve, 25));
+      }
+      return { min, max };
+    });
     await page.getByTestId("btn-run").click();
     await expect(page.getByTestId("btn-run")).toHaveText("play");
     await expect(page.getByTestId("stat-quasar")).toHaveText("100%");
 
     const rendered = await page.locator("#dataviz").evaluate((host) => {
       const activity = Number(host.getAttribute("data-quasar-activity"));
+      const pulse = Number(host.getAttribute("data-quasar-pulse"));
+      const age = Number(host.getAttribute("data-quasar-age"));
       const axis = Number(host.getAttribute("data-quasar-axis"));
+      const reach = Number(host.getAttribute("data-quasar-reach"));
+      const packets = Number(host.getAttribute("data-quasar-packets"));
+      const frame = Number(host.getAttribute("data-frame-angle"));
       const canvas = host.querySelector("canvas") as HTMLCanvasElement;
       const ctx = canvas.getContext("2d")!;
       const pixels = ctx.getImageData(0, 0, canvas.width, canvas.height).data;
@@ -166,13 +183,65 @@ test.describe("Galaxy Generator", () => {
       for (let i = 0; i < pixels.length; i += 4) {
         if (pixels[i] + pixels[i + 1] + pixels[i + 2] > 45) litPixels++;
       }
-      return { activity, axis, litPixels };
+
+      const dx = Math.cos(frame - axis);
+      const dy = Math.sin(frame - axis);
+      const cx = canvas.width / 2;
+      const cy = canvas.height / 2;
+      let edgeLitPixels = 0;
+      for (const direction of [-1, 1]) {
+        const vx = dx * direction;
+        const vy = dy * direction;
+        const tx = vx > 0 ? (canvas.width - 1 - cx) / vx : -cx / vx;
+        const ty = vy > 0 ? (canvas.height - 1 - cy) / vy : -cy / vy;
+        const distance = Math.min(tx, ty) * 0.96;
+        const ex = Math.round(cx + vx * distance);
+        const ey = Math.round(cy + vy * distance);
+        for (let y = ey - 12; y <= ey + 12; y++) {
+          for (let x = ex - 12; x <= ex + 12; x++) {
+            if (x < 0 || y < 0 || x >= canvas.width || y >= canvas.height) continue;
+            const i = (y * canvas.width + x) * 4;
+            if (pixels[i] + pixels[i + 1] + pixels[i + 2] > 45) edgeLitPixels++;
+          }
+        }
+      }
+      return { activity, pulse, age, axis, reach, packets, litPixels, edgeLitPixels };
     });
 
     expect(rendered.activity).toBeGreaterThan(0.95);
+    // Rendering may skip the single exact peak tick, but must capture a
+    // strong pulse and the quiet interval within one full cycle.
+    expect(pulseRange.max).toBeGreaterThan(0.7);
+    expect(pulseRange.min).toBeLessThan(0.2);
+    expect(pulseRange.max - pulseRange.min).toBeGreaterThan(0.6);
+    expect(rendered.pulse).toBeGreaterThanOrEqual(0);
+    expect(rendered.age).toBeGreaterThan(0);
     expect(rendered.axis).toBeGreaterThanOrEqual(0);
     expect(rendered.axis).toBeLessThanOrEqual(Math.PI);
+    expect(rendered.reach).toBeGreaterThanOrEqual(
+      await page
+        .locator("#dataviz canvas")
+        .evaluate(
+          (canvas) =>
+            Math.hypot(
+              (canvas as HTMLCanvasElement).clientWidth,
+              (canvas as HTMLCanvasElement).clientHeight
+            ) - 1
+        )
+    );
+    expect(rendered.packets).toBeGreaterThanOrEqual(2);
     expect(rendered.litPixels).toBeGreaterThan(100);
+    expect(rendered.edgeLitPixels).toBeGreaterThan(10);
+
+    await page.goto(
+      "/?seed=409007255426557616&size=50&scenario=irregular-elliptical&t=2900&lock=1"
+    );
+    await waitForWasm(page);
+    await expect(page.getByTestId("stat-ticks")).toHaveText("2900", {
+      timeout: 45_000,
+    });
+    await expect(page.getByTestId("stat-quasar")).toHaveCount(0);
+    await expect(page.locator("#dataviz")).toHaveAttribute("data-quasar-activity", "0.0000");
   });
 
   test("ticks actually redistribute mass (sim is not frozen)", async ({ page }) => {

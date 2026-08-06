@@ -37,6 +37,9 @@ export class Frontend {
   private overrideLensScale: number | null = null;
   private overrideStellarHaloMass: number | null = null;
   private overrideQuasarActivity: number | null = null;
+  private overrideQuasarPulse: number | null = null;
+  private overrideQuasarAge: number | null = null;
+  private overrideQuasarPulsePeriod: number | null = null;
   private overrideQuasarAxis: number | null = null;
   private overrideQuasarEpisodes: number | null = null;
   // CPU uses `Galaxy.tick`; WebGPU uses `tick_with_accel` after WGSL forces.
@@ -77,6 +80,9 @@ export class Frontend {
     this.overrideMetallicity = null;
     this.overrideStellarHaloMass = null;
     this.overrideQuasarActivity = null;
+    this.overrideQuasarPulse = null;
+    this.overrideQuasarAge = null;
+    this.overrideQuasarPulsePeriod = null;
     this.overrideQuasarAxis = null;
     this.overrideQuasarEpisodes = null;
     const next = this.galaxy.seed_with_mode(additionalMass, mode as unknown as wasm.Scenario);
@@ -96,6 +102,9 @@ export class Frontend {
     this.overrideMetallicity = null;
     this.overrideStellarHaloMass = null;
     this.overrideQuasarActivity = null;
+    this.overrideQuasarPulse = null;
+    this.overrideQuasarAge = null;
+    this.overrideQuasarPulsePeriod = null;
     this.overrideQuasarAxis = null;
     this.overrideQuasarEpisodes = null;
     const next = this.galaxy.seed_with_mode_seeded(
@@ -115,6 +124,9 @@ export class Frontend {
     this.overrideMetallicity = null;
     this.overrideStellarHaloMass = null;
     this.overrideQuasarActivity = null;
+    this.overrideQuasarPulse = null;
+    this.overrideQuasarAge = null;
+    this.overrideQuasarPulsePeriod = null;
     this.overrideQuasarAxis = null;
     this.overrideQuasarEpisodes = null;
     const next = this.galaxy.tick(timeModifier);
@@ -135,6 +147,9 @@ export class Frontend {
       this.overrideMetallicity = null;
       this.overrideStellarHaloMass = null;
       this.overrideQuasarActivity = null;
+      this.overrideQuasarPulse = null;
+      this.overrideQuasarAge = null;
+      this.overrideQuasarPulsePeriod = null;
       this.overrideQuasarAxis = null;
       this.overrideQuasarEpisodes = null;
       const mass = this.galaxy.mass();
@@ -278,6 +293,18 @@ export class Frontend {
     return this.overrideQuasarActivity ?? this.galaxy.quasar_activity();
   }
 
+  public quasarPulse(): number {
+    return this.overrideQuasarPulse ?? this.galaxy.quasar_pulse_strength();
+  }
+
+  public quasarAge(): number {
+    return this.overrideQuasarAge ?? this.galaxy.quasar_age_value();
+  }
+
+  public quasarPulsePeriod(): number {
+    return this.overrideQuasarPulsePeriod ?? this.galaxy.quasar_pulse_period_value();
+  }
+
   public quasarAxis(): number {
     return this.overrideQuasarAxis ?? this.galaxy.quasar_axis_value();
   }
@@ -286,8 +313,18 @@ export class Frontend {
     return this.overrideQuasarEpisodes ?? this.galaxy.quasar_episode_count();
   }
 
-  public setOverrideQuasar(activity: number, axis: number, episodes: number): void {
+  public setOverrideQuasar(
+    activity: number,
+    pulse: number,
+    age: number,
+    pulsePeriod: number,
+    axis: number,
+    episodes: number
+  ): void {
     this.overrideQuasarActivity = activity;
+    this.overrideQuasarPulse = pulse;
+    this.overrideQuasarAge = age;
+    this.overrideQuasarPulsePeriod = pulsePeriod;
     this.overrideQuasarAxis = axis;
     this.overrideQuasarEpisodes = episodes;
   }
@@ -353,6 +390,9 @@ export class Frontend {
     this.overrideMetallicity = null;
     this.overrideStellarHaloMass = null;
     this.overrideQuasarActivity = null;
+    this.overrideQuasarPulse = null;
+    this.overrideQuasarAge = null;
+    this.overrideQuasarPulsePeriod = null;
     this.overrideQuasarAxis = null;
     this.overrideQuasarEpisodes = null;
   }
@@ -418,6 +458,9 @@ export class TickWorker {
     gasColdFraction: number,
     lensScale: number,
     quasarActivity: number,
+    quasarPulse: number,
+    quasarAge: number,
+    quasarPulsePeriod: number,
     quasarAxis: number,
     quasarEpisodes: number
   ) => void;
@@ -449,6 +492,9 @@ export class TickWorker {
       gasColdFraction: number,
       lensScale: number,
       quasarActivity: number,
+      quasarPulse: number,
+      quasarAge: number,
+      quasarPulsePeriod: number,
       quasarAxis: number,
       quasarEpisodes: number
     ) => void
@@ -494,6 +540,9 @@ export class TickWorker {
         msg.gasColdFraction,
         msg.lensScale,
         msg.quasarActivity,
+        msg.quasarPulse,
+        msg.quasarAge,
+        msg.quasarPulsePeriod,
         msg.quasarAxis,
         msg.quasarEpisodes
       );

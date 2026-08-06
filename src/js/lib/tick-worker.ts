@@ -102,6 +102,9 @@ function runOneTick() {
     gasColdFraction: galaxy.gas_cold_fraction(),
     lensScale: galaxy.bh_lens_scale(),
     quasarActivity: galaxy.quasar_activity(),
+    quasarPulse: galaxy.quasar_pulse_strength(),
+    quasarAge: galaxy.quasar_age_value(),
+    quasarPulsePeriod: galaxy.quasar_pulse_period_value(),
     quasarAxis: galaxy.quasar_axis_value(),
     quasarEpisodes: galaxy.quasar_episode_count(),
   };

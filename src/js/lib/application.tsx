@@ -203,6 +203,9 @@ export function Interface() {
     gasColdFraction: number;
     lensScale: number;
     quasarActivity: number;
+    quasarPulse: number;
+    quasarAge: number;
+    quasarPulsePeriod: number;
     quasarAxis: number;
     quasarEpisodes: number;
   } | null>(null);
@@ -431,6 +434,9 @@ export function Interface() {
       galaxyFrontendRef.current.setOverrideStellarHaloMass(snap.stellarHaloMass);
       galaxyFrontendRef.current.setOverrideQuasar(
         snap.quasarActivity,
+        snap.quasarPulse,
+        snap.quasarAge,
+        snap.quasarPulsePeriod,
         snap.quasarAxis,
         snap.quasarEpisodes
       );
@@ -504,6 +510,9 @@ export function Interface() {
           gasColdFraction,
           lensScale,
           quasarActivity,
+          quasarPulse,
+          quasarAge,
+          quasarPulsePeriod,
           quasarAxis,
           quasarEpisodes
         ) => {
@@ -532,6 +541,9 @@ export function Interface() {
             gasColdFraction,
             lensScale,
             quasarActivity,
+            quasarPulse,
+            quasarAge,
+            quasarPulsePeriod,
             quasarAxis,
             quasarEpisodes,
           };

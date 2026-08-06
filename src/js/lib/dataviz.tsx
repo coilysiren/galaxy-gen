@@ -191,6 +191,9 @@ interface State {
   lastLensScale: number;
   lastStellarHaloMass: number;
   lastQuasarActivity: number;
+  lastQuasarPulse: number;
+  lastQuasarAge: number;
+  lastQuasarPulsePeriod: number;
   lastQuasarAxis: number;
   cleanup: () => void;
 }
@@ -207,7 +210,13 @@ function publishView(s: State) {
   host.setAttribute("data-cam-zoom", camera.zoom.toFixed(4));
   host.setAttribute("data-frame-angle", frameAngle(s).toFixed(6));
   host.setAttribute("data-quasar-activity", s.lastQuasarActivity.toFixed(4));
+  host.setAttribute("data-quasar-pulse", s.lastQuasarPulse.toFixed(4));
+  host.setAttribute("data-quasar-age", s.lastQuasarAge.toFixed(0));
   host.setAttribute("data-quasar-axis", s.lastQuasarAxis.toFixed(6));
+  host.setAttribute(
+    "data-quasar-reach",
+    (Math.hypot(s.cw, s.ch) / Math.max(0.001, camera.zoom)).toFixed(2)
+  );
   host.setAttribute("data-frame-rate", s.frameAngularRate.toFixed(8));
 }
 
@@ -426,6 +435,9 @@ export function initViz(
     lastLensScale: 1,
     lastStellarHaloMass: 0,
     lastQuasarActivity: 0,
+    lastQuasarPulse: 0,
+    lastQuasarAge: 0,
+    lastQuasarPulsePeriod: 1,
     lastQuasarAxis: 0,
     cleanup,
   };
@@ -452,6 +464,9 @@ export function updateData(galaxyFrontend: galaxy.Frontend, simTick?: number) {
   state.lastLensScale = galaxyFrontend.lensScale();
   state.lastStellarHaloMass = galaxyFrontend.stellarHaloMass();
   state.lastQuasarActivity = galaxyFrontend.quasarActivity();
+  state.lastQuasarPulse = galaxyFrontend.quasarPulse();
+  state.lastQuasarAge = galaxyFrontend.quasarAge();
+  state.lastQuasarPulsePeriod = galaxyFrontend.quasarPulsePeriod();
   state.lastQuasarAxis = galaxyFrontend.quasarAxis();
   publishView(state);
   drawFrame(state, state.lastMass);
@@ -685,13 +700,17 @@ function drawFrame(s: State, mass: Uint16Array) {
   applyBlackHoleLens(s);
 }
 
-// An active nucleus is long-lived simulation state, not an event flash.
-// Its seed-stable axis matches the two physical gas/radiation cones.
+// A brief active nucleus reads the same pulse and axis as the physical
+// feedback. Feathered cones light the whole viewport while each pulse
+// carries soft knots of ejected material away from the nucleus.
 function drawQuasar(s: State, toCx: (x: number) => number, toCy: (y: number) => number) {
   const activity = s.lastQuasarActivity;
-  if (activity <= 0) return;
+  if (activity <= 0) {
+    s.host.setAttribute("data-quasar-packets", "0");
+    return;
+  }
 
-  const { ctx, size, scale } = s;
+  const { ctx, size, scale, camera } = s;
   const center = size / 2;
   const cx = toCx(center - 0.5);
   const cy = toCy(center - 0.5);
@@ -699,58 +718,112 @@ function drawQuasar(s: State, toCx: (x: number) => number, toCy: (y: number) => 
   const uy = -Math.sin(s.lastQuasarAxis);
   const px = -uy;
   const py = ux;
-  const length = size * 0.58 * scale;
-  const coneWidth = size * (0.045 + activity * 0.035) * scale;
-  const pulse = 0.94 + 0.06 * Math.sin(s.simTick * 0.19);
+  const reach = Math.hypot(s.cw, s.ch) / Math.max(0.001, camera.zoom);
+  const pulse = s.lastQuasarPulse;
+  const coneWidth = reach * (0.085 + pulse * 0.025);
+  const beamAlpha = activity * (0.42 + pulse * 0.58);
 
   ctx.save();
   ctx.globalCompositeOperation = "screen";
   for (const direction of [-1, 1]) {
     const dx = ux * direction;
     const dy = uy * direction;
-    const ex = cx + dx * length;
-    const ey = cy + dy * length;
-    const cone = ctx.createLinearGradient(cx, cy, ex, ey);
-    cone.addColorStop(0, `rgba(255,246,230,${(0.62 * activity).toFixed(3)})`);
-    cone.addColorStop(0.18, `rgba(190,215,255,${(0.3 * activity).toFixed(3)})`);
-    cone.addColorStop(0.72, `rgba(102,154,238,${(0.13 * activity).toFixed(3)})`);
-    cone.addColorStop(1, "rgba(92,128,220,0)");
-    ctx.fillStyle = cone;
-    ctx.beginPath();
-    ctx.moveTo(cx + px * 2 * scale, cy + py * 2 * scale);
-    ctx.lineTo(ex + px * coneWidth, ey + py * coneWidth);
-    ctx.lineTo(ex - px * coneWidth, ey - py * coneWidth);
-    ctx.lineTo(cx - px * 2 * scale, cy - py * 2 * scale);
-    ctx.closePath();
-    ctx.fill();
+    const ex = cx + dx * reach;
+    const ey = cy + dy * reach;
 
-    const beam = ctx.createLinearGradient(cx, cy, ex, ey);
-    beam.addColorStop(0, `rgba(255,255,248,${(0.98 * activity).toFixed(3)})`);
-    beam.addColorStop(0.55, `rgba(214,238,255,${(0.72 * activity).toFixed(3)})`);
-    beam.addColorStop(1, "rgba(150,205,255,0)");
-    ctx.strokeStyle = beam;
-    ctx.lineWidth = Math.max(1.5, scale * 1.25 * activity * pulse);
-    ctx.beginPath();
-    ctx.moveTo(cx, cy);
-    ctx.lineTo(ex, ey);
-    ctx.stroke();
-
-    const lobeRadius = Math.max(5, coneWidth * 0.32);
-    const lobe = ctx.createRadialGradient(ex, ey, 0, ex, ey, lobeRadius);
-    lobe.addColorStop(0, `rgba(224,241,255,${(0.35 * activity).toFixed(3)})`);
-    lobe.addColorStop(0.45, `rgba(124,184,245,${(0.16 * activity).toFixed(3)})`);
-    lobe.addColorStop(1, "rgba(96,130,220,0)");
-    ctx.fillStyle = lobe;
-    ctx.beginPath();
-    ctx.arc(ex, ey, lobeRadius, 0, TAU);
-    ctx.fill();
+    for (const layer of [
+      { width: 1.35, blur: 22, alpha: 0.07 },
+      { width: 0.92, blur: 11, alpha: 0.09 },
+      { width: 0.38, blur: 5, alpha: 0.11 },
+    ]) {
+      const width = coneWidth * layer.width;
+      const cone = ctx.createLinearGradient(cx, cy, ex, ey);
+      cone.addColorStop(0, `rgba(255,244,224,${(beamAlpha * layer.alpha * 1.6).toFixed(3)})`);
+      cone.addColorStop(0.16, `rgba(211,207,255,${(beamAlpha * layer.alpha).toFixed(3)})`);
+      cone.addColorStop(0.58, `rgba(120,162,238,${(beamAlpha * layer.alpha * 0.58).toFixed(3)})`);
+      cone.addColorStop(1, `rgba(82,118,210,${(beamAlpha * layer.alpha * 0.12).toFixed(3)})`);
+      ctx.filter = `blur(${layer.blur}px)`;
+      ctx.fillStyle = cone;
+      ctx.beginPath();
+      ctx.moveTo(cx + px * 2 * scale, cy + py * 2 * scale);
+      ctx.quadraticCurveTo(
+        cx + dx * reach * 0.52 + px * width * 0.42,
+        cy + dy * reach * 0.52 + py * width * 0.42,
+        ex + px * width,
+        ey + py * width
+      );
+      ctx.lineTo(ex - px * width, ey - py * width);
+      ctx.quadraticCurveTo(
+        cx + dx * reach * 0.52 - px * width * 0.42,
+        cy + dy * reach * 0.52 - py * width * 0.42,
+        cx - px * 2 * scale,
+        cy - py * 2 * scale
+      );
+      ctx.closePath();
+      ctx.fill();
+    }
   }
 
-  const glareRadius = scale * (8 + 15 * activity) * pulse;
+  ctx.filter = "none";
+  const period = Math.max(1, s.lastQuasarPulsePeriod);
+  const packetLifetime = period * 3.2;
+  const pulseCount = Math.floor(s.lastQuasarAge / period) + 1;
+  let visiblePackets = 0;
+  ctx.globalCompositeOperation = "source-over";
+  for (let pulseIndex = 0; pulseIndex < pulseCount; pulseIndex++) {
+    const packetAge = s.lastQuasarAge - pulseIndex * period;
+    if (packetAge < 0 || packetAge > packetLifetime) continue;
+    const progress = packetAge / packetLifetime;
+    const travel = Math.pow(progress, 0.78);
+    const packetFade = Math.sin(Math.PI * progress) * activity;
+    if (packetFade <= 0.01) continue;
+
+    for (const direction of [-1, 1]) {
+      const dx = ux * direction;
+      const dy = uy * direction;
+      const distance = reach * (0.025 + travel * 0.94);
+      const packetX = cx + dx * distance;
+      const packetY = cy + dy * distance;
+      const headRadius = Math.max(5, scale * 4 + progress * coneWidth * 0.18);
+      const head = ctx.createRadialGradient(packetX, packetY, 0, packetX, packetY, headRadius);
+      head.addColorStop(0, `rgba(255,235,244,${(packetFade * 0.5).toFixed(3)})`);
+      head.addColorStop(0.35, `rgba(190,161,235,${(packetFade * 0.24).toFixed(3)})`);
+      head.addColorStop(1, "rgba(90,126,220,0)");
+      ctx.filter = `blur(${Math.max(2, headRadius * 0.18)}px)`;
+      ctx.fillStyle = head;
+      ctx.beginPath();
+      ctx.arc(packetX, packetY, headRadius, 0, TAU);
+      ctx.fill();
+
+      for (let knot = 0; knot < 4; knot++) {
+        const seed = pulseIndex * 17 + knot * 5 + (direction > 0 ? 1 : 3);
+        const trail = (knot + cellJitter(seed, 7)) * headRadius * 0.9;
+        const lateral = (cellJitter(seed, 13) - 0.5) * headRadius * 1.3;
+        const kx = packetX - dx * trail + px * lateral;
+        const ky = packetY - dy * trail + py * lateral;
+        const radius = Math.max(1.8, headRadius * (0.18 + cellJitter(seed, 19) * 0.2));
+        const knotGlow = ctx.createRadialGradient(kx, ky, 0, kx, ky, radius);
+        knotGlow.addColorStop(0, `rgba(255,196,224,${(packetFade * 0.78).toFixed(3)})`);
+        knotGlow.addColorStop(0.45, `rgba(164,154,238,${(packetFade * 0.36).toFixed(3)})`);
+        knotGlow.addColorStop(1, "rgba(92,116,210,0)");
+        ctx.filter = `blur(${Math.max(0.8, radius * 0.16)}px)`;
+        ctx.fillStyle = knotGlow;
+        ctx.beginPath();
+        ctx.arc(kx, ky, radius, 0, TAU);
+        ctx.fill();
+      }
+      visiblePackets++;
+    }
+  }
+  s.host.setAttribute("data-quasar-packets", visiblePackets.toFixed(0));
+
+  ctx.filter = "none";
+  ctx.globalCompositeOperation = "screen";
+  const glareRadius = scale * (10 + 22 * activity + 18 * pulse);
   const glare = ctx.createRadialGradient(cx, cy, 0, cx, cy, glareRadius);
-  glare.addColorStop(0, `rgba(255,255,248,${(0.98 * activity).toFixed(3)})`);
-  glare.addColorStop(0.16, `rgba(255,236,205,${(0.82 * activity).toFixed(3)})`);
-  glare.addColorStop(0.48, `rgba(220,178,255,${(0.34 * activity).toFixed(3)})`);
+  glare.addColorStop(0, `rgba(255,255,248,${(activity * (0.74 + pulse * 0.26)).toFixed(3)})`);
+  glare.addColorStop(0.16, `rgba(255,230,205,${(activity * (0.48 + pulse * 0.34)).toFixed(3)})`);
+  glare.addColorStop(0.5, `rgba(216,170,255,${(activity * (0.18 + pulse * 0.22)).toFixed(3)})`);
   glare.addColorStop(1, "rgba(120,150,245,0)");
   ctx.fillStyle = glare;
   ctx.beginPath();
