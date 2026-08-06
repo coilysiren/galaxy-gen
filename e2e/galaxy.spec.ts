@@ -136,19 +136,19 @@ test.describe("Galaxy Generator", () => {
     expect(frame2).toEqual(frame);
   });
 
-  test("the reference seed ignites and renders a quasar near tick 2500", async ({ page }) => {
+  test("the reference seed ignites and renders a quasar near tick 1000", async ({ page }) => {
     await page.goto(
-      "/?seed=409007255426557616&size=50&scenario=irregular-elliptical&t=2400&lock=1"
+      "/?seed=409007255426557616&size=50&scenario=irregular-elliptical&t=1000&lock=1"
     );
     await waitForWasm(page);
-    await expect(page.getByTestId("stat-ticks")).toHaveText("2400", {
+    await expect(page.getByTestId("stat-ticks")).toHaveText("1000", {
       timeout: 45_000,
     });
     await expect(page.getByTestId("stat-quasar")).toHaveCount(0);
 
     await page.getByTestId("btn-run").click();
     await page.waitForFunction(
-      () => Number(document.querySelector('[data-testid="stat-ticks"]')?.textContent) >= 2500,
+      () => Number(document.querySelector('[data-testid="stat-ticks"]')?.textContent) >= 1100,
       null,
       { timeout: 20_000 }
     );
@@ -234,10 +234,10 @@ test.describe("Galaxy Generator", () => {
     expect(rendered.edgeLitPixels).toBeGreaterThan(10);
 
     await page.goto(
-      "/?seed=409007255426557616&size=50&scenario=irregular-elliptical&t=2900&lock=1"
+      "/?seed=409007255426557616&size=50&scenario=irregular-elliptical&t=1400&lock=1"
     );
     await waitForWasm(page);
-    await expect(page.getByTestId("stat-ticks")).toHaveText("2900", {
+    await expect(page.getByTestId("stat-ticks")).toHaveText("1400", {
       timeout: 45_000,
     });
     await expect(page.getByTestId("stat-quasar")).toHaveCount(0);

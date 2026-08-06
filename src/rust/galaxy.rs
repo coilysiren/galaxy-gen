@@ -621,23 +621,23 @@ impl Galaxy {
     const BH_CAPTURE_MAX_SPEED: f32 = 0.8;
     const HAWKING_COEFF: f32 = 12_000.0;
 
-    // Quasar lifecycle. The growth threshold puts the size-250 reference
-    // seed's first ignition near tick 2500. The brief active phase ejects
-    // gas in discrete pulses instead of sustaining one continuous beam.
-    const QUASAR_GROWTH_TRIGGER: f32 = 1.20;
+    // Quasar lifecycle. The age floor admits early well-fed nuclei, while
+    // the 1.5x growth gate keeps modest accretion from igniting. The brief
+    // active phase ejects gas in discrete pulses.
+    const QUASAR_GROWTH_TRIGGER: f32 = 1.50;
     const QUASAR_RATE_TRIGGER: f32 = 0.00025;
-    const QUASAR_EARLIEST_TICK: u64 = 2_400;
+    const QUASAR_EARLIEST_TICK: u64 = 1_000;
     const QUASAR_ACCRETION_EMA_KEEP: f32 = 0.92;
     const QUASAR_DURATION: u32 = 360;
-    const QUASAR_COOLDOWN: u32 = 1_200;
+    const QUASAR_COOLDOWN: u32 = 500;
     const QUASAR_FADE_IN: f32 = 16.0;
     const QUASAR_FADE_OUT: f32 = 48.0;
     const QUASAR_PULSE_PERIOD: u32 = 56;
     const QUASAR_PULSE_ATTACK: u32 = 8;
-    const QUASAR_JET_ACCEL: f32 = 0.18;
-    const QUASAR_JET_LENGTH_FRAC: f32 = 1.15;
-    const QUASAR_JET_OPENING: f32 = 0.16;
-    const QUASAR_RADIATION_DEPOSIT: f32 = 20.0;
+    const QUASAR_JET_ACCEL: f32 = 0.55;
+    const QUASAR_JET_LENGTH_FRAC: f32 = 1.30;
+    const QUASAR_JET_OPENING: f32 = 0.32;
+    const QUASAR_RADIATION_DEPOSIT: f32 = 32.0;
 
     // RNG stream ids (see rng_stream).
     const RNG_COLLAPSE_WATCH: u64 = 1;
@@ -5160,6 +5160,9 @@ mod tests_dynamics {
     #[test]
     fn test_irregular_spiral_settles_into_resolved_star_forming_arms_for_100_ticks() {
         let mut g = Galaxy::new(50, 0).seed_with_mode_seeded(25, Scenario::IrregularSpiral, 42);
+        // Isolate the density-wave contract. Disruptive quasar morphology
+        // is covered by the dedicated outflow counterfactual.
+        g.quasar_cooldown = u32::MAX;
         let mut start_births = None;
         let mut min_coherence = (f32::INFINITY, 0);
         let mut min_coverage = (f32::INFINITY, 0);
@@ -6383,7 +6386,107 @@ mod tests_black_hole {
     }
 
     #[test]
-    fn test_reference_seed_ignites_its_first_quasar_near_tick_2500() {
+    fn test_quasar_trigger_uses_growth_age_and_cooldown_gates() {
+        let eligible_hole = |tick: u64, growth: f32| {
+            let mut g = Galaxy::new(20, 0);
+            g.tick_count = tick;
+            g.bh_mass_initial = 100.0;
+            g.bh_mass = 100.0 * growth;
+            g.bh_accretion_ema = 1.0;
+            g
+        };
+
+        let mut too_early = eligible_hole(999, 1.5);
+        too_early.process_bh_accretion(0.5);
+        assert_eq!(too_early.quasar_episode_count(), 0);
+
+        let mut too_small = eligible_hole(1_000, 1.49);
+        too_small.process_bh_accretion(0.5);
+        assert_eq!(too_small.quasar_episode_count(), 0);
+
+        let mut g = eligible_hole(1_000, 1.5);
+        g.process_bh_accretion(0.5);
+        assert_eq!(g.quasar_episode_count(), 1);
+        assert_eq!(g.quasar_ticks_remaining, Galaxy::QUASAR_DURATION);
+
+        for _ in 0..Galaxy::QUASAR_DURATION {
+            g.process_quasar_feedback(0.5);
+        }
+        assert_eq!(g.quasar_cooldown, 500);
+        for _ in 0..499 {
+            g.process_quasar_feedback(0.5);
+        }
+        g.process_bh_accretion(0.5);
+        assert_eq!(g.quasar_episode_count(), 1);
+
+        g.process_quasar_feedback(0.5);
+        g.process_bh_accretion(0.5);
+        assert_eq!(g.quasar_episode_count(), 2);
+    }
+
+    #[test]
+    fn test_quasar_episode_redistributes_gas_outward() {
+        let size = 96usize;
+        let center = size / 2;
+        let mut driven = Galaxy::new(size as u16, 0);
+        for direction in [-1isize, 1] {
+            for axial in 4isize..=18 {
+                let half_width = (axial as f32 * Galaxy::QUASAR_JET_OPENING + 1.25) as isize;
+                for lateral in -half_width..=half_width {
+                    let col = (center as isize + direction * axial) as usize;
+                    let row = (center as isize + lateral) as usize;
+                    let cell = row * size + col;
+                    driven.mass[cell] = 20;
+                    driven.metal_mass[cell] = 2.0;
+                }
+            }
+        }
+        driven.quasar_axis = 0.0;
+        driven.quasar_ticks_remaining = Galaxy::QUASAR_DURATION;
+        driven.quasar_episodes = 1;
+        let mut control = driven.clone();
+        control.quasar_ticks_remaining = 0;
+
+        let axis_moment = |g: &Galaxy| {
+            let mut weighted_distance = 0.0f64;
+            let mut total = 0.0f64;
+            for (i, &mass) in g.mass.iter().enumerate() {
+                if mass == 0 {
+                    continue;
+                }
+                let x = i % size;
+                let distance = (x as f32 + g.frac_x[i] - center as f32).abs() as f64;
+                weighted_distance += distance * mass as f64;
+                total += mass as f64;
+            }
+            weighted_distance / total
+        };
+        let baryons = driven.baryonic_total();
+        let metals = driven.tracked_metal_total();
+
+        for _ in 0..Galaxy::QUASAR_PULSE_PERIOD * 2 {
+            driven.acc_x.fill(0.0);
+            driven.acc_y.fill(0.0);
+            driven.process_quasar_feedback(0.5);
+            driven.process_integrate_gas(0.5);
+
+            control.acc_x.fill(0.0);
+            control.acc_y.fill(0.0);
+            control.process_integrate_gas(0.5);
+        }
+
+        let driven_moment = axis_moment(&driven);
+        let control_moment = axis_moment(&control);
+        assert!(
+            driven_moment > control_moment + 8.0,
+            "quasar must materially redistribute gas along its poles: driven={driven_moment:.2}, control={control_moment:.2}"
+        );
+        assert_eq!(driven.baryonic_total(), baryons);
+        assert!((driven.tracked_metal_total() - metals).abs() < 0.001);
+    }
+
+    #[test]
+    fn test_reference_seed_ignites_its_first_quasar_near_tick_1000() {
         let mut g = Galaxy::new(50, 0).seed_with_mode_seeded(
             25,
             Scenario::IrregularElliptical,
@@ -6391,13 +6494,13 @@ mod tests_black_hole {
         );
         let baryons = g.baryonic_total();
         let metals = g.tracked_metal_total();
-        for _ in 0..2400 {
+        for _ in 0..1000 {
             g = g.tick(0.5);
         }
         assert_eq!(g.quasar_episode_count(), 0);
         assert_eq!(g.quasar_activity(), 0.0);
 
-        for _ in 2400..2500 {
+        for _ in 1000..1100 {
             g = g.tick(0.5);
         }
         assert_eq!(g.quasar_episode_count(), 1);
@@ -6408,7 +6511,7 @@ mod tests_black_hole {
         assert!(g.quasar_axis_value().is_finite());
         assert!((0.0..=std::f32::consts::PI).contains(&g.quasar_axis_value()));
 
-        for _ in 2500..2900 {
+        for _ in 1100..1400 {
             g = g.tick(0.5);
         }
         assert_eq!(g.quasar_episode_count(), 1);
