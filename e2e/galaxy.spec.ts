@@ -95,7 +95,7 @@ test.describe("Galaxy Generator", () => {
     const frameAngle = Number(await host.getAttribute("data-frame-angle"));
     const frameRate = Number(await host.getAttribute("data-frame-rate"));
     expect(frameAngle).toBeGreaterThan(0);
-    expect(frameRate).toBeCloseTo((2 * 0.0085) / Math.sqrt(250), 8);
+    expect(frameRate).toBeCloseTo((4 * 0.0085) / Math.sqrt(250), 8);
     // Stepping stamps the tick into the URL - the moment's address.
     expect(new URL(page.url()).searchParams.get("t")).toBe("2");
   });
