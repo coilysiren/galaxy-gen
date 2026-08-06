@@ -4799,6 +4799,58 @@ mod tests_dynamics {
     }
 
     #[test]
+    fn test_irregular_spiral_settles_into_resolved_star_forming_arms_for_100_ticks() {
+        let mut g = Galaxy::new(50, 0).seed_with_mode_seeded(25, Scenario::IrregularSpiral, 42);
+        let mut start_births = None;
+        let mut min_coherence = (f32::INFINITY, 0);
+        let mut min_coverage = (f32::INFINITY, 0);
+        let mut min_occupied = (usize::MAX, 0);
+        for tick in 1..=2093 {
+            g = g.tick(0.5);
+            if tick < 1993 {
+                continue;
+            }
+            let coherence = g.spiral_coherence();
+            let coverage = g.spiral_coverage();
+            let occupied = g.mass.iter().filter(|&&mass| mass > 0).count();
+            let births = g.events_executed(crate::events::EventKind::StarBirth as u32);
+            start_births.get_or_insert(births);
+            if coherence < min_coherence.0 {
+                min_coherence = (coherence, tick);
+            }
+            if coverage < min_coverage.0 {
+                min_coverage = (coverage, tick);
+            }
+            if occupied < min_occupied.0 {
+                min_occupied = (occupied, tick);
+            }
+        }
+        assert!(
+            min_coherence.0 >= 0.3,
+            "tick {} coherence was {}",
+            min_coherence.1,
+            min_coherence.0
+        );
+        assert!(
+            min_coverage.0 >= 0.5,
+            "tick {} coverage was {}",
+            min_coverage.1,
+            min_coverage.0
+        );
+        assert!(
+            min_occupied.0 >= 300,
+            "tick {} had only {} gas cells",
+            min_occupied.1,
+            min_occupied.0
+        );
+        assert!(
+            g.events_executed(crate::events::EventKind::StarBirth as u32)
+                > start_births.expect("tick 1993 checkpoint"),
+            "the settled irregular arm window must remain actively star-forming"
+        );
+    }
+
+    #[test]
     fn test_ring_remains_hollow_resolved_and_star_forming_for_100_ticks() {
         let mut g = Galaxy::new(50, 0).seed_with_mode_seeded(25, Scenario::BangRing, 42);
         let mut start_births = None;
