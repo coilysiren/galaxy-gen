@@ -44,6 +44,7 @@ test.describe("Galaxy Generator", () => {
     await expect(page.getByTestId("stat-neutron-stars")).toHaveText("0");
     await expect(page.getByTestId("stat-grb")).toHaveText("0");
     await expect(page.getByTestId("stat-phase-mixed")).toHaveText("0");
+    await expect(page.getByTestId("stat-associations")).toHaveText("0");
     await expect(page.getByTestId("btn-init")).toBeVisible();
     await expect(page.getByTestId("btn-tick")).toBeVisible();
     // Seed mass is URL-param-only; it must not render an input.

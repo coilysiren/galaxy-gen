@@ -26,6 +26,9 @@ commands:
   build-wasm:
     run: bash scripts/ward-command.sh build-wasm
     description: Compile Rust to WASM via wasm-pack (pkg/).
+  debug-sim:
+    run: bash scripts/ward-command.sh debug-sim
+    description: Run the native seeded physics probe with ticks, size, seed-count, and start-seed arguments.
   build-js-prod:
     run: bash scripts/ward-command.sh build-js-prod
     description: Production webpack build.
@@ -43,7 +46,7 @@ commands:
     description: Replace the tracked README GIF with an inspected capture candidate.
   dev:
     run: bash scripts/ward-command.sh dev
-    description: Run the rust/wasm watcher and webpack-dev-server concurrently with auto-reload.
+    description: Run the Rust/WASM watcher and webpack dev server. GALAXY_DEV_PORT overrides port 8081.
   dev-js:
     run: bash scripts/ward-command.sh dev-js
     description: Run only the JS dev server with HMR.

@@ -613,6 +613,7 @@ function drawFrame(s: State, mass: Uint16Array) {
   };
 
   renderGas(false);
+  drawAssociations(s, toCx, toCy);
   drawStars(s, toCx, toCy);
   // Dust sits under the foreground gas: it still dims the star field,
   // but the glow layer re-softens it so lanes read as embedded darkness
@@ -930,6 +931,79 @@ function classColor(ci: number): [number, number, number] {
   ];
 }
 
+type AssociationGlow = {
+  count: number;
+  weight: number;
+  x: number;
+  y: number;
+  x2: number;
+  y2: number;
+};
+
+// Bound associations get one shared, restrained pool of unresolved light.
+// The glow is derived entirely from member positions and disappears as the
+// physics strips cluster ids, so a dissolving association naturally turns
+// into discrete tidal-stream stars instead of dragging a fake blob with it.
+function drawAssociations(s: State, toCx: (x: number) => number, toCy: (y: number) => number) {
+  const stars = s.lastStars;
+  if (!stars || stars.length === 0) return;
+  const associations = new Map<number, AssociationGlow>();
+  for (let i = 0; i < stars.length; i += galaxy.STAR_RENDER_FLOATS) {
+    const cluster = Math.round(stars[i + 5]);
+    // Rust's u32::MAX sentinel rounds to 2^32 in f32.
+    if (cluster >= 4_000_000_000) continue;
+    const weight = 1 + Math.pow(Math.max(0, stars[i + 2]), 0.18);
+    const x = stars[i];
+    const y = stars[i + 1];
+    const a = associations.get(cluster) ?? {
+      count: 0,
+      weight: 0,
+      x: 0,
+      y: 0,
+      x2: 0,
+      y2: 0,
+    };
+    a.count++;
+    a.weight += weight;
+    a.x += weight * x;
+    a.y += weight * y;
+    a.x2 += weight * x * x;
+    a.y2 += weight * y * y;
+    associations.set(cluster, a);
+  }
+
+  const center = s.size / 2;
+  const softR = s.size / 2 - 1;
+  s.ctx.globalCompositeOperation = "screen";
+  for (const a of associations.values()) {
+    if (a.count < 4 || a.weight <= 0) continue;
+    const x = a.x / a.weight;
+    const y = a.y / a.weight;
+    const variance = Math.max(0, a.x2 / a.weight - x * x) + Math.max(0, a.y2 / a.weight - y * y);
+    const rms = Math.sqrt(variance);
+    // A broad association is already a stream. Do not paint it back into
+    // a cluster after the physics has visibly pulled it apart.
+    if (rms > 5.5) continue;
+    const fade = radialFade(Math.hypot(x - center, y - center), softR);
+    const coherence = Math.exp(-rms * 0.22);
+    const richness = Math.min(1, Math.log1p(a.count) / Math.log(40));
+    const alpha = 0.055 * coherence * richness * fade;
+    if (alpha < 0.006) continue;
+    const radius = Math.max(5, s.scale * (1.2 + rms * 1.9));
+    const px = toCx(x - 0.5);
+    const py = toCy(y - 0.5);
+    const glow = s.ctx.createRadialGradient(px, py, 0, px, py, radius);
+    glow.addColorStop(0, `rgba(222,226,255,${alpha.toFixed(3)})`);
+    glow.addColorStop(0.38, `rgba(172,184,238,${(alpha * 0.48).toFixed(3)})`);
+    glow.addColorStop(1, "rgba(126,140,210,0)");
+    s.ctx.fillStyle = glow;
+    s.ctx.beginPath();
+    s.ctx.arc(px, py, radius, 0, Math.PI * 2);
+    s.ctx.fill();
+  }
+  s.ctx.globalCompositeOperation = "source-over";
+}
+
 // Stars: three brightness tiers, like a long-exposure field. Most stars
 // are bare points of their class color; the bright minority get a tight
 // glow; only the rare giants (top of the luminosity range) earn
@@ -945,7 +1019,7 @@ function drawStars(s: State, toCx: (x: number) => number, toCy: (y: number) => n
   // so a dense swarm (cluster core, elliptical spheroid) reads as a
   // glow rather than a sprinkle of isolated dots.
   ctx.globalCompositeOperation = "screen";
-  for (let i = 0; i < stars.length; i += 5) {
+  for (let i = 0; i < stars.length; i += galaxy.STAR_RENDER_FLOATS) {
     // Radial fade into the halo; deep-halo stars do not render.
     const rad = Math.hypot(stars[i] - center, stars[i + 1] - center);
     const fade = radialFade(rad, softR);

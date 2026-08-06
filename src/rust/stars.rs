@@ -35,7 +35,7 @@ pub const NO_BINARY: u32 = u32::MAX;
 pub const STAR_FLOATS: usize = 14;
 
 /// Floats per star in the render packing (see `render_data`).
-pub const RENDER_FLOATS: usize = 5;
+pub const RENDER_FLOATS: usize = 6;
 
 /// Struct-of-arrays star storage. Removal is swap-remove; indices are not
 /// stable across ticks and must never be persisted outside a tick.
@@ -127,8 +127,9 @@ impl Stars {
         self.id.iter().position(|&x| x == id)
     }
 
-    /// Renderer packing: [x, y, luminosity, color_index, stage] per star. The
-    /// renderer derives size/glow from these; nothing flows back.
+    /// Renderer packing: [x, y, luminosity, color_index, stage, cluster_id]
+    /// per star. The renderer derives size and shared association glow from
+    /// these values. Nothing flows back into the simulation.
     pub fn render_data(&self) -> Vec<f32> {
         let n = self.len();
         let mut out = Vec::with_capacity(n * RENDER_FLOATS);
@@ -138,6 +139,7 @@ impl Stars {
             out.push(self.luminosity[i]);
             out.push(self.color_index[i]);
             out.push(self.stage[i] as f32);
+            out.push(self.cluster_id[i] as f32);
         }
         out
     }

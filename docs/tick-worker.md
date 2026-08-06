@@ -11,5 +11,5 @@ Web Worker that owns its own `Galaxy` WASM instance and runs `tick` off the main
 
 ## Worker to main
 
-- `snapshot` with `mass, fracX, fracY, tickMs, tickId, stars, transients, radiation, counters, stellarHaloMass, bhMass, gasColdFraction, lensScale`. Per-tick render snapshot: gas mass and sub-cell offsets, star render packing ([x, y, luminosity, colorIndex, stage] per star), event transients ([kind, x, y, ticksAgo, magnitude] per recent Supernova/StarBirth/GammaRayBurst), the coarse radiation field, and live UI values. Typed arrays are transferred.
+- `snapshot` with `mass, fracX, fracY, tickMs, tickId, stars, transients, radiation, counters, stellarHaloMass, bhMass, gasColdFraction, lensScale`. Per-tick render snapshot: gas mass and sub-cell offsets, star render packing ([x, y, luminosity, colorIndex, stage, clusterId] per star), event transients ([kind, x, y, ticksAgo, magnitude] per recent Supernova/StarBirth/GammaRayBurst), the coarse radiation field, and live UI values including the cumulative association count. Typed arrays are transferred.
 - `stopped` with `mass, velX, velY, fracX, fracY, stars, field, meta`. Final state after stop. The opaque buffers ride back so the main thread rehydrates the full sim (star population, coarse fields, scheduler tick count, RNG master seed, pending events) - the round-trip is byte-exact, guarded by a unit test.

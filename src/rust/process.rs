@@ -83,8 +83,12 @@ static REGISTRY: &[ProcessDescriptor] = &[
         // Reads a possibly stale field by design - fields update less
         // often than motion. Hence no requires_fresh on GravityField.
         name: "integrate_stars",
-        reads: &[StateKey::GravityField, StateKey::StarKinematics],
-        writes: &[StateKey::StarKinematics],
+        reads: &[
+            StateKey::GravityField,
+            StateKey::StarKinematics,
+            StateKey::StarLifecycle,
+        ],
+        writes: &[StateKey::StarKinematics, StateKey::StarLifecycle],
         requires_fresh: &[],
         cadence: 1,
         phase_offset: 0,

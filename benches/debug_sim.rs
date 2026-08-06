@@ -1,5 +1,6 @@
 //! Native physics probe: seeded runs of every scenario with structure
-//! metrics at checkpoints. `cargo run --bin debug_sim [ticks] [size] [seeds]`.
+//! metrics at checkpoints.
+//! `cargo run --bin debug_sim [ticks] [size] [seeds] [start-seed]`.
 //! Iterating on sim constants goes through this harness, not the browser -
 //! same kernel, no webpack in the loop.
 
@@ -148,6 +149,10 @@ fn main() {
         .nth(3)
         .and_then(|a| a.parse().ok())
         .unwrap_or(1);
+    let start_seed: u64 = std::env::args()
+        .nth(4)
+        .and_then(|a| a.parse().ok())
+        .unwrap_or(12345);
     let checkpoints = [0usize, 250, 500, 1000, 2000, 4000];
 
     for (mode, name) in [
@@ -169,7 +174,7 @@ fn main() {
             }
             println!();
         }
-        for seed in 12345..12345 + n_seeds {
+        for seed in start_seed..start_seed.saturating_add(n_seeds) {
             let mut g = Galaxy::new(size, 0).seed_with_mode_seeded(25, mode, seed);
             println!("--- {name} (size={size}, seed={seed}, dt=0.5) ---");
             let mut done = 0usize;

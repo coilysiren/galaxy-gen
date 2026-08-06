@@ -86,7 +86,7 @@ function runOneTick() {
     transients,
     radiation,
     snCount: Number(galaxy.events_executed(2)),
-    birthCount: Number(galaxy.events_executed(1)),
+    associationCount: galaxy.stellar_association_count(),
     captureCount: Number(galaxy.events_executed(5)),
     neutronStarCount: galaxy.neutron_star_count(),
     grbCount: Number(galaxy.events_executed(7)),

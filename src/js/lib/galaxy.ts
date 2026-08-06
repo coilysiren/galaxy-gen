@@ -20,6 +20,7 @@ export enum Scenario {
 export type ComputeBackend = "cpu" | "webgpu";
 
 export const isWebGPUAvailable = _isWebGPUAvailable;
+export const STAR_RENDER_FLOATS = 6;
 
 /** JS wrapper over WASM Galaxy. See `TickWorker` for the worker integration. */
 export class Frontend {
@@ -143,11 +144,11 @@ export class Frontend {
   }
 
   public starCount(): number {
-    if (this.overrideStars) return this.overrideStars.length / 5;
+    if (this.overrideStars) return this.overrideStars.length / STAR_RENDER_FLOATS;
     return this.galaxy.star_count();
   }
 
-  /** Renderer packing: [x, y, luminosity, colorIndex, stage] per star. */
+  /** Renderer packing: [x, y, luminosity, colorIndex, stage, clusterId]. */
   public starRenderArray(): Float32Array {
     return this.overrideStars ?? this.galaxy.star_render_data();
   }
@@ -170,8 +171,8 @@ export class Frontend {
     return Number(this.galaxy.events_executed(2));
   }
 
-  public birthCount(): number {
-    return Number(this.galaxy.events_executed(1));
+  public associationCount(): number {
+    return this.galaxy.stellar_association_count();
   }
 
   public captureCount(): number {
@@ -334,7 +335,7 @@ export class TickWorker {
     transients: Float32Array,
     radiation: Float32Array,
     snCount: number,
-    birthCount: number,
+    associationCount: number,
     captureCount: number,
     neutronStarCount: number,
     grbCount: number,
@@ -357,7 +358,7 @@ export class TickWorker {
       transients: Float32Array,
       radiation: Float32Array,
       snCount: number,
-      birthCount: number,
+      associationCount: number,
       captureCount: number,
       neutronStarCount: number,
       grbCount: number,
@@ -394,7 +395,7 @@ export class TickWorker {
         msg.transients,
         msg.radiation,
         msg.snCount,
-        msg.birthCount,
+        msg.associationCount,
         msg.captureCount,
         msg.neutronStarCount,
         msg.grbCount,

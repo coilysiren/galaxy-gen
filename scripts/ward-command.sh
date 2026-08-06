@@ -40,6 +40,10 @@ case "${1:-}" in
   build-wasm)
     build_wasm
     ;;
+  debug-sim)
+    shift
+    cargo run --release --bin debug_sim -- "$@"
+    ;;
   build-js-prod)
     build_wasm
     npx webpack --config webpack.config.js --mode production
@@ -65,7 +69,11 @@ case "${1:-}" in
     echo "Starting rust watcher + JS dev server (Ctrl-C stops both)"
     trap 'kill 0' INT TERM EXIT
     cargo watch -w src/rust -w Cargo.toml -s "wasm-pack build && touch src/js/index.js" &
-    npx webpack serve --open &
+    webpack_args=(serve --open)
+    if [[ -n "${GALAXY_DEV_PORT:-}" ]]; then
+      webpack_args+=(--port "${GALAXY_DEV_PORT}")
+    fi
+    npx webpack "${webpack_args[@]}" &
     wait
     ;;
   dev-js)

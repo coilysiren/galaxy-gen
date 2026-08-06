@@ -195,6 +195,37 @@ impl Scenario {
     }
 }
 
+/// Per-tick reduction of one stellar association. The authoritative state
+/// remains on each star through `cluster_id`, so worker snapshots need no
+/// second cluster object graph. Rebuilding this compact view keeps removal
+/// and phase mixing compatible with the star SoA's swap-remove semantics.
+#[derive(Clone, Copy, Default)]
+struct AssociationAggregate {
+    mass: f32,
+    weighted_x: f32,
+    weighted_y: f32,
+    weighted_vx: f32,
+    weighted_vy: f32,
+    oldest_age: f32,
+    members: u32,
+}
+
+impl AssociationAggregate {
+    fn center(self) -> (f32, f32) {
+        if self.mass <= 0.0 {
+            return (0.0, 0.0);
+        }
+        (self.weighted_x / self.mass, self.weighted_y / self.mass)
+    }
+
+    fn velocity(self) -> (f32, f32) {
+        if self.mass <= 0.0 {
+            return (0.0, 0.0);
+        }
+        (self.weighted_vx / self.mass, self.weighted_vy / self.mass)
+    }
+}
+
 #[wasm_bindgen]
 #[derive(Clone)]
 pub struct Galaxy {
@@ -401,6 +432,31 @@ impl Galaxy {
     /// center - sqrt(|a| r) from a mis-aimed sample slingshots newborns
     /// outward.
     const BIRTH_VCIRC_CAP: f32 = 1.5;
+
+    // Stellar associations. Nearby collapse events belong to the same
+    // star-forming complex, receive one center-of-mass orbit, and retain a
+    // temporary softened binding potential. The potential fades with age
+    // and the local galactic tide releases exterior members into streams.
+    const ASSOCIATION_JOIN_RADIUS: f32 = 3.2;
+    const ASSOCIATION_JOIN_MAX_AGE: f32 = 32.0;
+    const ASSOCIATION_BIRTH_RADIUS: f32 = 0.9;
+    const ASSOCIATION_RADIAL_INHERITANCE: f32 = 0.12;
+    const ASSOCIATION_ORBIT_SUPPORT: f32 = 1.08;
+    const ASSOCIATION_HALO_ORBIT_FLOOR: f32 = 0.88;
+    // Retain most of the pre-association gas-plus-circular-support envelope
+    // while leaving headroom below the high-speed halo escape regime.
+    const ASSOCIATION_ORBIT_SPEED_CAP: f32 = 2.1;
+    const ASSOCIATION_EXISTING_VELOCITY_WEIGHT: f32 = 0.70;
+    const ASSOCIATION_INTERNAL_SPEED_SCALE: f32 = 0.42;
+    const ASSOCIATION_INTERNAL_SPEED_CAP: f32 = 0.24;
+    const ASSOCIATION_BINDING_G: f32 = 7.5e-4;
+    const ASSOCIATION_BINDING_SOFTENING_SQ: f32 = 0.64;
+    const ASSOCIATION_ACCEL_MAX: f32 = 0.08;
+    const ASSOCIATION_BINDING_LIFETIME: f32 = 620.0;
+    const ASSOCIATION_TIDAL_GRACE: f32 = 56.0;
+    const ASSOCIATION_TIDAL_RADIUS_MIN: f32 = 1.4;
+    const ASSOCIATION_TIDAL_RADIUS_MAX: f32 = 6.5;
+    const ASSOCIATION_MIN_MEMBERS: u32 = 3;
 
     // Radiation tuning. Deposits scale luminosity into the coarse field
     // with a 3x3 splat; the field decays every rebuild.
@@ -912,9 +968,15 @@ impl Galaxy {
         self.stars.len()
     }
 
-    /// Renderer packing: [x, y, luminosity, color_index, stage] per star.
+    /// Renderer packing: [x, y, luminosity, color_index, stage, cluster_id]
+    /// per star.
     pub fn star_render_data(&self) -> Vec<f32> {
         self.stars.render_data()
+    }
+
+    /// Cumulative number of distinct stellar associations formed since seeding.
+    pub fn stellar_association_count(&self) -> u32 {
+        self.next_cluster_id
     }
 
     pub fn neutron_star_count(&self) -> usize {
@@ -1323,6 +1385,115 @@ impl Galaxy {
         (ax, ay)
     }
 
+    /// Reduce star-local cluster ids into deterministic center-of-mass
+    /// aggregates. Cluster ids are allocated densely, so a Vec keeps this
+    /// hot path cheaper and more reproducible than a hash table.
+    fn association_aggregates(&self) -> Vec<AssociationAggregate> {
+        let mut associations = vec![AssociationAggregate::default(); self.next_cluster_id as usize];
+        for i in 0..self.stars.len() {
+            let cluster = self.stars.cluster_id[i];
+            if cluster == NO_CLUSTER || cluster as usize >= associations.len() {
+                continue;
+            }
+            let mass = self.stars.mass[i];
+            let a = &mut associations[cluster as usize];
+            a.mass += mass;
+            a.weighted_x += mass * self.stars.pos_x[i];
+            a.weighted_y += mass * self.stars.pos_y[i];
+            a.weighted_vx += mass * self.stars.vel_x[i];
+            a.weighted_vy += mass * self.stars.vel_y[i];
+            a.oldest_age = a.oldest_age.max(self.stars.age[i]);
+            a.members += 1;
+        }
+        associations
+    }
+
+    /// Find a still-forming association close enough to share the same
+    /// molecular complex. Distance is measured to young main-sequence
+    /// members rather than an ever-expanding bounding box, preventing a
+    /// long tidal stream from chaining unrelated births across the disk.
+    fn nearby_young_association(&self, x: f32, y: f32) -> Option<u32> {
+        let join_r2 = Galaxy::ASSOCIATION_JOIN_RADIUS * Galaxy::ASSOCIATION_JOIN_RADIUS;
+        let mut best: Option<(f32, u32)> = None;
+        for i in 0..self.stars.len() {
+            let cluster = self.stars.cluster_id[i];
+            if cluster == NO_CLUSTER
+                || self.stars.stage[i] != Stage::MainSequence as u8
+                || self.stars.age[i] > Galaxy::ASSOCIATION_JOIN_MAX_AGE
+            {
+                continue;
+            }
+            let dx = self.stars.pos_x[i] - x;
+            let dy = self.stars.pos_y[i] - y;
+            let d2 = dx * dx + dy * dy;
+            if d2 > join_r2 {
+                continue;
+            }
+            if best.is_none_or(|(best_d2, best_cluster)| {
+                d2 < best_d2 || (d2 == best_d2 && cluster < best_cluster)
+            }) {
+                best = Some((d2, cluster));
+            }
+        }
+        best.map(|(_, cluster)| cluster)
+    }
+
+    /// Circular support from an azimuthal average of the live stellar
+    /// field. Sampling around the same radius removes the nearest-clump
+    /// direction that makes a local field sample unsuitable for choosing
+    /// an association's galactic orbit, while retaining the actual gas,
+    /// halo, stellar, and black-hole mass already encoded in the field.
+    fn association_circular_speed(&self, radius: f32) -> f32 {
+        if radius < 1e-3 {
+            return 0.0;
+        }
+        const SAMPLES: usize = 8;
+        let center = self.size as f32 * 0.5;
+        let mut inward = 0.0f32;
+        for sample in 0..SAMPLES {
+            let angle = std::f32::consts::TAU * sample as f32 / SAMPLES as f32;
+            let (rx, ry) = (angle.cos(), angle.sin());
+            let (ax, ay) = self.sample_field(center + rx * radius, center + ry * radius);
+            inward += (-(ax * rx + ay * ry)).max(0.0);
+        }
+        let mean_inward = inward / SAMPLES as f32;
+        (mean_inward * radius).sqrt().min(Galaxy::BIRTH_VCIRC_CAP)
+    }
+
+    /// Smooth axisymmetric support not captured robustly by a local sample
+    /// of the coarse, clump-dominated field. The weights keep associations
+    /// coupled to the intentionally slower stellar rotation curve.
+    fn association_background_speed(&self, radius: f32) -> f32 {
+        let params = self.scenario.params();
+        let halo_core = params.halo_core_frac * self.disk_radius();
+        let halo_support = params.v_flat * radius
+            / (radius * radius + halo_core * halo_core).sqrt()
+            * Galaxy::ASSOCIATION_HALO_ORBIT_FLOOR;
+        let bh_support = (Galaxy::GRAVATIONAL_CONSTANT * self.bh_mass * radius * radius
+            / (radius * radius + Galaxy::BH_GAS_SOFTENING_SQ).powf(1.5))
+        .sqrt();
+        0.55 * halo_support + 0.65 * bh_support
+    }
+
+    fn association_tidal_radius(&self, association: AssociationAggregate) -> f32 {
+        let (cx, cy) = association.center();
+        let center = self.size as f32 * 0.5;
+        let (rx, ry) = (cx - center, cy - center);
+        let radius = (rx * rx + ry * ry).sqrt().max(1.0);
+        let (ax, ay) = self.sample_field(cx, cy);
+        let inward = (-(ax * rx + ay * ry) / radius).max(1e-5);
+        let omega_sq = inward / radius;
+        let age_fraction =
+            (1.0 - association.oldest_age / Galaxy::ASSOCIATION_BINDING_LIFETIME).clamp(0.0, 1.0);
+        let bound_mass = association.mass * (0.35 + 0.65 * age_fraction);
+        (Galaxy::ASSOCIATION_BINDING_G * bound_mass / (3.0 * omega_sq))
+            .cbrt()
+            .clamp(
+                Galaxy::ASSOCIATION_TIDAL_RADIUS_MIN,
+                Galaxy::ASSOCIATION_TIDAL_RADIUS_MAX,
+            )
+    }
+
     /// Integrate the star population: field gravity + two-tier halo
     /// confinement, semi-implicit Euler, no movement cap (stars cannot
     /// jam). Positions may leave the grid into the halo band; field
@@ -1334,10 +1505,96 @@ impl Galaxy {
         let hard_r = soft_r * Galaxy::HARD_CLIP_FACTOR;
         let halo_drag = (-Galaxy::STAR_HALO_DRAG * time).exp();
         let disk_drag = (-self.scenario.params().star_drag * time).exp();
+
+        // Associations are real but temporary. Once the oldest member has
+        // exhausted the binding lifetime, or a member crosses the local
+        // tidal radius after the embedded-cluster grace period, that star
+        // keeps its exact phase-space state and simply becomes unbound.
+        // The resulting differential galactic acceleration makes a stream.
+        let mut associations = self.association_aggregates();
+        let tidal_radii: Vec<f32> = associations
+            .iter()
+            .map(|&association| self.association_tidal_radius(association))
+            .collect();
+        for i in 0..self.stars.len() {
+            let cluster = self.stars.cluster_id[i];
+            if cluster == NO_CLUSTER || cluster as usize >= associations.len() {
+                continue;
+            }
+            let association = associations[cluster as usize];
+            if association.members < Galaxy::ASSOCIATION_MIN_MEMBERS
+                || association.oldest_age >= Galaxy::ASSOCIATION_BINDING_LIFETIME
+            {
+                self.stars.cluster_id[i] = NO_CLUSTER;
+                continue;
+            }
+            if association.oldest_age < Galaxy::ASSOCIATION_TIDAL_GRACE {
+                continue;
+            }
+            let (cx, cy) = association.center();
+            let distance = (self.stars.pos_x[i] - cx).hypot(self.stars.pos_y[i] - cy);
+            if distance > tidal_radii[cluster as usize] {
+                self.stars.cluster_id[i] = NO_CLUSTER;
+            }
+        }
+
+        // Rebuild after releases, then calculate a softened association
+        // acceleration for every remaining member. Subtracting each
+        // cluster's mass-weighted mean acceleration makes the internal
+        // force momentum-neutral, so binding cannot propel the cluster's
+        // center of mass or manufacture orbital angular momentum.
+        associations = self.association_aggregates();
+        let mut binding_ax = vec![0.0f32; self.stars.len()];
+        let mut binding_ay = vec![0.0f32; self.stars.len()];
+        let mut recoil_x = vec![0.0f32; associations.len()];
+        let mut recoil_y = vec![0.0f32; associations.len()];
+        for i in 0..self.stars.len() {
+            let cluster = self.stars.cluster_id[i];
+            if cluster == NO_CLUSTER || cluster as usize >= associations.len() {
+                continue;
+            }
+            let association = associations[cluster as usize];
+            if association.members < Galaxy::ASSOCIATION_MIN_MEMBERS || association.mass <= 0.0 {
+                continue;
+            }
+            let age_fraction = (1.0
+                - association.oldest_age / Galaxy::ASSOCIATION_BINDING_LIFETIME)
+                .clamp(0.0, 1.0);
+            let (cx, cy) = association.center();
+            let dx = cx - self.stars.pos_x[i];
+            let dy = cy - self.stars.pos_y[i];
+            let softened = dx * dx + dy * dy + Galaxy::ASSOCIATION_BINDING_SOFTENING_SQ;
+            let mut scale = Galaxy::ASSOCIATION_BINDING_G * association.mass * age_fraction.powi(2)
+                / (softened * softened.sqrt());
+            let raw_magnitude = scale * (dx * dx + dy * dy).sqrt();
+            if raw_magnitude > Galaxy::ASSOCIATION_ACCEL_MAX {
+                scale *= Galaxy::ASSOCIATION_ACCEL_MAX / raw_magnitude;
+            }
+            let ax = dx * scale;
+            let ay = dy * scale;
+            binding_ax[i] = ax;
+            binding_ay[i] = ay;
+            recoil_x[cluster as usize] += self.stars.mass[i] * ax;
+            recoil_y[cluster as usize] += self.stars.mass[i] * ay;
+        }
+        for i in 0..self.stars.len() {
+            let cluster = self.stars.cluster_id[i];
+            if cluster == NO_CLUSTER || cluster as usize >= associations.len() {
+                continue;
+            }
+            let mass = associations[cluster as usize].mass;
+            if mass > 0.0 {
+                binding_ax[i] -= recoil_x[cluster as usize] / mass;
+                binding_ay[i] -= recoil_y[cluster as usize] / mass;
+            }
+        }
+
         for i in 0..self.stars.len() {
             let px = self.stars.pos_x[i];
             let py = self.stars.pos_y[i];
             let (mut ax, mut ay) = self.sample_field(px, py);
+            ax += binding_ax[i];
+            ay += binding_ay[i];
             let dx = px - center;
             let dy = py - center;
             let r = (dx * dx + dy * dy).sqrt();
@@ -2125,8 +2382,10 @@ impl Galaxy {
     /// Spawn a cluster of stars from the budget, masses drawn from the
     /// IMF (mostly red dwarfs, occasionally a giant), leftover folded
     /// into the heaviest draw so the masses sum to the budget exactly
-    /// and the baryonic ledger stays closed. Velocities = capped local
-    /// gas velocity + prograde circular orbit component from the field.
+    /// and the baryonic ledger stays closed. Nearby young births join one
+    /// association. Each batch receives a shared galactic orbit plus a
+    /// momentum-neutral internal spin, rather than independently adding
+    /// circular speed to whatever radial motion the gas happened to carry.
     fn handle_star_birth(&mut self, ev: &Event) {
         let i = ev.target as usize;
         if i >= self.n {
@@ -2177,12 +2436,23 @@ impl Galaxy {
         }
         let masses = expanded;
         let n_stars = masses.len();
-        let cluster = self.next_cluster_id;
-        self.next_cluster_id += 1;
 
         let cx = self.xs_i[i] as f32;
         let cy = self.ys_i[i] as f32;
         let center = self.size as f32 * 0.5;
+        let existing_associations = self.association_aggregates();
+        let cluster = if let Some(cluster) = self.nearby_young_association(cx, cy) {
+            cluster
+        } else {
+            let cluster = self.next_cluster_id;
+            self.next_cluster_id = self.next_cluster_id.wrapping_add(1);
+            cluster
+        };
+        let existing = existing_associations
+            .get(cluster as usize)
+            .copied()
+            .filter(|association| association.mass > 0.0);
+
         let mut gas_vx = self.vel_x[i];
         let mut gas_vy = self.vel_y[i];
         let gas_speed = (gas_vx * gas_vx + gas_vy * gas_vy).sqrt();
@@ -2192,35 +2462,120 @@ impl Galaxy {
             gas_vy *= scale;
         }
 
+        // Choose one center-of-mass orbit from the prograde gas flow plus
+        // the azimuthally smoothed live stellar potential. Dense collapse
+        // gas may be streaming inward, but only a small radial share
+        // survives star formation. Separating the components preserves the
+        // disk's real rotation without inheriting its radial plunge.
+        let rx = cx - center;
+        let ry = cy - center;
+        let galactic_r = (rx * rx + ry * ry).sqrt().max(1e-3);
+        let (radial_x, radial_y) = (rx / galactic_r, ry / galactic_r);
+        let (tangent_x, tangent_y) = (-radial_y, radial_x);
+        let gas_radial = gas_vx * radial_x + gas_vy * radial_y;
+        let gas_tangential = gas_vx * tangent_x + gas_vy * tangent_y;
+        let stellar_support =
+            self.association_circular_speed(galactic_r) * Galaxy::ASSOCIATION_ORBIT_SUPPORT;
+        let background_support = self.association_background_speed(galactic_r);
+        // The smooth floor supplements the deliberately quarter-strength
+        // live field. The cap keeps that compensation inside the old
+        // gas-plus-circular-support birth envelope.
+        let smooth_support = stellar_support + background_support;
+        let target_tangential =
+            (gas_tangential.max(0.0) + smooth_support).min(Galaxy::ASSOCIATION_ORBIT_SPEED_CAP);
+        let orbital_radial = gas_radial * Galaxy::ASSOCIATION_RADIAL_INHERITANCE;
+        let orbital_tangential = target_tangential;
+        let orbital_vx = radial_x * orbital_radial + tangent_x * orbital_tangential;
+        let orbital_vy = radial_y * orbital_radial + tangent_y * orbital_tangential;
+        let (association_vx, association_vy) = if let Some(existing) = existing {
+            let (old_vx, old_vy) = existing.velocity();
+            let old = Galaxy::ASSOCIATION_EXISTING_VELOCITY_WEIGHT;
+            (
+                old_vx * old + orbital_vx * (1.0 - old),
+                old_vy * old + orbital_vy * (1.0 - old),
+            )
+        } else {
+            (orbital_vx, orbital_vy)
+        };
+
+        // A circular footprint reads as a cluster before the
+        // binding process has integrated even one tick. Compact-binary
+        // partners remain much closer than the broader association.
+        let mut positions: Vec<(f32, f32)> = Vec::with_capacity(n_stars);
         for k in 0..n_stars {
-            let mass = masses[k];
             let paired_with_previous =
                 k > 0 && binary_ids[k] != NO_BINARY && binary_ids[k] == binary_ids[k - 1];
             let (px, py) = if paired_with_previous {
-                let previous = self.stars.len() - 1;
+                let previous = positions[k - 1];
                 (
-                    (self.stars.pos_x[previous] + rng.random_range(-0.18f32..0.18))
+                    (previous.0 + rng.random_range(-0.18f32..0.18))
                         .clamp(0.0, self.size as f32 - 1e-3),
-                    (self.stars.pos_y[previous] + rng.random_range(-0.18f32..0.18))
+                    (previous.1 + rng.random_range(-0.18f32..0.18))
                         .clamp(0.0, self.size as f32 - 1e-3),
                 )
             } else {
+                let angle = rng.random_range(0.0f32..std::f32::consts::TAU);
+                let radius =
+                    Galaxy::ASSOCIATION_BIRTH_RADIUS * rng.random_range(0.0f32..1.0).sqrt();
                 (
-                    (cx + rng.random_range(-1.8f32..1.8)).clamp(0.0, self.size as f32 - 1e-3),
-                    (cy + rng.random_range(-1.8f32..1.8)).clamp(0.0, self.size as f32 - 1e-3),
+                    (cx + angle.cos() * radius).clamp(0.0, self.size as f32 - 1e-3),
+                    (cy + angle.sin() * radius).clamp(0.0, self.size as f32 - 1e-3),
                 )
             };
-            // Prograde circular support from the INWARD RADIAL component
-            // of the field only - the raw magnitude is dominated by
-            // whatever clump is nearest and mis-aims newborns.
-            let rx = px - center;
-            let ry = py - center;
-            let r = (rx * rx + ry * ry).sqrt().max(1e-3);
-            let (ax, ay) = self.sample_field(px, py);
-            let a_rad = (-(ax * rx + ay * ry) / r).max(0.0);
-            let v_circ = (a_rad * r).sqrt().min(Galaxy::BIRTH_VCIRC_CAP);
-            let vx = gas_vx + (-ry / r) * v_circ;
-            let vy = gas_vy + (rx / r) * v_circ;
+            positions.push((px, py));
+        }
+
+        let mut combined_mass = budget;
+        let mut combined_x = positions
+            .iter()
+            .zip(masses.iter())
+            .map(|(&(x, _), &mass)| x * mass)
+            .sum::<f32>();
+        let mut combined_y = positions
+            .iter()
+            .zip(masses.iter())
+            .map(|(&(_, y), &mass)| y * mass)
+            .sum::<f32>();
+        if let Some(existing) = existing {
+            combined_mass += existing.mass;
+            combined_x += existing.weighted_x;
+            combined_y += existing.weighted_y;
+        }
+        let association_x = combined_x / combined_mass.max(1e-3);
+        let association_y = combined_y / combined_mass.max(1e-3);
+
+        let mut internal_velocities: Vec<(f32, f32)> = Vec::with_capacity(n_stars);
+        let mut internal_momentum_x = 0.0f32;
+        let mut internal_momentum_y = 0.0f32;
+        for (k, &(px, py)) in positions.iter().enumerate() {
+            let dx = px - association_x;
+            let dy = py - association_y;
+            let local_r = (dx * dx + dy * dy).sqrt();
+            let speed = if local_r > 1e-3 {
+                (Galaxy::ASSOCIATION_BINDING_G * combined_mass / (local_r + 0.8)).sqrt()
+                    * Galaxy::ASSOCIATION_INTERNAL_SPEED_SCALE
+            } else {
+                0.0
+            }
+            .min(Galaxy::ASSOCIATION_INTERNAL_SPEED_CAP);
+            let (ivx, ivy) = if local_r > 1e-3 {
+                (-dy / local_r * speed, dx / local_r * speed)
+            } else {
+                (0.0, 0.0)
+            };
+            internal_velocities.push((ivx, ivy));
+            internal_momentum_x += masses[k] * ivx;
+            internal_momentum_y += masses[k] * ivy;
+        }
+        let batch_mass = masses.iter().sum::<f32>().max(1e-3);
+        let mean_internal_vx = internal_momentum_x / batch_mass;
+        let mean_internal_vy = internal_momentum_y / batch_mass;
+
+        for k in 0..n_stars {
+            let mass = masses[k];
+            let (px, py) = positions[k];
+            let vx = association_vx + internal_velocities[k].0 - mean_internal_vx;
+            let vy = association_vy + internal_velocities[k].1 - mean_internal_vy;
             let (mut lifetime, luminosity, class_index) = Galaxy::star_attrs(mass);
             if binary_ids[k] != NO_BINARY {
                 lifetime = Galaxy::star_attrs(mass * 2.0).0;
@@ -3345,8 +3700,8 @@ mod tests_golden {
     }
 
     /// Golden values pin the mass field after 100 ticks per scenario
-    /// (size 50, dt 0.5). Last recaptured for live black-hole gas gravity
-    /// and the nuclear-inflow model.
+    /// (size 50, dt 0.5). Last recaptured for coherent stellar-association
+    /// births, binding, and tidal release.
     /// If another deliberate change lands, recapture and say so in the
     /// commit.
     #[test]
@@ -3371,7 +3726,7 @@ mod tests_golden {
                 3175198802015567231u64,
                 16676742571752694121,
                 16206595836715500053,
-                10168810829841237666,
+                4274638675712473258,
             ]
         );
     }
@@ -3401,6 +3756,34 @@ mod tests_golden {
 mod tests_stars_dynamics {
     use super::*;
 
+    fn fill_radial_star_field(g: &mut Galaxy, inward: f32) {
+        let res = Galaxy::FIELD_RES;
+        let cell = g.size as f32 / res as f32;
+        let center = g.size as f32 * 0.5;
+        for fy in 0..res {
+            for fx in 0..res {
+                let x = (fx as f32 + 0.5) * cell - center;
+                let y = (fy as f32 + 0.5) * cell - center;
+                let r = (x * x + y * y).sqrt().max(1e-3);
+                g.field_ax[fy * res + fx] = -inward * x / r;
+                g.field_ay[fy * res + fx] = -inward * y / r;
+            }
+        }
+    }
+
+    fn birth_event(target: usize, payload: f32) -> Event {
+        Event {
+            id: 1,
+            tick: 1,
+            seq: 0,
+            kind: crate::events::EventKind::StarBirth,
+            source: target as u32,
+            target: target as u32,
+            payload,
+            parent: crate::events::NO_PARENT,
+        }
+    }
+
     #[test]
     fn test_star_at_rest_falls_toward_the_disk_center() {
         let mut g = Galaxy::new(50, 0).seed_with_mode_seeded(25, Scenario::IrregularSpiral, 42);
@@ -3413,6 +3796,97 @@ mod tests_stars_dynamics {
         assert!(
             r1 < r0,
             "field gravity must pull a resting star inward: r {r0:.2} -> {r1:.2}"
+        );
+    }
+
+    #[test]
+    fn test_nearby_births_share_one_supported_association_orbit() {
+        let mut g = Galaxy::new(50, 0);
+        g.master_seed = 17;
+        fill_radial_star_field(&mut g, 0.02);
+        let first_cell = 25 * 50 + 35;
+        g.vel_x[first_cell] = -1.0;
+        g.handle_star_birth(&birth_event(first_cell, 120.0));
+
+        assert_eq!(g.next_cluster_id, 1);
+        assert!(g.stars.len() >= Galaxy::ASSOCIATION_MIN_MEMBERS as usize);
+        assert!(g.stars.cluster_id.iter().all(|&cluster| cluster == 0));
+        let association = g.association_aggregates()[0];
+        let (vx, vy) = association.velocity();
+        assert!(
+            vx.abs() < 0.2,
+            "birth must suppress radial gas inflow, got vx={vx}"
+        );
+        assert!(
+            vy > 0.35,
+            "birth must receive prograde circular support, got vy={vy}"
+        );
+
+        let nearby_cell = 25 * 50 + 37;
+        g.handle_star_birth(&birth_event(nearby_cell, 100.0));
+        assert_eq!(
+            g.next_cluster_id, 1,
+            "nearby young collapse must join the existing association"
+        );
+        assert!(g.stars.cluster_id.iter().all(|&cluster| cluster == 0));
+
+        let distant_cell = 25 * 50 + 10;
+        g.handle_star_birth(&birth_event(distant_cell, 100.0));
+        assert_eq!(
+            g.next_cluster_id, 2,
+            "a distant collapse must begin a new association"
+        );
+        assert!(g.stars.cluster_id.contains(&1));
+    }
+
+    #[test]
+    fn test_association_binding_is_momentum_neutral_and_tides_strip_members() {
+        let mut bound = Galaxy::new(50, 0);
+        bound.next_cluster_id = 1;
+        for (x, vx) in [(33.0, -0.2), (34.0, -0.1), (35.0, 0.1), (36.0, 0.2)] {
+            let i = bound.spawn_star(x, 25.0, vx, 0.0, 10.0);
+            bound.stars.cluster_id[i] = 0;
+        }
+        let momentum_before: f32 = bound
+            .stars
+            .mass
+            .iter()
+            .zip(bound.stars.vel_x.iter())
+            .map(|(&mass, &vx)| mass * vx)
+            .sum();
+        bound.process_integrate_stars(0.5);
+        let momentum_after: f32 = bound
+            .stars
+            .mass
+            .iter()
+            .zip(bound.stars.vel_x.iter())
+            .map(|(&mass, &vx)| mass * vx)
+            .sum();
+        assert!(
+            (momentum_after - momentum_before).abs() < 1e-5,
+            "internal binding must not accelerate the association center"
+        );
+        assert!(bound.stars.vel_x[0] > -0.2);
+        assert!(bound.stars.vel_x[3] < 0.2);
+
+        let mut stripped = Galaxy::new(50, 0);
+        stripped.next_cluster_id = 1;
+        fill_radial_star_field(&mut stripped, 0.3);
+        for x in [30.0, 30.0, 30.0, 34.0] {
+            let i = stripped.spawn_star(x, 25.0, 0.0, 0.0, 10.0);
+            stripped.stars.cluster_id[i] = 0;
+            stripped.stars.age[i] = Galaxy::ASSOCIATION_TIDAL_GRACE + 1.0;
+        }
+        stripped.process_integrate_stars(0.5);
+        assert_eq!(
+            stripped
+                .stars
+                .cluster_id
+                .iter()
+                .filter(|&&cluster| cluster == NO_CLUSTER)
+                .count(),
+            1,
+            "the exterior member must leave the association as a tidal-stream star"
         );
     }
 
@@ -3461,7 +3935,8 @@ mod tests_stars_dynamics {
         let rd = g.star_render_data();
         assert_eq!(rd.len(), 2 * crate::stars::RENDER_FLOATS);
         assert_eq!(rd[0], 10.0);
-        assert!(rd[2] > rd[7], "heavier star must be more luminous");
+        assert!(rd[2] > rd[8], "heavier star must be more luminous");
+        assert!(rd[5] >= 4_000_000_000.0, "debug stars have no association");
     }
 
     #[test]

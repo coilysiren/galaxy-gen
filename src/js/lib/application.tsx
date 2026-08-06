@@ -155,7 +155,7 @@ export function Interface() {
   const [tickMs, setTickMs] = React.useState(0);
   const [starCount, setStarCount] = React.useState(0);
   const [snCount, setSnCount] = React.useState(0);
-  const [birthCount, setBirthCount] = React.useState(0);
+  const [associationCount, setAssociationCount] = React.useState(0);
   const [captureCount, setCaptureCount] = React.useState(0);
   const [neutronStarCount, setNeutronStarCount] = React.useState(0);
   const [grbCount, setGrbCount] = React.useState(0);
@@ -183,7 +183,7 @@ export function Interface() {
     transients: Float32Array;
     radiation: Float32Array;
     snCount: number;
-    birthCount: number;
+    associationCount: number;
     captureCount: number;
     neutronStarCount: number;
     grbCount: number;
@@ -320,7 +320,7 @@ export function Interface() {
     setTickCount(0);
     setStarCount(0);
     setSnCount(0);
-    setBirthCount(0);
+    setAssociationCount(0);
     setCaptureCount(0);
     setNeutronStarCount(0);
     setGrbCount(0);
@@ -362,7 +362,7 @@ export function Interface() {
   const refreshStats = (fe: galaxy.Frontend) => {
     setStarCount(fe.starCount());
     setSnCount(fe.supernovaCount());
-    setBirthCount(fe.birthCount());
+    setAssociationCount(fe.associationCount());
     setCaptureCount(fe.captureCount());
     setNeutronStarCount(fe.neutronStarCount());
     setGrbCount(fe.grbCount());
@@ -406,9 +406,9 @@ export function Interface() {
       galaxyFrontendRef.current.setOverrideLensScale(snap.lensScale);
       galaxyFrontendRef.current.setOverrideStellarHaloMass(snap.stellarHaloMass);
       dataviz.updateData(galaxyFrontendRef.current, snap.tickId);
-      setStarCount(snap.stars.length / 5);
+      setStarCount(snap.stars.length / galaxy.STAR_RENDER_FLOATS);
       setSnCount(snap.snCount);
-      setBirthCount(snap.birthCount);
+      setAssociationCount(snap.associationCount);
       setCaptureCount(snap.captureCount);
       setNeutronStarCount(snap.neutronStarCount);
       setGrbCount(snap.grbCount);
@@ -455,7 +455,7 @@ export function Interface() {
           transients,
           radiation,
           snCount,
-          birthCount,
+          associationCount,
           captureCount,
           neutronStarCount,
           grbCount,
@@ -475,7 +475,7 @@ export function Interface() {
             transients,
             radiation,
             snCount,
-            birthCount,
+            associationCount,
             captureCount,
             neutronStarCount,
             grbCount,
@@ -623,8 +623,10 @@ export function Interface() {
                   </td>
                 </tr>
                 <tr>
-                  <td>clusters born</td>
-                  <td className="text-right">{birthCount.toLocaleString()}</td>
+                  <td>associations formed</td>
+                  <td className="text-right" data-testid="stat-associations">
+                    {associationCount.toLocaleString()}
+                  </td>
                 </tr>
                 <tr>
                   <td>eaten by black hole</td>
