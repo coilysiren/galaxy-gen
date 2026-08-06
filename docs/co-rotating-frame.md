@@ -26,7 +26,9 @@ same world rotation before applying camera pan and zoom.
 Each scenario owns one renderer-only coefficient calibrated from the median
 angular velocity of resolved stars in a representative seeded run. The
 angular rate scales with the inverse square root of galaxy size, matching the
-way world radius and gravitating mass grow together.
+way world radius and gravitating mass grow together. Presentation applies a
+2x multiplier above that calibrated rate so the nebular lead remains legible
+at normal playback speed.
 
 Frame phase is derived from scenario, size, and absolute simulation tick. It
 is not integrated from wall-clock animation time. Pausing freezes the frame,

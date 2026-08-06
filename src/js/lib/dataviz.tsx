@@ -17,6 +17,10 @@ const FRAME_RATE_SCALE: Record<galaxy.Scenario, number> = {
   [galaxy.Scenario.IrregularElliptical]: 0.038,
 };
 
+// Lead the calibrated stellar frame so gas crossing star-forming regions
+// reads clearly at normal playback speed.
+const FRAME_RATE_PRESENTATION_MULTIPLIER = 2;
+
 // Radial render fade starts inside the nominal disk and reaches black well
 // before the canvas. This turns the finite simulation domain into a broad
 // stellar-halo transition instead of revealing a crisp circular boundary.
@@ -404,7 +408,9 @@ export function initViz(
     scale,
     rMax: scale * 0.5,
     camera,
-    frameAngularRate: FRAME_RATE_SCALE[scenario] / Math.sqrt(Math.max(1, size)),
+    frameAngularRate:
+      (FRAME_RATE_PRESENTATION_MULTIPLIER * FRAME_RATE_SCALE[scenario]) /
+      Math.sqrt(Math.max(1, size)),
     simTick: 0,
     lastMass: null,
     lastFracX: null,
