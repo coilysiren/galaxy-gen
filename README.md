@@ -4,10 +4,14 @@
 
 `{ rust → wasm → js }` living-galaxy simulation. Gravitational physics,
 star birth and death, neutron-star mergers, stellar-halo phase mixing,
-black-hole evolution, and a cycling cold/hot gas reservoir are computed in
+black-hole evolution, conserved chemical enrichment, and a cycling cold/hot gas reservoir are computed in
 Rust, compiled to WebAssembly via
 [wasm-pack](https://github.com/rustwasm/wasm-pack), and rendered on a browser
 canvas with React.
+
+Heavy elements move with gas and stars through the full lifecycle. Supernovae
+enrich later generations, while local composition controls the rendered dust
+lanes and shock-swept [OIII] glow.
 
 ## Quick start
 

@@ -33,6 +33,7 @@ export class Frontend {
   private overrideStars: Float32Array | null = null;
   private overrideTransients: Float32Array | null = null;
   private overrideRadiation: Float32Array | null = null;
+  private overrideMetallicity: Float32Array | null = null;
   private overrideLensScale: number | null = null;
   private overrideStellarHaloMass: number | null = null;
   // CPU uses `Galaxy.tick`; WebGPU uses `tick_with_accel` after WGSL forces.
@@ -70,6 +71,7 @@ export class Frontend {
     this.overrideMass = null;
     this.overrideFracX = null;
     this.overrideFracY = null;
+    this.overrideMetallicity = null;
     this.overrideStellarHaloMass = null;
     const next = this.galaxy.seed_with_mode(additionalMass, mode as unknown as wasm.Scenario);
     this.galaxy.free();
@@ -85,6 +87,7 @@ export class Frontend {
     this.overrideMass = null;
     this.overrideFracX = null;
     this.overrideFracY = null;
+    this.overrideMetallicity = null;
     this.overrideStellarHaloMass = null;
     const next = this.galaxy.seed_with_mode_seeded(
       additionalMass,
@@ -100,6 +103,7 @@ export class Frontend {
     this.overrideFracX = null;
     this.overrideFracY = null;
     this.overrideStars = null;
+    this.overrideMetallicity = null;
     this.overrideStellarHaloMass = null;
     const next = this.galaxy.tick(timeModifier);
     this.galaxy.free();
@@ -116,6 +120,7 @@ export class Frontend {
       this.overrideMass = null;
       this.overrideFracX = null;
       this.overrideFracY = null;
+      this.overrideMetallicity = null;
       this.overrideStellarHaloMass = null;
       const mass = this.galaxy.mass();
       const { acc_x, acc_y } = await this.gpuBackend.computeAccelerations(mass, this.galaxySize);
@@ -165,6 +170,15 @@ export class Frontend {
 
   public setOverrideRadiation(radiation: Float32Array): void {
     this.overrideRadiation = radiation;
+  }
+
+  /** Per-cell heavy-element fraction used by dust and line emission. */
+  public metallicityArray(): Float32Array {
+    return this.overrideMetallicity ?? this.galaxy.gas_metallicity();
+  }
+
+  public setOverrideMetallicity(metallicity: Float32Array): void {
+    this.overrideMetallicity = metallicity;
   }
 
   public supernovaCount(): number {
@@ -232,6 +246,7 @@ export class Frontend {
   /** Debug/test spawn; production stars come from StarBirth events. */
   public spawnStar(x: number, y: number, vx: number, vy: number, mass: number): number {
     this.overrideStars = null;
+    this.overrideMetallicity = null;
     return this.galaxy.spawn_star(x, y, vx, vy, mass);
   }
 
@@ -286,6 +301,7 @@ export class Frontend {
     this.overrideFracX = null;
     this.overrideFracY = null;
     this.overrideStars = null;
+    this.overrideMetallicity = null;
     this.overrideStellarHaloMass = null;
   }
 
@@ -334,6 +350,7 @@ export class TickWorker {
     stars: Float32Array,
     transients: Float32Array,
     radiation: Float32Array,
+    metallicity: Float32Array,
     snCount: number,
     associationCount: number,
     captureCount: number,
@@ -357,6 +374,7 @@ export class TickWorker {
       stars: Float32Array,
       transients: Float32Array,
       radiation: Float32Array,
+      metallicity: Float32Array,
       snCount: number,
       associationCount: number,
       captureCount: number,
@@ -394,6 +412,7 @@ export class TickWorker {
         msg.stars,
         msg.transients,
         msg.radiation,
+        msg.metallicity,
         msg.snCount,
         msg.associationCount,
         msg.captureCount,

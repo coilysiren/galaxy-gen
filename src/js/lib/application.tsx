@@ -182,6 +182,7 @@ export function Interface() {
     stars: Float32Array;
     transients: Float32Array;
     radiation: Float32Array;
+    metallicity: Float32Array;
     snCount: number;
     associationCount: number;
     captureCount: number;
@@ -403,6 +404,7 @@ export function Interface() {
       galaxyFrontendRef.current.setOverrideStars(snap.stars);
       galaxyFrontendRef.current.setOverrideTransients(snap.transients);
       galaxyFrontendRef.current.setOverrideRadiation(snap.radiation);
+      galaxyFrontendRef.current.setOverrideMetallicity(snap.metallicity);
       galaxyFrontendRef.current.setOverrideLensScale(snap.lensScale);
       galaxyFrontendRef.current.setOverrideStellarHaloMass(snap.stellarHaloMass);
       dataviz.updateData(galaxyFrontendRef.current, snap.tickId);
@@ -454,6 +456,7 @@ export function Interface() {
           stars,
           transients,
           radiation,
+          metallicity,
           snCount,
           associationCount,
           captureCount,
@@ -474,6 +477,7 @@ export function Interface() {
             stars,
             transients,
             radiation,
+            metallicity,
             snCount,
             associationCount,
             captureCount,

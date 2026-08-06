@@ -170,6 +170,7 @@ interface State {
   lastStars: Float32Array | null;
   lastTransients: Float32Array | null;
   lastRadiation: Float32Array | null;
+  lastMetallicity: Float32Array | null;
   lastLensScale: number;
   lastStellarHaloMass: number;
   cleanup: () => void;
@@ -388,6 +389,7 @@ export function initViz(galaxyFrontend: galaxy.Frontend) {
     lastStars: null,
     lastTransients: null,
     lastRadiation: null,
+    lastMetallicity: null,
     lastLensScale: 1,
     lastStellarHaloMass: 0,
     cleanup,
@@ -411,6 +413,7 @@ export function updateData(galaxyFrontend: galaxy.Frontend, simTick?: number) {
   state.lastStars = galaxyFrontend.starRenderArray().slice();
   state.lastTransients = galaxyFrontend.transientsArray().slice();
   state.lastRadiation = galaxyFrontend.radiationArray().slice();
+  state.lastMetallicity = galaxyFrontend.metallicityArray().slice();
   state.lastLensScale = galaxyFrontend.lensScale();
   state.lastStellarHaloMass = galaxyFrontend.stellarHaloMass();
   drawFrame(state, state.lastMass);
@@ -472,6 +475,11 @@ function drawFrame(s: State, mass: Uint16Array) {
   const radScale = radRes / size;
   const fracX = s.lastFracX;
   const fracY = s.lastFracY;
+  const metallicity = s.lastMetallicity;
+  const metalStrengthAt = (i: number): number => {
+    const z = metallicity?.[i] ?? 0;
+    return Math.min(1, Math.max(0, (z - 0.0015) / 0.02));
+  };
 
   // Recent supernova shells, for the [OIII] teal tier: gas near an
   // expanding front is shock-ionized and glows teal, lingering after
@@ -496,6 +504,7 @@ function drawFrame(s: State, mass: Uint16Array) {
   // dark specks over the gas was the failure mode this replaces.
   const isDusty = (i: number, col: number, row: number): boolean => {
     if (mass[i] < 78) return false;
+    if (metalStrengthAt(i) <= 0) return false;
     let thick = 0;
     if (col > 0 && mass[i - 1] >= 55) thick++;
     if (col < size - 1 && mass[i + 1] >= 55) thick++;
@@ -556,13 +565,14 @@ function drawFrame(s: State, mass: Uint16Array) {
         if (wgt > teal) teal = wgt;
       }
       teal = teal > 0 ? teal * teal * (3 - 2 * teal) : 0;
+      teal *= 0.3 + 0.7 * metalStrengthAt(i);
       // Fuzz overflows the cell on purpose, with per-cell size and
       // brightness jitter so the field is cloudy rather than uniform.
       const footprint = Math.max(7, (0.5 + t * rMax * 1.4) * 6) * (0.75 + cellJitter(i, 1));
       let brightness = 0.48 + 0.54 * cellJitter(i, 2);
       // Dust darkens by emitting less - absence of glow cannot leave
       // overlay artifacts the way a multiply stamp can.
-      if (isDusty(i, col, row)) brightness *= 0.45;
+      if (isDusty(i, col, row)) brightness *= 1 - 0.6 * metalStrengthAt(i);
       const alpha = radialFade(Math.sqrt(radSq), softR) * brightness;
       const dx = toCx(gasX) - footprint / 2;
       const dy = toCy(gasY) - footprint / 2;
@@ -599,7 +609,7 @@ function drawFrame(s: State, mass: Uint16Array) {
       const footprint = Math.max(10, rMax * 12) * (0.8 + 0.5 * cellJitter(i, 6));
       const gasX = col + (fracX?.[i] ?? 0);
       const gasY = row + (fracY?.[i] ?? 0);
-      ctx.globalAlpha = 0.16;
+      ctx.globalAlpha = 0.06 + 0.18 * metalStrengthAt(i);
       ctx.drawImage(
         dustSprite!,
         toCx(gasX) - footprint / 2,

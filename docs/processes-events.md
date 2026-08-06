@@ -20,7 +20,7 @@ Deterministic queued-event model:
 
 - an event emitted during tick N is scheduled for tick N+1 - same-tick recursive execution is structurally impossible
 - execution order is stable (tick, seq), where seq is emission order within the emitting tick; ids are globally monotonic
-- each event carries kind, source, target, a scalar payload, and a causal parent id, so a supernova-induced star birth is traceable back through `ShockWave` to the `Supernova` that caused it
+- each event carries kind, source, target, two scalar payloads, and a causal parent id, so a `StarBirth` can carry mass plus composition while a supernova-induced birth remains traceable through `ShockWave` to the `Supernova` that caused it
 - a bounded ring of executed events feeds instrumentation counters and renderer transients - a supernova flash is the renderer's reading of a Supernova event, never authoritative state
 
 ## RNG service
@@ -43,7 +43,7 @@ Core-collapse-scale birth draws split into equal compact-binary partners. Each c
 
 `stellar_halo` counts consecutive scans beyond 1.18 disk radii. A star that remains there phase-mixes out of the resolved point population after eight scans. Old quiet remnants, merged remnants, and unpaired neutron stars retire on their own clocks. All of their mass moves into `stellar_halo_mass`, which the renderer reads as diffuse light. A binary that loses one partner to the halo becomes unpaired rather than merging with a missing object.
 
-Conservation: the baryonic ledger (cold gas + hot halo gas + resolved stars + diffuse stellar halo + in-flight birth budgets + black hole + radiated sink) stays constant to sub-1.0 through formation, fountain exchange, supernovae, phase mixing, and compact mergers. Per-tick, fountain-direction, phase-mixing, and merger tests guard it.
+Conservation: the baryonic ledger (cold gas + hot halo gas + resolved stars + diffuse stellar halo + in-flight birth budgets + black hole + radiated sink) stays constant to sub-1.0 through formation, fountain exchange, supernovae, phase mixing, and compact mergers. A second ledger tracks heavy elements across the same carriers plus explicit stellar yields. Per-tick, transport, state round-trip, fountain-direction, phase-mixing, and merger tests guard both.
 
 ## See also
 

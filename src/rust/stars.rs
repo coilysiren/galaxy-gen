@@ -32,7 +32,7 @@ pub const NO_CLUSTER: u32 = u32::MAX;
 pub const NO_BINARY: u32 = u32::MAX;
 
 /// Floats per star in the flat serialization (see `to_flat`).
-pub const STAR_FLOATS: usize = 14;
+pub const STAR_FLOATS: usize = 15;
 
 /// Floats per star in the render packing (see `render_data`).
 pub const RENDER_FLOATS: usize = 6;
@@ -46,6 +46,8 @@ pub struct Stars {
     pub vel_x: Vec<f32>,
     pub vel_y: Vec<f32>,
     pub mass: Vec<f32>,
+    /// Heavy-element mass carried by each star. This is a subset of mass.
+    pub metal_mass: Vec<f32>,
     pub age: Vec<f32>,
     pub lifetime: Vec<f32>,
     pub stage: Vec<u8>,
@@ -82,6 +84,7 @@ impl Stars {
         vel_x: f32,
         vel_y: f32,
         mass: f32,
+        metal_mass: f32,
         lifetime: f32,
         luminosity: f32,
         color_index: f32,
@@ -94,6 +97,7 @@ impl Stars {
         self.vel_x.push(vel_x);
         self.vel_y.push(vel_y);
         self.mass.push(mass);
+        self.metal_mass.push(metal_mass.clamp(0.0, mass));
         self.age.push(0.0);
         self.lifetime.push(lifetime);
         self.stage.push(Stage::MainSequence as u8);
@@ -112,6 +116,7 @@ impl Stars {
         self.vel_x.swap_remove(i);
         self.vel_y.swap_remove(i);
         self.mass.swap_remove(i);
+        self.metal_mass.swap_remove(i);
         self.age.swap_remove(i);
         self.lifetime.swap_remove(i);
         self.stage.swap_remove(i);
@@ -146,7 +151,7 @@ impl Stars {
 
     /// Full flat serialization for the worker state round-trip. Layout per
     /// star: [x, y, vx, vy, mass, age, lifetime, stage, luminosity,
-    /// color_index, cluster_id, binary_id, halo_dwell, id]. Integer ids
+    /// color_index, cluster_id, binary_id, halo_dwell, id, metal_mass]. Integer ids
     /// survive f32 because live ids stay far below 2^24. The u32::MAX
     /// sentinels round-trip through Rust's saturating float cast.
     pub fn to_flat(&self) -> Vec<f32> {
@@ -167,6 +172,7 @@ impl Stars {
             out.push(self.binary_id[i] as f32);
             out.push(self.halo_dwell[i] as f32);
             out.push(self.id[i] as f32);
+            out.push(self.metal_mass[i]);
         }
         out
     }
@@ -188,6 +194,7 @@ impl Stars {
             s.binary_id.push(chunk[11] as u32);
             s.halo_dwell.push(chunk[12] as u16);
             s.id.push(chunk[13] as u32);
+            s.metal_mass.push(chunk[14].clamp(0.0, chunk[4]));
         }
         s
     }
@@ -200,9 +207,11 @@ mod tests_stars {
     #[test]
     fn test_flat_round_trip_is_exact() {
         let mut s = Stars::new();
-        s.spawn(1.5, 2.5, -0.1, 0.2, 40.0, 1000.0, 250.0, 0.7, 3, 7, 101);
         s.spawn(
-            9.0, 8.0, 0.3, -0.4, 12.0, 4000.0, 40.0, 0.2, NO_CLUSTER, NO_BINARY, 102,
+            1.5, 2.5, -0.1, 0.2, 40.0, 0.8, 1000.0, 250.0, 0.7, 3, 7, 101,
+        );
+        s.spawn(
+            9.0, 8.0, 0.3, -0.4, 12.0, 0.12, 4000.0, 40.0, 0.2, NO_CLUSTER, NO_BINARY, 102,
         );
         s.age[1] = 123.5;
         s.stage[0] = Stage::Remnant as u8;
@@ -214,6 +223,7 @@ mod tests_stars {
         assert_eq!(back.pos_x, s.pos_x);
         assert_eq!(back.vel_y, s.vel_y);
         assert_eq!(back.age, s.age);
+        assert_eq!(back.metal_mass, s.metal_mass);
         assert_eq!(back.stage, s.stage);
         assert_eq!(back.cluster_id, s.cluster_id);
         assert_eq!(back.binary_id, s.binary_id);
@@ -224,13 +234,20 @@ mod tests_stars {
     #[test]
     fn test_swap_remove_keeps_arrays_parallel() {
         let mut s = Stars::new();
-        s.spawn(0.0, 0.0, 0.0, 0.0, 1.0, 1.0, 1.0, 0.0, 0, NO_BINARY, 10);
-        s.spawn(1.0, 1.0, 0.0, 0.0, 2.0, 1.0, 1.0, 0.0, 1, NO_BINARY, 11);
-        s.spawn(2.0, 2.0, 0.0, 0.0, 3.0, 1.0, 1.0, 0.0, 2, NO_BINARY, 12);
+        s.spawn(
+            0.0, 0.0, 0.0, 0.0, 1.0, 0.01, 1.0, 1.0, 0.0, 0, NO_BINARY, 10,
+        );
+        s.spawn(
+            1.0, 1.0, 0.0, 0.0, 2.0, 0.02, 1.0, 1.0, 0.0, 1, NO_BINARY, 11,
+        );
+        s.spawn(
+            2.0, 2.0, 0.0, 0.0, 3.0, 0.03, 1.0, 1.0, 0.0, 2, NO_BINARY, 12,
+        );
         s.swap_remove(0);
         assert_eq!(s.len(), 2);
         assert_eq!(s.pos_x[0], 2.0);
         assert_eq!(s.mass[0], 3.0);
+        assert_eq!(s.metal_mass[0], 0.03);
         assert_eq!(s.cluster_id[0], 2);
         assert_eq!(s.index_of_id(11), Some(1));
         assert_eq!(s.index_of_id(10), None);

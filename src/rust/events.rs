@@ -46,6 +46,8 @@ pub struct Event {
     pub target: u32,
     /// Kind-dependent scalar (mass budget, kick strength, ...).
     pub payload: f32,
+    /// Optional second scalar, currently composition carried by an event.
+    pub aux: f32,
     /// Causal parent event id, NO_PARENT for root causes.
     pub parent: u64,
 }
@@ -88,6 +90,20 @@ impl EventQueue {
         payload: f32,
         parent: u64,
     ) -> u64 {
+        self.emit_with_aux(current_tick, kind, source, target, payload, 0.0, parent)
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub fn emit_with_aux(
+        &mut self,
+        current_tick: u64,
+        kind: EventKind,
+        source: u32,
+        target: u32,
+        payload: f32,
+        aux: f32,
+        parent: u64,
+    ) -> u64 {
         if self.seq_tick != current_tick {
             self.seq_tick = current_tick;
             self.seq_in_tick = 0;
@@ -100,6 +116,7 @@ impl EventQueue {
             source,
             target,
             payload,
+            aux,
             parent,
         };
         self.next_id += 1;
@@ -155,11 +172,11 @@ impl EventQueue {
     }
 
     /// Flat u32 serialization for the worker state round-trip. Layout:
-    /// [next_id lo/hi, seq_tick lo/hi, seq_in_tick, n_pending, then 11
+    /// [next_id lo/hi, seq_tick lo/hi, seq_in_tick, n_pending, then 12
     /// u32 per pending event]. The instrumentation ring and counters are
     /// intentionally dropped - they are diagnostics, not sim state.
     pub fn to_flat(&self) -> Vec<u32> {
-        let mut out = Vec::with_capacity(6 + self.pending.len() * 11);
+        let mut out = Vec::with_capacity(6 + self.pending.len() * 12);
         out.push(self.next_id as u32);
         out.push((self.next_id >> 32) as u32);
         out.push(self.seq_tick as u32);
@@ -176,6 +193,7 @@ impl EventQueue {
             out.push(ev.source);
             out.push(ev.target);
             out.push(ev.payload.to_bits());
+            out.push(ev.aux.to_bits());
             out.push(ev.parent as u32);
             out.push((ev.parent >> 32) as u32);
         }
@@ -191,7 +209,7 @@ impl EventQueue {
         q.seq_tick = data[2] as u64 | ((data[3] as u64) << 32);
         q.seq_in_tick = data[4];
         let n = data[5] as usize;
-        for chunk in data[6..].chunks_exact(11).take(n) {
+        for chunk in data[6..].chunks_exact(12).take(n) {
             q.pending.push(Event {
                 id: chunk[0] as u64 | ((chunk[1] as u64) << 32),
                 tick: chunk[2] as u64 | ((chunk[3] as u64) << 32),
@@ -200,7 +218,8 @@ impl EventQueue {
                 source: chunk[6],
                 target: chunk[7],
                 payload: f32::from_bits(chunk[8]),
-                parent: chunk[9] as u64 | ((chunk[10] as u64) << 32),
+                aux: f32::from_bits(chunk[9]),
+                parent: chunk[10] as u64 | ((chunk[11] as u64) << 32),
             });
         }
         q
@@ -296,6 +315,7 @@ mod tests_event_queue {
                 source: NO_REF,
                 target: NO_REF,
                 payload: 0.0,
+                aux: 0.0,
                 parent: NO_PARENT,
             };
             q.record_executed(ev);

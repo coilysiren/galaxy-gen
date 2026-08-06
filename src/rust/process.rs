@@ -23,6 +23,7 @@ pub enum StateKey {
     BlackHole,
     HaloGas,
     StellarHalo,
+    Composition,
 }
 
 pub struct ProcessDescriptor {
@@ -72,8 +73,13 @@ static REGISTRY: &[ProcessDescriptor] = &[
             StateKey::GasMass,
             StateKey::GasKinematics,
             StateKey::GasAccel,
+            StateKey::Composition,
         ],
-        writes: &[StateKey::GasMass, StateKey::GasKinematics],
+        writes: &[
+            StateKey::GasMass,
+            StateKey::GasKinematics,
+            StateKey::Composition,
+        ],
         requires_fresh: &[StateKey::GasAccel],
         cadence: 1,
         phase_offset: 0,
@@ -128,6 +134,7 @@ static REGISTRY: &[ProcessDescriptor] = &[
             StateKey::StarKinematics,
             StateKey::StarLifecycle,
             StateKey::StellarHalo,
+            StateKey::Composition,
         ],
         requires_fresh: &[],
         cadence: 8,
@@ -153,8 +160,14 @@ static REGISTRY: &[ProcessDescriptor] = &[
             StateKey::GasMass,
             StateKey::StarKinematics,
             StateKey::BlackHole,
+            StateKey::Composition,
         ],
-        writes: &[StateKey::GasMass, StateKey::BlackHole, StateKey::EventQueue],
+        writes: &[
+            StateKey::GasMass,
+            StateKey::BlackHole,
+            StateKey::EventQueue,
+            StateKey::Composition,
+        ],
         requires_fresh: &[],
         cadence: 8,
         phase_offset: 2,
@@ -174,8 +187,17 @@ static REGISTRY: &[ProcessDescriptor] = &[
     ProcessDescriptor {
         // Emits CloudDissipate; irradiated gas rises into the hot halo.
         name: "gas_dissipation",
-        reads: &[StateKey::GasMass, StateKey::RadiationField],
-        writes: &[StateKey::GasMass, StateKey::HaloGas, StateKey::EventQueue],
+        reads: &[
+            StateKey::GasMass,
+            StateKey::RadiationField,
+            StateKey::Composition,
+        ],
+        writes: &[
+            StateKey::GasMass,
+            StateKey::HaloGas,
+            StateKey::EventQueue,
+            StateKey::Composition,
+        ],
         requires_fresh: &[],
         cadence: 8,
         phase_offset: 5,
@@ -190,11 +212,13 @@ static REGISTRY: &[ProcessDescriptor] = &[
             StateKey::GasKinematics,
             StateKey::StarLifecycle,
             StateKey::HaloGas,
+            StateKey::Composition,
         ],
         writes: &[
             StateKey::GasMass,
             StateKey::GasKinematics,
             StateKey::HaloGas,
+            StateKey::Composition,
         ],
         requires_fresh: &[],
         cadence: 8,

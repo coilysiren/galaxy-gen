@@ -245,6 +245,9 @@ pub struct Galaxy {
     ys_i: Vec<i16>,
     inv_r3: Vec<f32>,
     scratch_mass: Vec<u32>,
+    /// Heavy-element mass in each cold-gas cell. Always bounded by mass.
+    metal_mass: Vec<f32>,
+    scratch_metal_mass: Vec<f32>,
 
     /// Ticks elapsed since seeding. Drives process cadence and the
     /// per-tick RNG stream derivation.
@@ -264,6 +267,10 @@ pub struct Galaxy {
     bh_mass_initial: f32,
     /// Mass lost to Hawking radiation - the irreversible ledger sink.
     radiated_total: f64,
+    /// Heavy elements carried into the central black hole.
+    bh_metal_mass: f64,
+    /// Heavy elements carried out in the radiated sink.
+    radiated_metal_mass: f64,
     /// Coarse acceleration field (FIELD_RES x FIELD_RES over the world),
     /// rebuilt by process_gravity_field, bilinear-sampled by stars.
     field_ax: Vec<f32>,
@@ -277,9 +284,15 @@ pub struct Galaxy {
     /// Hot gas lifted out of the visible disk by feedback. The galactic
     /// fountain cools it back, making this a reservoir rather than a sink.
     halo_gas_mass: u64,
+    /// Heavy elements carried by the hot circumgalactic gas.
+    halo_metal_mass: f64,
     /// Resolved stars and compact remnants phase-mixed into a diffuse,
     /// unresolved stellar halo. It remains in the baryonic ledger.
     stellar_halo_mass: f64,
+    /// Heavy elements retired with unresolved stellar-halo mass.
+    stellar_halo_metal_mass: f64,
+    /// New heavy elements synthesized by stellar feedback.
+    metal_produced_total: f64,
     /// Number of resolved particles retired into `stellar_halo_mass`.
     phase_mixed_count: u64,
     next_cluster_id: u32,
@@ -362,6 +375,9 @@ impl Galaxy {
     const FIELD_SOFTENING_SQ: f32 = 25.0;
     /// Central black hole mass as a fraction of total seeded mass.
     const BH_MASS_FRACTION: f32 = 0.05;
+    /// Primordial gas begins weakly enriched so dust remains visible before
+    /// the first stellar generation completes.
+    const INITIAL_METALLICITY: f32 = 0.004;
     // Stellar population. Births sample a Salpeter-flavored IMF
     // (dN/dm proportional to m^-2.35) between the mass bounds: many
     // faint red dwarfs, rare blue giants. Luminosity follows a
@@ -483,6 +499,8 @@ impl Galaxy {
     // gas with an outward kick and leaves a neutron star.
     const SN_MASS_THRESHOLD: f32 = 30.0;
     const SN_GAS_RETURN: f32 = 0.8;
+    /// Newly synthesized heavy elements as a share of progenitor mass.
+    const SN_METAL_YIELD_FRACTION: f32 = 0.02;
     const SN_KICK: f32 = 1.2;
     const SN_RADIUS: i32 = 2;
     /// Core-collapse-scale birth draws split into a close pair. The pair
@@ -573,6 +591,8 @@ impl Galaxy {
             ys_i,
             inv_r3,
             scratch_mass: vec![0; n],
+            metal_mass: vec![cell_initial_mass as f32 * Galaxy::INITIAL_METALLICITY; n],
+            scratch_metal_mass: vec![0.0; n],
             tick_count: 0,
             master_seed: 0,
             events: EventQueue::new(),
@@ -580,12 +600,17 @@ impl Galaxy {
             bh_mass: 0.0,
             bh_mass_initial: 0.0,
             radiated_total: 0.0,
+            bh_metal_mass: 0.0,
+            radiated_metal_mass: 0.0,
             field_ax: vec![0.0; Galaxy::FIELD_RES * Galaxy::FIELD_RES],
             field_ay: vec![0.0; Galaxy::FIELD_RES * Galaxy::FIELD_RES],
             radiation: vec![0.0; Galaxy::FIELD_RES * Galaxy::FIELD_RES],
             collapse_heat: vec![0; n],
             halo_gas_mass: 0,
+            halo_metal_mass: 0.0,
             stellar_halo_mass: 0.0,
+            stellar_halo_metal_mass: 0.0,
+            metal_produced_total: 0.0,
             phase_mixed_count: 0,
             next_cluster_id: 0,
             next_star_id: 1,
@@ -889,6 +914,12 @@ impl Galaxy {
         g.frac_x = vec![0.0; self.n];
         g.frac_y = vec![0.0; self.n];
         g.scratch_mass = vec![0; self.n];
+        g.metal_mass = g
+            .mass
+            .iter()
+            .map(|&mass| mass as f32 * Galaxy::INITIAL_METALLICITY)
+            .collect();
+        g.scratch_metal_mass = vec![0.0; self.n];
         g.tick_count = 0;
         g.master_seed = master_seed;
         g.events = EventQueue::new();
@@ -896,10 +927,15 @@ impl Galaxy {
         g.bh_mass = total_mass as f32 * Galaxy::BH_MASS_FRACTION;
         g.bh_mass_initial = g.bh_mass;
         g.radiated_total = 0.0;
+        g.bh_metal_mass = g.bh_mass as f64 * Galaxy::INITIAL_METALLICITY as f64;
+        g.radiated_metal_mass = 0.0;
         g.radiation = vec![0.0; Galaxy::FIELD_RES * Galaxy::FIELD_RES];
         g.collapse_heat = vec![0; self.n];
         g.halo_gas_mass = 0;
+        g.halo_metal_mass = 0.0;
         g.stellar_halo_mass = 0.0;
+        g.stellar_halo_metal_mass = 0.0;
+        g.metal_produced_total = 0.0;
         g.phase_mixed_count = 0;
         g.next_cluster_id = 0;
         g.next_star_id = 1;
@@ -1009,6 +1045,7 @@ impl Galaxy {
             vx,
             vy,
             m,
+            0.0,
             lifetime,
             luminosity,
             class_index,
@@ -1065,6 +1102,21 @@ impl Galaxy {
         self.radiation.clone()
     }
 
+    /// Per-cell cold-gas metallicity for dust and emission-line rendering.
+    pub fn gas_metallicity(&self) -> Vec<f32> {
+        self.mass
+            .iter()
+            .zip(self.metal_mass.iter())
+            .map(|(&mass, &metals)| {
+                if mass == 0 {
+                    0.0
+                } else {
+                    (metals / mass as f32).clamp(0.0, 1.0)
+                }
+            })
+            .collect()
+    }
+
     pub fn radiation_res() -> usize {
         Galaxy::FIELD_RES
     }
@@ -1119,35 +1171,41 @@ impl Galaxy {
         self.stars = Stars::from_flat(data);
     }
 
-    /// Coarse-field state: [field_ax..., field_ay..., radiation...]. The
+    /// Coarse-field state: [field_ax..., field_ay..., radiation...,
+    /// metal_mass...]. The
     /// fields are mid-tick derived state - rebuilding after restore would
     /// use post-tick inputs and fork the trajectory. Opaque to JS.
     pub fn sim_state_field(&self) -> Vec<f32> {
         let mut out = self.field_ax.clone();
         out.extend_from_slice(&self.field_ay);
         out.extend_from_slice(&self.radiation);
+        out.extend_from_slice(&self.metal_mass);
         out
     }
 
     pub fn restore_sim_state_field(&mut self, data: &[f32]) {
         let res = Galaxy::FIELD_RES * Galaxy::FIELD_RES;
-        if data.len() != res * 3 {
+        if data.len() != res * 3 + self.n {
             return;
         }
         self.field_ax.copy_from_slice(&data[..res]);
         self.field_ay.copy_from_slice(&data[res..res * 2]);
-        self.radiation.copy_from_slice(&data[res * 2..]);
+        self.radiation.copy_from_slice(&data[res * 2..res * 3]);
+        for (i, &metals) in data[res * 3..].iter().enumerate() {
+            self.metal_mass[i] = metals.clamp(0.0, self.mass[i] as f32);
+        }
     }
 
-    /// Versioned scheduler/event/RNG state: [version=6, tick lo/hi, seed
+    /// Versioned scheduler/event/RNG state: [version=7, tick lo/hi, seed
     /// lo/hi, bh_mass bits, bh_initial bits, radiated f64 bits lo/hi,
     /// halo-gas lo/hi, stellar-halo f64 lo/hi, phase-mixed lo/hi,
-    /// next_cluster, next_star, next_binary, scenario, n_cells, heat bytes
+    /// next_cluster, next_star, next_binary, scenario, five composition
+    /// ledger f64 values, n_cells, heat bytes
     /// packed 4-per-u32, heat_parent lo/hi per cell, then events].
     pub fn sim_state_meta(&self) -> Vec<u32> {
         let heat_words = self.n.div_ceil(4);
-        let mut out = Vec::with_capacity(20 + heat_words + self.n * 2 + 6);
-        out.push(6u32);
+        let mut out = Vec::with_capacity(30 + heat_words + self.n * 2 + 6);
+        out.push(7u32);
         out.push(self.tick_count as u32);
         out.push((self.tick_count >> 32) as u32);
         out.push(self.master_seed as u32);
@@ -1168,6 +1226,17 @@ impl Galaxy {
         out.push(self.next_star_id);
         out.push(self.next_binary_id);
         out.push(self.scenario as u32);
+        for value in [
+            self.halo_metal_mass,
+            self.stellar_halo_metal_mass,
+            self.bh_metal_mass,
+            self.radiated_metal_mass,
+            self.metal_produced_total,
+        ] {
+            let bits = value.to_bits();
+            out.push(bits as u32);
+            out.push((bits >> 32) as u32);
+        }
         out.push(self.n as u32);
         for chunk in self.collapse_heat.chunks(4) {
             let mut w = 0u32;
@@ -1185,7 +1254,7 @@ impl Galaxy {
     }
 
     pub fn restore_sim_state_meta(&mut self, data: &[u32]) {
-        if data.len() < 20 || data[0] != 6 {
+        if data.len() < 30 || data[0] != 7 {
             return;
         }
         self.tick_count = data[1] as u64 | ((data[2] as u64) << 32);
@@ -1200,18 +1269,23 @@ impl Galaxy {
         self.next_star_id = data[16];
         self.next_binary_id = data[17];
         self.scenario = Scenario::from_u32(data[18]);
-        let n_cells = data[19] as usize;
+        self.halo_metal_mass = f64::from_bits(data[19] as u64 | ((data[20] as u64) << 32));
+        self.stellar_halo_metal_mass = f64::from_bits(data[21] as u64 | ((data[22] as u64) << 32));
+        self.bh_metal_mass = f64::from_bits(data[23] as u64 | ((data[24] as u64) << 32));
+        self.radiated_metal_mass = f64::from_bits(data[25] as u64 | ((data[26] as u64) << 32));
+        self.metal_produced_total = f64::from_bits(data[27] as u64 | ((data[28] as u64) << 32));
+        let n_cells = data[29] as usize;
         if n_cells != self.n {
             return;
         }
         let heat_words = n_cells.div_ceil(4);
-        let parents_at = 20 + heat_words;
+        let parents_at = 30 + heat_words;
         let events_at = parents_at + n_cells * 2;
         if data.len() < events_at {
             return;
         }
         for i in 0..n_cells {
-            let w = data[20 + i / 4];
+            let w = data[30 + i / 4];
             self.collapse_heat[i] = ((w >> (8 * (i % 4))) & 0xFF) as u8;
         }
         for i in 0..n_cells {
@@ -1727,8 +1801,9 @@ impl Galaxy {
                 continue;
             }
             let lose = (m / 50).max(1).min(m);
-            self.mass[i] = m - lose;
+            let metals = self.remove_cell_mass_with_metals(i, lose);
             self.halo_gas_mass += lose as u64;
+            self.halo_metal_mass += metals as f64;
             if self.mass[i] == 0 && dissipate_events < 32 {
                 dissipate_events += 1;
                 self.events.emit(
@@ -1799,7 +1874,8 @@ impl Galaxy {
                     (m / 16).max(1)
                 };
                 let take = (per_cell as u64).min(remaining) as u16;
-                self.mass[i] -= take;
+                let metals = self.remove_cell_mass_with_metals(i, take);
+                self.halo_metal_mass += metals as f64;
                 remaining -= take as u64;
             }
             if remaining == 0 {
@@ -1822,6 +1898,11 @@ impl Galaxy {
         let start = (splitmix64(self.master_seed ^ self.tick_count ^ 0xA076_1D64_78BD_642F)
             as usize)
             % self.n;
+        let halo_metallicity = if self.halo_gas_mass == 0 {
+            0.0
+        } else {
+            (self.halo_metal_mass / self.halo_gas_mass as f64).clamp(0.0, 1.0)
+        };
 
         for seed_empty in [false, true] {
             for offset in 0..self.n {
@@ -1873,6 +1954,9 @@ impl Galaxy {
                     self.frac_y[i] = jy;
                 }
                 self.mass[i] += add;
+                let metals = (add as f64 * halo_metallicity).min(self.halo_metal_mass);
+                self.metal_mass[i] = (self.metal_mass[i] + metals as f32).min(self.mass[i] as f32);
+                self.halo_metal_mass -= metals;
                 remaining -= add as u64;
             }
             if remaining == 0 {
@@ -1880,6 +1964,22 @@ impl Galaxy {
             }
         }
         requested - remaining
+    }
+
+    /// Remove whole gas mass while retaining the cell's composition ratio.
+    fn remove_cell_mass_with_metals(&mut self, i: usize, requested: u16) -> f32 {
+        let old_mass = self.mass[i];
+        let take = requested.min(old_mass);
+        if take == 0 || old_mass == 0 {
+            return 0.0;
+        }
+        let fraction = take as f32 / old_mass as f32;
+        let metals = (self.metal_mass[i] * fraction).min(take as f32);
+        self.mass[i] -= take;
+        self.metal_mass[i] = (self.metal_mass[i] - metals)
+            .max(0.0)
+            .min(self.mass[i] as f32);
+        metals
     }
 
     /// Retire long-lived outer stars and old dim remnants from the resolved
@@ -1921,6 +2021,7 @@ impl Galaxy {
                 }
             }
             self.stellar_halo_mass += self.stars.mass[i] as f64;
+            self.stellar_halo_metal_mass += self.stars.metal_mass[i] as f64;
             self.phase_mixed_count += 1;
             self.stars.swap_remove(i);
         }
@@ -2025,6 +2126,7 @@ impl Galaxy {
             return;
         }
         let star_mass = self.stars.mass[i];
+        let star_metals = self.stars.metal_mass[i];
         let ejected = (star_mass * Galaxy::SN_GAS_RETURN).floor() as u16;
         // Distribute ejecta over the disc around the cell with an
         // outward momentum kick, mass-weighted into cell velocity.
@@ -2044,8 +2146,15 @@ impl Galaxy {
         let share = ejected / targets.len() as u16;
         let remainder = ejected % targets.len() as u16;
         let mut distributed = 0.0f32;
+        let mut deposits: Vec<(usize, u16)> = Vec::with_capacity(targets.len());
         for (order, &t) in targets.iter().enumerate() {
-            let add = share + u16::from(order < remainder as usize);
+            let requested = share + u16::from(order < remainder as usize);
+            if requested == 0 {
+                continue;
+            }
+            let old_mass = self.mass[t];
+            let new_mass = old_mass.saturating_add(requested);
+            let add = new_mass - old_mass;
             if add == 0 {
                 continue;
             }
@@ -2064,12 +2173,32 @@ impl Galaxy {
             let new_m = old_m + add as f32;
             self.vel_x[t] = (self.vel_x[t] * old_m + Galaxy::SN_KICK * dx * add as f32) / new_m;
             self.vel_y[t] = (self.vel_y[t] * old_m + Galaxy::SN_KICK * dy * add as f32) / new_m;
-            self.mass[t] = self.mass[t].saturating_add(add);
+            self.mass[t] = new_mass;
             distributed += add as f32;
+            deposits.push((t, add));
         }
+        let inherited_ejecta_metals = if star_mass > 0.0 {
+            star_metals * (distributed / star_mass).clamp(0.0, 1.0)
+        } else {
+            0.0
+        };
+        let yield_metals = (star_mass * Galaxy::SN_METAL_YIELD_FRACTION)
+            .min((distributed - inherited_ejecta_metals).max(0.0));
+        let ejecta_metals = inherited_ejecta_metals + yield_metals;
+        if distributed > 0.0 {
+            for (target, add) in deposits {
+                self.metal_mass[target] = (self.metal_mass[target]
+                    + ejecta_metals * add as f32 / distributed)
+                    .min(self.mass[target] as f32);
+            }
+        }
+        self.metal_produced_total += yield_metals as f64;
         // Remnant keeps whatever the integer distribution left behind, so
         // the baryonic ledger stays closed exactly.
         self.stars.mass[i] = star_mass - distributed;
+        self.stars.metal_mass[i] = (star_metals - inherited_ejecta_metals)
+            .max(0.0)
+            .min(self.stars.mass[i]);
         self.stars.stage[i] = Stage::NeutronStar as u8;
         self.stars.age[i] = 0.0;
         self.stars.lifetime[i] = if self.stars.binary_id[i] == NO_BINARY {
@@ -2133,6 +2262,7 @@ impl Galaxy {
 
         let source_mass = self.stars.mass[source];
         let target_mass = self.stars.mass[target];
+        let combined_metals = self.stars.metal_mass[source] + self.stars.metal_mass[target];
         let combined = source_mass + target_mass;
         if combined <= 0.0 {
             return;
@@ -2157,6 +2287,9 @@ impl Galaxy {
         self.stars.vel_x[source] = merged_vx;
         self.stars.vel_y[source] = merged_vy;
         self.stars.mass[source] = combined - radiated;
+        let radiated_metals = combined_metals * Galaxy::GRB_RADIATED_FRACTION;
+        self.stars.metal_mass[source] =
+            (combined_metals - radiated_metals).min(self.stars.mass[source]);
         self.stars.stage[source] = Stage::MergedRemnant as u8;
         self.stars.age[source] = 0.0;
         self.stars.lifetime[source] = Galaxy::REMNANT_RESOLVED_AGE;
@@ -2164,6 +2297,7 @@ impl Galaxy {
         self.stars.binary_id[source] = NO_BINARY;
         self.stars.halo_dwell[source] = 0;
         self.radiated_total += radiated as f64;
+        self.radiated_metal_mass += radiated_metals as f64;
         self.stars.swap_remove(target);
 
         self.events.emit(
@@ -2257,8 +2391,9 @@ impl Galaxy {
             let fractional = expected - whole as f32;
             let stochastic = u16::from(rng.random_range(0.0f32..1.0) < fractional);
             let take = whole.saturating_add(stochastic).min(m);
-            self.mass[i] -= take;
+            let metals = self.remove_cell_mass_with_metals(i, take);
             self.bh_mass += take as f32;
+            self.bh_metal_mass += metals as f64;
         }
 
         let cap_sq = Galaxy::BH_CAPTURE_RADIUS * Galaxy::BH_CAPTURE_RADIUS;
@@ -2294,11 +2429,17 @@ impl Galaxy {
         let elapsed = time * 8.0;
         let loss =
             (Galaxy::HAWKING_COEFF / (self.bh_mass * self.bh_mass) * elapsed).min(self.bh_mass);
+        let metal_fraction = (self.bh_metal_mass / self.bh_mass as f64).clamp(0.0, 1.0);
+        let lost_metals = (loss as f64 * metal_fraction).min(self.bh_metal_mass);
         self.bh_mass -= loss;
         self.radiated_total += loss as f64;
+        self.bh_metal_mass -= lost_metals;
+        self.radiated_metal_mass += lost_metals;
         if self.bh_mass < 1.0 {
             // Final flash: the last scrap evaporates entirely.
             self.radiated_total += self.bh_mass as f64;
+            self.radiated_metal_mass += self.bh_metal_mass;
+            self.bh_metal_mass = 0.0;
             self.bh_mass = 0.0;
         }
         let res = Galaxy::FIELD_RES;
@@ -2319,6 +2460,7 @@ impl Galaxy {
             return;
         }
         self.bh_mass += self.stars.mass[i];
+        self.bh_metal_mass += self.stars.metal_mass[i] as f64;
         self.stars.swap_remove(i);
     }
 
@@ -2350,9 +2492,10 @@ impl Galaxy {
         }
         let size = self.size as i32;
         let mut budget = 0.0f32;
+        let mut metal_budget = 0.0f32;
         let take = |m: u16, frac: f32| -> u16 { (m as f32 * frac) as u16 };
         let own = take(self.mass[i], Galaxy::COLLAPSE_CONSUME_FRACTION);
-        self.mass[i] -= own;
+        metal_budget += self.remove_cell_mass_with_metals(i, own);
         budget += own as f32;
         let (col, row) = (i as i32 % size, i as i32 / size);
         for (dc, dr) in [(1, 0), (-1, 0), (0, 1), (0, -1)] {
@@ -2360,21 +2503,23 @@ impl Galaxy {
             let nr = wrap(row + dr, size) as u16;
             let ni = self.col_row_to_index(nc, nr) as usize;
             let part = take(self.mass[ni], Galaxy::COLLAPSE_CONSUME_FRACTION * 0.5);
-            self.mass[ni] -= part;
+            metal_budget += self.remove_cell_mass_with_metals(ni, part);
             budget += part as f32;
         }
         if budget < Galaxy::BIRTH_MIN_BUDGET {
             // Fizzle: return the gas where it came from.
             self.mass[i] = self.mass[i].saturating_add(budget as u16);
+            self.metal_mass[i] = (self.metal_mass[i] + metal_budget).min(self.mass[i] as f32);
             return;
         }
         let tick = self.tick_count;
-        self.events.emit(
+        self.events.emit_with_aux(
             tick,
             crate::events::EventKind::StarBirth,
             ev.source,
             ev.source,
             budget,
+            metal_budget,
             ev.id,
         );
     }
@@ -2392,6 +2537,11 @@ impl Galaxy {
             return;
         }
         let budget = ev.payload;
+        let metallicity = if budget > 0.0 {
+            (ev.aux / budget).clamp(0.0, 1.0)
+        } else {
+            0.0
+        };
         let mut rng = self.rng_stream(Galaxy::RNG_STAR_BIRTH);
         // Draw IMF masses until the budget runs out.
         let mut masses: Vec<f32> = Vec::new();
@@ -2588,6 +2738,7 @@ impl Galaxy {
                 vx,
                 vy,
                 mass,
+                mass * metallicity,
                 lifetime,
                 luminosity,
                 class_index,
@@ -2608,6 +2759,15 @@ impl Galaxy {
             .sum()
     }
 
+    /// Heavy elements carried by in-flight StarBirth events.
+    pub(crate) fn pending_birth_metals(&self) -> f64 {
+        self.events
+            .pending()
+            .filter(|e| e.kind == crate::events::EventKind::StarBirth)
+            .map(|e| e.aux as f64)
+            .sum()
+    }
+
     /// Baryonic ledger: gas + resolved stars + in-flight births + the black
     /// hole + both halo reservoirs and the radiated sink.
     pub(crate) fn baryonic_total(&self) -> f64 {
@@ -2619,6 +2779,18 @@ impl Galaxy {
             + self.stellar_halo_mass
             + self.bh_mass as f64
             + self.radiated_total
+    }
+
+    /// Composition ledger across every carrier and in-flight birth event.
+    pub(crate) fn tracked_metal_total(&self) -> f64 {
+        let gas: f64 = self.metal_mass.iter().map(|&m| m as f64).sum();
+        let stars: f64 = self.stars.metal_mass.iter().map(|&m| m as f64).sum();
+        gas + stars
+            + self.pending_birth_metals()
+            + self.halo_metal_mass
+            + self.stellar_halo_metal_mass
+            + self.bh_metal_mass
+            + self.radiated_metal_mass
     }
 
     /// Stateless per-(process, tick) RNG stream. Derivation depends only
@@ -2830,6 +3002,9 @@ impl Galaxy {
         for m in self.scratch_mass.iter_mut() {
             *m = 0;
         }
+        for metals in self.scratch_metal_mass.iter_mut() {
+            *metals = 0.0;
+        }
         let mut p_x = vec![0.0f32; self.n];
         let mut p_y = vec![0.0f32; self.n];
         let mut frac_next_x = vec![0.0f32; self.n];
@@ -2857,6 +3032,7 @@ impl Galaxy {
                 self.vel_y[i] = 0.0;
                 self.frac_x[i] = 0.0;
                 self.frac_y[i] = 0.0;
+                self.metal_mass[i] = 0.0;
                 want_ni[i] = i as u32;
                 continue;
             }
@@ -3008,6 +3184,7 @@ impl Galaxy {
             // the *arriving* cell (approx — good enough for visuals).
             let sum = self.scratch_mass[ni].saturating_add(m as u32);
             self.scratch_mass[ni] = sum;
+            self.scratch_metal_mass[ni] += self.metal_mass[i];
             p_x[ni] += vx * m as f32;
             p_y[ni] += vy * m as f32;
             frac_next_x[ni] = fx;
@@ -3019,6 +3196,8 @@ impl Galaxy {
             self.mass[i] = m32 as u16;
             if m32 > 0 {
                 let mf = m32 as f32;
+                let retained = m32 as f32 / self.scratch_mass[i].max(1) as f32;
+                self.metal_mass[i] = (self.scratch_metal_mass[i] * retained).clamp(0.0, mf);
                 self.vel_x[i] = p_x[i] / mf;
                 self.vel_y[i] = p_y[i] / mf;
                 self.frac_x[i] = frac_next_x[i];
@@ -3028,6 +3207,7 @@ impl Galaxy {
                 self.vel_y[i] = 0.0;
                 self.frac_x[i] = 0.0;
                 self.frac_y[i] = 0.0;
+                self.metal_mass[i] = 0.0;
             }
             self.acc_x[i] = 0.0;
             self.acc_y[i] = 0.0;
@@ -3064,8 +3244,19 @@ impl Galaxy {
                 let mf = new_m as f32;
                 self.vel_x[ni] = (self.vel_x[ni] * nm as f32 + svx * moved as f32) / mf;
                 self.vel_y[ni] = (self.vel_y[ni] * nm as f32 + svy * moved as f32) / mf;
+                let source_mass = self.mass[i];
+                let moved_metals = if source_mass == 0 {
+                    0.0
+                } else {
+                    self.metal_mass[i] * moved as f32 / source_mass as f32
+                };
                 self.mass[ni] = new_m;
                 self.mass[i] -= moved;
+                self.metal_mass[i] = (self.metal_mass[i] - moved_metals)
+                    .max(0.0)
+                    .min(self.mass[i] as f32);
+                self.metal_mass[ni] =
+                    (self.metal_mass[ni] + moved_metals).min(self.mass[ni] as f32);
             }
         }
     }
@@ -3780,6 +3971,7 @@ mod tests_stars_dynamics {
             source: target as u32,
             target: target as u32,
             payload,
+            aux: 0.0,
             parent: crate::events::NO_PARENT,
         }
     }
@@ -4031,6 +4223,129 @@ mod tests_stars_dynamics {
 }
 
 #[cfg(test)]
+mod tests_composition {
+    use super::*;
+    use crate::events::{EventKind, NO_PARENT};
+
+    fn root_event(kind: EventKind, cell: usize) -> Event {
+        Event {
+            id: 1,
+            tick: 0,
+            seq: 0,
+            kind,
+            source: cell as u32,
+            target: cell as u32,
+            payload: 0.0,
+            aux: 0.0,
+            parent: NO_PARENT,
+        }
+    }
+
+    fn assert_carriers_bounded(g: &Galaxy) {
+        for (&metals, &mass) in g.metal_mass.iter().zip(g.mass.iter()) {
+            assert!(metals >= 0.0 && metals <= mass as f32 + 1e-6);
+        }
+        for (&metals, &mass) in g.stars.metal_mass.iter().zip(g.stars.mass.iter()) {
+            assert!(metals >= 0.0 && metals <= mass + 1e-6);
+        }
+    }
+
+    #[test]
+    fn test_pressure_overflow_advects_metals_proportionally() {
+        let mut g = Galaxy::new(10, 0);
+        let cell = 5 * 10 + 5;
+        g.mass[cell] = 140;
+        g.metal_mass[cell] = 14.0;
+        let initial = g.tracked_metal_total();
+
+        g.apply_acceleration(0.0);
+
+        assert_eq!(g.mass[cell], Galaxy::CELL_MASS_CAP as u16);
+        assert!((g.tracked_metal_total() - initial).abs() < 1e-5);
+        for (&metals, &mass) in g.metal_mass.iter().zip(g.mass.iter()) {
+            if mass > 0 {
+                assert!((metals / mass as f32 - 0.1).abs() < 1e-5);
+            }
+        }
+        assert_carriers_bounded(&g);
+    }
+
+    #[test]
+    fn test_collapse_and_birth_preserve_composition() {
+        let mut g = Galaxy::new(20, 0);
+        g.master_seed = 7;
+        let cell = 10 * 20 + 10;
+        g.mass[cell] = 100;
+        g.metal_mass[cell] = 5.0;
+        let initial = g.tracked_metal_total();
+
+        g.handle_cloud_collapse(&root_event(EventKind::CloudCollapse, cell));
+        let pending_metals = g.pending_birth_metals();
+        assert!(pending_metals > 0.0);
+        assert!((g.tracked_metal_total() - initial).abs() < 1e-6);
+
+        g.tick_count = 1;
+        let births = g.events.take_due(1);
+        g.execute_events(births, 0.5);
+        let stellar_metals: f64 = g.stars.metal_mass.iter().map(|&m| m as f64).sum();
+        assert!((stellar_metals - pending_metals).abs() < 1e-5);
+        assert!((g.tracked_metal_total() - initial).abs() < 1e-5);
+        assert_carriers_bounded(&g);
+    }
+
+    #[test]
+    fn test_supernova_adds_an_explicit_yield_without_adding_mass() {
+        let mut g = Galaxy::new(20, 0);
+        let cell = 10 * 20 + 10;
+        let star = g.spawn_star(10.0, 10.0, 0.0, 0.0, 40.0);
+        g.stars.metal_mass[star] = 0.4;
+        let baryons = g.baryonic_total();
+        let initial_metals = g.tracked_metal_total();
+        let mut event = root_event(EventKind::Supernova, cell);
+        event.source = g.stars.id[star];
+        event.payload = g.stars.mass[star];
+
+        g.handle_supernova(&event);
+
+        assert!(g.metal_produced_total > 0.0);
+        assert!((g.baryonic_total() - baryons).abs() < 1e-5);
+        assert!((g.tracked_metal_total() - initial_metals - g.metal_produced_total).abs() < 1e-5);
+        assert_carriers_bounded(&g);
+    }
+
+    #[test]
+    fn test_composition_state_round_trip_is_exact() {
+        let mut a = Galaxy::new(12, 3);
+        a.metal_mass[7] = 0.75;
+        a.halo_gas_mass = 10;
+        a.halo_metal_mass = 0.4;
+        a.stellar_halo_mass = 4.0;
+        a.stellar_halo_metal_mass = 0.2;
+        a.bh_mass = 6.0;
+        a.bh_metal_mass = 0.3;
+        a.radiated_total = 2.0;
+        a.radiated_metal_mass = 0.1;
+        a.metal_produced_total = 0.9;
+        let star = a.spawn_star(4.0, 5.0, 0.0, 0.0, 8.0);
+        a.stars.metal_mass[star] = 0.6;
+
+        let mut b = Galaxy::from_state(12, a.mass(), a.vel_x(), a.vel_y(), a.frac_x(), a.frac_y());
+        b.restore_sim_state_stars(&a.sim_state_stars());
+        b.restore_sim_state_field(&a.sim_state_field());
+        b.restore_sim_state_meta(&a.sim_state_meta());
+
+        assert_eq!(b.metal_mass, a.metal_mass);
+        assert_eq!(b.stars.metal_mass, a.stars.metal_mass);
+        assert_eq!(b.halo_metal_mass, a.halo_metal_mass);
+        assert_eq!(b.stellar_halo_metal_mass, a.stellar_halo_metal_mass);
+        assert_eq!(b.bh_metal_mass, a.bh_metal_mass);
+        assert_eq!(b.radiated_metal_mass, a.radiated_metal_mass);
+        assert_eq!(b.metal_produced_total, a.metal_produced_total);
+        assert_eq!(b.tracked_metal_total(), a.tracked_metal_total());
+    }
+}
+
+#[cfg(test)]
 mod tests_causal_loop {
     use super::*;
     use crate::events::EventKind;
@@ -4058,12 +4373,18 @@ mod tests_causal_loop {
     fn test_baryonic_ledger_is_conserved_through_star_formation() {
         let mut g = Galaxy::new(50, 0).seed_with_mode_seeded(25, Scenario::IrregularSpiral, 42);
         let initial = g.baryonic_total();
+        let initial_metals = g.tracked_metal_total();
         for _ in 0..3000 {
             g = g.tick(0.5);
             let now = g.baryonic_total();
             assert!(
                 (now - initial).abs() < 1.0,
                 "ledger drifted at tick {}: {initial} -> {now}",
+                g.tick_count
+            );
+            assert!(
+                (g.tracked_metal_total() - initial_metals - g.metal_produced_total).abs() < 0.02,
+                "composition ledger drifted at tick {}",
                 g.tick_count
             );
         }
@@ -4095,7 +4416,7 @@ mod tests_causal_loop {
         // Same seed + same dt sequence -> identical star arrays and
         // event log, checked at two depths to catch cadence-boundary
         // nondeterminism. Both depths reach into the star-formation era.
-        fn run(n: usize) -> (Vec<f32>, Vec<f32>, u64, [u64; 5]) {
+        fn run(n: usize) -> (Vec<f32>, Vec<f32>, Vec<f32>, u64, [u64; 5]) {
             let mut g = Galaxy::new(50, 0).seed_with_mode_seeded(25, Scenario::IrregularSpiral, 42);
             for _ in 0..n {
                 g = g.tick(0.5);
@@ -4110,6 +4431,7 @@ mod tests_causal_loop {
             (
                 g.stars.pos_x.clone(),
                 g.stars.vel_y.clone(),
+                g.metal_mass.clone(),
                 g.stars.len() as u64,
                 counts,
             )
@@ -4117,11 +4439,12 @@ mod tests_causal_loop {
         for n in [900usize, 1800] {
             let a = run(n);
             let b = run(n);
-            assert_eq!(a.2, b.2, "star count must be deterministic at n={n}");
-            assert!(a.2 > 0, "depth n={n} must include star formation");
+            assert_eq!(a.3, b.3, "star count must be deterministic at n={n}");
+            assert!(a.3 > 0, "depth n={n} must include star formation");
             assert_eq!(a.0, b.0, "star positions must be deterministic at n={n}");
             assert_eq!(a.1, b.1, "star velocities must be deterministic at n={n}");
-            assert_eq!(a.3, b.3, "event log must be deterministic at n={n}");
+            assert_eq!(a.2, b.2, "gas composition must be deterministic at n={n}");
+            assert_eq!(a.4, b.4, "event log must be deterministic at n={n}");
         }
     }
 
