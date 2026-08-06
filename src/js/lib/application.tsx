@@ -110,7 +110,7 @@ function patchUrlTick(t: number): void {
   window.history.replaceState(
     null,
     "",
-    `${window.location.pathname}?${params.toString()}${window.location.hash}`,
+    `${window.location.pathname}?${params.toString()}${window.location.hash}`
   );
 }
 
@@ -160,7 +160,6 @@ export function Interface() {
   const [bhFactor, setBhFactor] = React.useState(1);
   const [gasPct, setGasPct] = React.useState(100);
   // Seed-time baselines for the popsci ratios.
-  const initialGasRef = React.useRef(1);
   const initialBhRef = React.useRef(1);
 
   const wasmModuleRef = React.useRef<any>(null);
@@ -173,6 +172,8 @@ export function Interface() {
   const workerRef = React.useRef<galaxy.TickWorker | null>(null);
   const latestSnapshotRef = React.useRef<{
     mass: Uint16Array;
+    fracX: Float32Array;
+    fracY: Float32Array;
     tickMs: number;
     tickId: number;
     stars: Float32Array;
@@ -182,7 +183,7 @@ export function Interface() {
     birthCount: number;
     captureCount: number;
     bhMass: number;
-    gasTotal: number;
+    gasColdFraction: number;
     lensScale: number;
   } | null>(null);
   const renderedTickIdRef = React.useRef<number>(-1);
@@ -226,8 +227,7 @@ export function Interface() {
       (window as any).__galaxyGen = (window as any).__galaxyGen || {};
       (window as any).__galaxyGen.frontend = galaxyFrontendRef.current;
       (window as any).__galaxyGen.worker = workerRef.current;
-      (window as any).__galaxyGen.workerSupported =
-        typeof Worker !== "undefined";
+      (window as any).__galaxyGen.workerSupported = typeof Worker !== "undefined";
     }
   };
 
@@ -259,7 +259,7 @@ export function Interface() {
           state.fracY,
           state.stars,
           state.field,
-          state.meta,
+          state.meta
         );
         const tick = galaxyFrontendRef.current.tickCount();
         setTickCount(tick);
@@ -292,8 +292,7 @@ export function Interface() {
     // current seed only when locked or on the first generate of a
     // seed-bearing URL; otherwise every press rolls a fresh galaxy.
     let effectiveSeed = seed;
-    const reuse =
-      parseSeed(effectiveSeed) != null && (seedLocked || !hasGeneratedRef.current);
+    const reuse = parseSeed(effectiveSeed) != null && (seedLocked || !hasGeneratedRef.current);
     if (!reuse) {
       effectiveSeed = randomU64Seed().toString();
       setSeed(effectiveSeed);
@@ -318,7 +317,6 @@ export function Interface() {
     setCaptureCount(0);
     setBhFactor(1);
     setGasPct(100);
-    initialGasRef.current = Math.max(1, next.gasTotal());
     initialBhRef.current = Math.max(1, next.bhMass());
     const warp = pendingWarpRef.current;
     pendingWarpRef.current = 0;
@@ -357,7 +355,7 @@ export function Interface() {
     setBirthCount(fe.birthCount());
     setCaptureCount(fe.captureCount());
     setBhFactor(fe.bhMass() / initialBhRef.current);
-    setGasPct((100 * fe.gasTotal()) / initialGasRef.current);
+    setGasPct(100 * fe.gasColdFraction());
   };
 
   // Fast-forward to a target tick in chunks that yield to the event
@@ -388,6 +386,7 @@ export function Interface() {
     if (snap && snap.tickId !== renderedTickIdRef.current) {
       renderedTickIdRef.current = snap.tickId;
       galaxyFrontendRef.current.setOverrideMass(snap.mass);
+      galaxyFrontendRef.current.setOverrideGasOffsets(snap.fracX, snap.fracY);
       galaxyFrontendRef.current.setOverrideStars(snap.stars);
       galaxyFrontendRef.current.setOverrideTransients(snap.transients);
       galaxyFrontendRef.current.setOverrideRadiation(snap.radiation);
@@ -398,14 +397,11 @@ export function Interface() {
       setBirthCount(snap.birthCount);
       setCaptureCount(snap.captureCount);
       setBhFactor(snap.bhMass / initialBhRef.current);
-      setGasPct((100 * snap.gasTotal) / initialGasRef.current);
+      setGasPct(100 * snap.gasColdFraction);
 
       fpsSamplesRef.current.push(performance.now());
       const cutoff = performance.now() - 1000;
-      while (
-        fpsSamplesRef.current.length > 0 &&
-        fpsSamplesRef.current[0] < cutoff
-      ) {
+      while (fpsSamplesRef.current.length > 0 && fpsSamplesRef.current[0] < cutoff) {
         fpsSamplesRef.current.shift();
       }
       setFps(fpsSamplesRef.current.length);
@@ -428,14 +424,14 @@ export function Interface() {
     // Spin up (or reuse) the worker and hand it the current sim state.
     if (!workerRef.current) {
       if (typeof Worker === "undefined") {
-        console.error(
-          "Web Worker unsupported in this browser; physics run loop unavailable.",
-        );
+        console.error("Web Worker unsupported in this browser; physics run loop unavailable.");
         return;
       }
       workerRef.current = new galaxy.TickWorker(
         (
           mass,
+          fracX,
+          fracY,
           tickMs,
           tickId,
           stars,
@@ -445,11 +441,13 @@ export function Interface() {
           birthCount,
           captureCount,
           bhMass,
-          gasTotal,
-          lensScale,
+          gasColdFraction,
+          lensScale
         ) => {
           latestSnapshotRef.current = {
             mass,
+            fracX,
+            fracY,
             tickMs,
             tickId,
             stars,
@@ -459,10 +457,10 @@ export function Interface() {
             birthCount,
             captureCount,
             bhMass,
-            gasTotal,
+            gasColdFraction,
             lensScale,
           };
-        },
+        }
       );
     }
     // snapshotState() reads mass/vel/frac out of WASM as fresh typed
@@ -513,9 +511,7 @@ export function Interface() {
                 >
                   <option value={galaxy.Scenario.BangRing}>bang → ring</option>
                   <option value={galaxy.Scenario.BangSpiral}>bang → spiral</option>
-                  <option value={galaxy.Scenario.IrregularSpiral}>
-                    irregular → spiral
-                  </option>
+                  <option value={galaxy.Scenario.IrregularSpiral}>irregular → spiral</option>
                   <option value={galaxy.Scenario.IrregularElliptical}>
                     irregular → elliptical
                   </option>

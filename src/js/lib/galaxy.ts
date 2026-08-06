@@ -27,6 +27,8 @@ export class Frontend {
   public galaxySize: number;
   // Worker-driven mass snapshot, read by the renderer without re-entering WASM.
   private overrideMass: Uint16Array | null = null;
+  private overrideFracX: Float32Array | null = null;
+  private overrideFracY: Float32Array | null = null;
   private overrideStars: Float32Array | null = null;
   private overrideTransients: Float32Array | null = null;
   private overrideRadiation: Float32Array | null = null;
@@ -64,10 +66,9 @@ export class Frontend {
 
   public seed(additionalMass: number, mode: Scenario = Scenario.IrregularSpiral): void {
     this.overrideMass = null;
-    const next = this.galaxy.seed_with_mode(
-      additionalMass,
-      mode as unknown as wasm.Scenario
-    );
+    this.overrideFracX = null;
+    this.overrideFracY = null;
+    const next = this.galaxy.seed_with_mode(additionalMass, mode as unknown as wasm.Scenario);
     this.galaxy.free();
     this.galaxy = next;
   }
@@ -79,6 +80,8 @@ export class Frontend {
     mode: Scenario = Scenario.IrregularSpiral
   ): void {
     this.overrideMass = null;
+    this.overrideFracX = null;
+    this.overrideFracY = null;
     const next = this.galaxy.seed_with_mode_seeded(
       additionalMass,
       mode as unknown as wasm.Scenario,
@@ -90,6 +93,8 @@ export class Frontend {
 
   public tick(timeModifier: number): void {
     this.overrideMass = null;
+    this.overrideFracX = null;
+    this.overrideFracY = null;
     this.overrideStars = null;
     const next = this.galaxy.tick(timeModifier);
     this.galaxy.free();
@@ -104,6 +109,8 @@ export class Frontend {
     }
     try {
       this.overrideMass = null;
+      this.overrideFracX = null;
+      this.overrideFracY = null;
       const mass = this.galaxy.mass();
       const { acc_x, acc_y } = await this.gpuBackend.computeAccelerations(mass, this.galaxySize);
       const next = this.galaxy.tick_with_accel(timeModifier, acc_x, acc_y);
@@ -119,6 +126,15 @@ export class Frontend {
   /** Fast path for the renderer — one memcpy, no per-cell object churn. */
   public massArray(): Uint16Array {
     return this.overrideMass ?? this.galaxy.mass();
+  }
+
+  /** Sub-cell gas position used to render continuous, physical motion. */
+  public fracXArray(): Float32Array {
+    return this.overrideFracX ?? this.galaxy.frac_x();
+  }
+
+  public fracYArray(): Float32Array {
+    return this.overrideFracY ?? this.galaxy.frac_y();
   }
 
   public starCount(): number {
@@ -171,6 +187,11 @@ export class Frontend {
     let total = 0;
     for (let i = 0; i < mass.length; i++) total += mass[i];
     return total;
+  }
+
+  /** Cold disk share of cold + hot halo gas, in [0, 1]. */
+  public gasColdFraction(): number {
+    return this.galaxy.gas_cold_fraction();
   }
 
   /** Lens depth relative to the seeded black hole; 0 = evaporated. */
@@ -227,28 +248,28 @@ export class Frontend {
     fracY: Float32Array,
     stars?: Float32Array,
     field?: Float32Array,
-    meta?: Uint32Array,
+    meta?: Uint32Array
   ): void {
-    const next = wasm.Galaxy.from_state(
-      this.galaxySize,
-      mass,
-      velX,
-      velY,
-      fracX,
-      fracY,
-    );
+    const next = wasm.Galaxy.from_state(this.galaxySize, mass, velX, velY, fracX, fracY);
     if (stars) next.restore_sim_state_stars(stars);
     if (field) next.restore_sim_state_field(field);
     if (meta) next.restore_sim_state_meta(meta);
     this.galaxy.free();
     this.galaxy = next;
     this.overrideMass = null;
+    this.overrideFracX = null;
+    this.overrideFracY = null;
     this.overrideStars = null;
   }
 
   /** Point renderer at worker-produced mass buffer. Skips WASM round-trip. */
   public setOverrideMass(mass: Uint16Array): void {
     this.overrideMass = mass;
+  }
+
+  public setOverrideGasOffsets(fracX: Float32Array, fracY: Float32Array): void {
+    this.overrideFracX = fracX;
+    this.overrideFracY = fracY;
   }
 
   /** Point renderer at worker-produced star render buffer. */
@@ -279,6 +300,8 @@ export class TickWorker {
   private worker: Worker;
   private onSnapshot: (
     mass: Uint16Array,
+    fracX: Float32Array,
+    fracY: Float32Array,
     tickMs: number,
     tickId: number,
     stars: Float32Array,
@@ -288,14 +311,16 @@ export class TickWorker {
     birthCount: number,
     captureCount: number,
     bhMass: number,
-    gasTotal: number,
-    lensScale: number,
+    gasColdFraction: number,
+    lensScale: number
   ) => void;
   private stopResolver: ((state: StoppedState | null) => void) | null = null;
 
   constructor(
     onSnapshot: (
       mass: Uint16Array,
+      fracX: Float32Array,
+      fracY: Float32Array,
       tickMs: number,
       tickId: number,
       stars: Float32Array,
@@ -305,13 +330,13 @@ export class TickWorker {
       birthCount: number,
       captureCount: number,
       bhMass: number,
-      gasTotal: number,
-      lensScale: number,
-    ) => void,
+      gasColdFraction: number,
+      lensScale: number
+    ) => void
   ) {
     if (typeof Worker === "undefined") {
       throw new Error(
-        "Web Workers are not supported in this environment; TickWorker cannot be constructed.",
+        "Web Workers are not supported in this environment; TickWorker cannot be constructed."
       );
     }
     this.worker = new Worker(new URL("./tick-worker.ts", import.meta.url), {
@@ -327,6 +352,8 @@ export class TickWorker {
     if (msg.type === "snapshot") {
       this.onSnapshot(
         msg.mass,
+        msg.fracX,
+        msg.fracY,
         msg.tickMs,
         msg.tickId,
         msg.stars,
@@ -336,8 +363,8 @@ export class TickWorker {
         msg.birthCount,
         msg.captureCount,
         msg.bhMass,
-        msg.gasTotal,
-        msg.lensScale,
+        msg.gasColdFraction,
+        msg.lensScale
       );
     } else if (msg.type === "stopped") {
       if (!this.stopResolver) return;
@@ -385,7 +412,7 @@ export class TickWorker {
         snapshot.stars.buffer,
         snapshot.field.buffer,
         snapshot.meta.buffer,
-      ],
+      ]
     );
   }
 
@@ -400,9 +427,7 @@ export class TickWorker {
   /** Stop the loop and resolve with final state. Null if worker uninitialized. */
   public stop(): Promise<StoppedState | null> {
     if (this.stopResolver) {
-      return Promise.reject(
-        new Error("TickWorker.stop() is already in flight"),
-      );
+      return Promise.reject(new Error("TickWorker.stop() is already in flight"));
     }
     return new Promise<StoppedState | null>((resolve) => {
       this.stopResolver = resolve;

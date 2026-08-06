@@ -30,6 +30,9 @@ case "${1:-}" in
   test-rust)
     test_rust
     ;;
+  format-rust)
+    cargo fmt
+    ;;
   build-rust)
     build_wasm
     cargo build
@@ -40,6 +43,23 @@ case "${1:-}" in
   build-js-prod)
     build_wasm
     npx webpack --config webpack.config.js --mode production
+    ;;
+  check-js)
+    npm run lint
+    npm run typecheck
+    ;;
+  capture-readme)
+    node scripts/capture-readme.mjs
+    ;;
+  promote-readme)
+    candidate="${GALAXY_CAPTURE_OUTPUT:-docs/project-galaxy-gen.next.gif}"
+    tracked="docs/project-galaxy-gen.gif"
+    if [[ "${candidate}" == "${tracked}" || ! -f "${candidate}" ]]; then
+      echo "capture candidate not found or not safely separated: ${candidate}" >&2
+      exit 2
+    fi
+    mv -f -- "${candidate}" "${tracked}"
+    rm -f -- docs/project-galaxy-gen.next.gif docs/project-galaxy-gen.next2.gif
     ;;
   dev)
     echo "Starting rust watcher + JS dev server (Ctrl-C stops both)"

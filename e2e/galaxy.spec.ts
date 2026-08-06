@@ -409,9 +409,9 @@ test.describe("Galaxy Generator", () => {
     // Sanity: the dropdown carries the four start => end pairs.
     const select = page.getByTestId("select-scenario");
     await expect(select).toBeVisible();
-    const optionValues = await select.locator("option").evaluateAll((opts) =>
-      (opts as HTMLOptionElement[]).map((o) => o.value)
-    );
+    const optionValues = await select
+      .locator("option")
+      .evaluateAll((opts) => (opts as HTMLOptionElement[]).map((o) => o.value));
     expect(optionValues).toEqual(["0", "1", "2", "3"]);
 
     // A bang start must produce a different mass field than an
@@ -441,7 +441,7 @@ test.describe("Galaxy Generator", () => {
     const minDistinctCells = Math.floor(irregular.length * 0.1);
     expect(
       diffCount(irregular, snapshots["1"]),
-      "bang snapshot should differ from irregular",
+      "bang snapshot should differ from irregular"
     ).toBeGreaterThan(minDistinctCells);
     expect(nonzero(snapshots["1"])).toBeGreaterThan(0);
   });
@@ -484,6 +484,20 @@ test.describe("Galaxy Generator", () => {
     const tickText = await page.getByTestId("stat-ticks").textContent();
     const advanced = parseInt(tickText?.replace(/\D/g, "") ?? "0", 10);
     expect(advanced, `tick count didn't advance (got ${tickText})`).toBeGreaterThan(0);
+    const movingGas = await page.evaluate(() => {
+      const fe: any = (window as any).__galaxyGen.frontend;
+      const mass = fe.massArray() as Uint16Array;
+      const fracX = fe.fracXArray() as Float32Array;
+      const fracY = fe.fracYArray() as Float32Array;
+      let moving = 0;
+      for (let i = 0; i < mass.length; i++) {
+        if (mass[i] > 0 && Math.abs(fracX[i]) + Math.abs(fracY[i]) > 0.001) moving++;
+      }
+      return moving;
+    });
+    expect(movingGas, "worker snapshots must preserve visible sub-cell gas motion").toBeGreaterThan(
+      0
+    );
     await page.getByTestId("btn-run").click();
     await expect(page.getByTestId("btn-run")).toHaveText("play");
 
@@ -503,12 +517,12 @@ test.describe("Galaxy Generator", () => {
     // Step button must still bump the counter after pause/restore.
     const tickCountBefore = parseInt(
       (await page.getByTestId("stat-ticks").textContent())?.replace(/\D/g, "") ?? "0",
-      10,
+      10
     );
     await page.getByTestId("btn-tick").click();
     const tickCountAfter = parseInt(
       (await page.getByTestId("stat-ticks").textContent())?.replace(/\D/g, "") ?? "0",
-      10,
+      10
     );
     expect(tickCountAfter).toBe(tickCountBefore + 1);
   });

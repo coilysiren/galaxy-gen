@@ -2,10 +2,11 @@
 
 [![Galaxy Generator interface showing an irregular galaxy evolving into a spiral](docs/project-galaxy-gen.gif)](https://galaxy-gen.coilysiren.me)
 
-`{ rust → wasm → js }` galaxy generation simulation. Gravitational physics
-(Newton's law on a cell grid) computed in Rust, compiled to WebAssembly via
-[wasm-pack](https://github.com/rustwasm/wasm-pack), rendered in the browser
-with React + [D3](https://d3js.org/).
+`{ rust → wasm → js }` living-galaxy simulation. Gravitational physics,
+star birth and death, black-hole evolution, and a cycling cold/hot gas
+reservoir are computed in Rust, compiled to WebAssembly via
+[wasm-pack](https://github.com/rustwasm/wasm-pack), and rendered on a browser
+canvas with React.
 
 ## Quick start
 
@@ -28,7 +29,7 @@ See [.ward/ward.yaml](.ward/ward.yaml) for the full command catalog and
   into `node_modules/galaxy_gen_backend` by `npm install ./pkg`.
 - `src/js/lib/galaxy.ts` — `Frontend` class; the JS ↔ WASM boundary.
 - `src/js/lib/application.tsx` — React UI (inputs, buttons, `data-testid`s).
-- `src/js/lib/dataviz.tsx` — D3 scatter plot into `#dataviz`.
+- `src/js/lib/dataviz.tsx` — layered canvas renderer in `#dataviz`.
 - `src/js/lib/styles.css` — Tailwind v4 + custom palette.
 - `e2e/galaxy.spec.ts` — Playwright end-to-end tests.
 - `dist/` — production webpack build output (gitignored).

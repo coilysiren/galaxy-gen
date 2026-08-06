@@ -25,7 +25,11 @@ Struct-of-arrays (parallel `Vec<f32>` / `Vec<u16>`) so the physics inner loop is
 - `CELL_MASS_CAP` is 128. Transfers into a cell never pack it past this (incompressibility floor). A full destination rejects the mover, which parks at its cell edge with velocity intact (`BLOCKED_FRICTION` = 1.0, traffic-jam model - reflecting or damping thermalizes disk rotation). Admission resolves iteratively like a traffic wave: a mover is admitted when its destination's resident is CONFIRMED leaving, so a convoy of full cells unwinds from its free end and dense clouds translate and rotate as bodies instead of freezing solid. (Trusting mere intent is over-permissive in a jam and collapses whole clouds into one mega-blob; the strict single-sweep rule froze all +x/+y bulk motion.) Cells above the cap shed the excess to their four neighbors each tick (pressure overflow), so capped cores breathe instead of gridlocking.
 - `CONFINE_STIFFNESS` is 0.02. Gas boundary spring: past the disk radius (size/2 - 1, the soft clip) cells feel a linear pull back toward the center. The toroidal wrap remains as a backstop only.
 - `STAR_FIELD_SCALE` is 0.25: the coarse field stars read is built at quarter strength with its halo term on half the gas curve, so star orbits run at half the gas pace - fast pink rivers of gas around a slow drifting star population.
-- Stars use a two-tier halo instead: between the soft clip and the hard clip (`HARD_CLIP_FACTOR` 3.0 x soft) a repulsive gradient `HALO_STIFFNESS x (r - soft)/(hard - r)` (clamped at `HALO_ACCEL_MAX`) diverges at the hard clip, so no finite speed reaches it. `STAR_HALO_DRAG` bleeds velocity only inside the band - the halo spring is conservative, and without dissipation ejecta would oscillate forever instead of rejoining the disk. The renderer fades matter from the soft clip to invisible by 1.5 x soft; the deep halo exists but never renders.
+- Stars use a two-tier halo instead: between the soft clip and the hard clip (`HARD_CLIP_FACTOR` 3.0 x soft) a repulsive gradient `HALO_STIFFNESS x (r - soft)/(hard - r)` (clamped at `HALO_ACCEL_MAX`) diverges at the hard clip, so no finite speed reaches it. `STAR_HALO_DRAG` bleeds velocity only inside the band - the halo spring is conservative, and without dissipation ejecta would oscillate forever instead of rejoining the disk. The renderer uses a smoothstep fade from the soft clip to invisible by 1.35 x soft; the deep halo exists but never renders.
+
+## Galactic fountain
+
+Radiation-dissipated gas is not destroyed. It moves into `halo_gas_mass`, a hot circumgalactic reservoir serialized with the rest of the simulation. `gas_fountain` runs every eight ticks and drives the cold share of active gas around a 480-tick 40-60% limit cycle. Feedback lifts irradiated cells first. Cooling returns small parcels to existing moving disk filaments before sparsely seeding empty annular cells, with circular velocity and a slight inward drift. The exchange changes visibility and density without creating baryons, and the UI reports `cold / (cold + halo)`.
 
 ## Stars and the causal loop
 
@@ -53,7 +57,7 @@ Every scenario seeds inside the disk radius and adds orbital support on top: `v 
 ## Buffers
 
 - `vel_x`, `vel_y`. Persistent per-cell velocity. Without persistence the sim restarts from rest each tick and produces imperceptible motion.
-- `frac_x`, `frac_y`. Sub-grid fractional offsets so a cell accumulates toward its next grid cell across ticks rather than snapping.
+- `frac_x`, `frac_y`. Sub-grid fractional offsets so a cell accumulates toward its next grid cell across ticks rather than snapping. Worker snapshots carry them to the canvas renderer, so visible clouds move continuously between integer cell transfers.
 - `xs_i`, `ys_i`. Integer cell positions. Integer diffs let us index an inv-r-cubed lookup with r squared, no `sqrt` in the hot loop.
 - `inv_r3`. Precomputed `g * (r squared + soft) ^ (-3/2)` indexed by integer r squared. Populated in `new()`, reused across seeds and ticks.
 - `scratch_mass`. Reused across ticks.

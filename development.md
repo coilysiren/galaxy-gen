@@ -5,7 +5,7 @@
 ### Rust Backend (`src/rust/`)
 
 - `lib.rs` — crate root, re-exports the `galaxy` module
-- `galaxy.rs` — core simulation logic: `Galaxy` struct with `Cell` grid, gravitational physics (Newton's law), acceleration, seeding, tick advancement. Exposed to JS via `wasm-bindgen`
+- `galaxy.rs` - core simulation logic: struct-of-arrays gas grid, gravitational physics, living-galaxy lifecycle, seeding, and tick advancement. Exposed to JS via `wasm-bindgen`
 
 The Galaxy is immutable-style — methods like `seed()`, `tick()` return new Galaxy instances.
 
@@ -16,12 +16,12 @@ The Galaxy is immutable-style — methods like `seed()`, `tick()` return new Gal
 
 ### JavaScript Frontend (`src/js/`)
 
-- `index.html` — Bootstrap 5 dark theme shell
-- `index.js` — React entry point
-- `lib/galaxy.ts` — `Frontend` class wrapping the WASM Galaxy, exposes `seed()`, `tick()`, `cells()`
-- `lib/application.tsx` — React UI: desktop sidebar with inputs (galaxy size, initial condition) and buttons (generate, run/pause, advance time)
-- `lib/dataviz.tsx` — D3 scatter plot visualization of cells, circle radius = log(mass)
-- `lib/styles.css` — custom styles
+- `index.html` - browser shell
+- `index.js` - React entry point
+- `lib/galaxy.ts` - `Frontend` class wrapping the WASM Galaxy and its worker snapshots
+- `lib/application.tsx` - React UI and live simulation controls
+- `lib/dataviz.tsx` - layered canvas visualization
+- `lib/styles.css` - Tailwind theme and custom styles
 
 ### Build System
 
@@ -37,30 +37,24 @@ The Galaxy is immutable-style — methods like `seed()`, `tick()` return new Gal
 ## Commands
 
 ```bash
-# Rust
-cargo build          # compile
-cargo check          # type check
-cargo test           # run tests (there are many in galaxy.rs)
-
-# WASM
-wasm-pack build      # compile to WASM, output in pkg/
-
-# JS
-npm install          # install deps (requires pkg/ from wasm-pack)
-npm run build        # production webpack build
-npm start            # dev server
+ward exec install
+ward exec dev
+ward exec test
+ward exec build-js-prod
 ```
+
+To refresh the README animation, start the dev server and run `ward exec capture-readme`. Set `GALAXY_CAPTURE_URL` when the server is not on port 8081. The command writes `docs/project-galaxy-gen.next.gif` and refuses to overwrite either an earlier candidate or the tracked GIF. After inspection, `ward exec promote-readme` replaces the tracked asset with that candidate.
 
 ## Key Conventions
 
 - Rust code uses `wasm_bindgen` for the public API boundary; private methods are plain `impl` blocks
-- Galaxy grid is flat `Vec<Cell>` indexed by `row * size + col`
-- Physics uses magnitude + degrees (not x/y vectors) for acceleration storage, converting at computation boundaries
+- Galaxy state uses parallel flat arrays indexed by `row * size + col`
+- Physics accumulates cartesian acceleration and preserves fractional gas positions between grid transfers
 - Tests are organized in `mod tests_*` blocks at the bottom of `galaxy.rs`
 - Frontend state is managed with React `useState` hooks (no state library)
-- No linting/formatting tools are actively enforced beyond `tslint.json` (which is deprecated)
+- ESLint, Prettier, TypeScript, Rust formatting, Clippy, and browser tests run through the Ward validation surface
 
 ## Dependencies
 
-- Rust: `wasm-bindgen`, `specs`/`specs-derive` (ECS, currently unused), `rand`, `console_error_panic_hook`
-- JS: React 18, D3 7, TypeScript 5, webpack 5, Bootstrap 5 (CDN)
+- Rust: `wasm-bindgen`, `rand`, `console_error_panic_hook`
+- JS: React, TypeScript, webpack, Tailwind, Playwright

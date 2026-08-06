@@ -65,16 +65,19 @@ function runOneTick() {
   galaxy = next;
   const tickMs = performance.now() - t0;
 
-  // `galaxy.mass()` allocates a JS-heap Uint16Array; safe to transfer.
+  // WASM getters allocate transferable JS arrays. Gas offsets preserve
+  // continuous sub-cell motion on the main-thread canvas.
   const mass: Uint16Array = galaxy.mass();
+  const fracX: Float32Array = galaxy.frac_x();
+  const fracY: Float32Array = galaxy.frac_y();
   const stars: Float32Array = galaxy.star_render_data();
   const transients: Float32Array = galaxy.render_transients();
   const radiation: Float32Array = galaxy.radiation_field();
-  let gasTotal = 0;
-  for (let i = 0; i < mass.length; i++) gasTotal += mass[i];
   const payload = {
     type: "snapshot" as const,
     mass,
+    fracX,
+    fracY,
     tickMs,
     // The sim's own tick counter - continuous across pause/resume, so
     // the UI's frame reference never resets mid-run.
@@ -86,11 +89,13 @@ function runOneTick() {
     birthCount: Number(galaxy.events_executed(1)),
     captureCount: Number(galaxy.events_executed(5)),
     bhMass: galaxy.bh_mass_value(),
-    gasTotal,
+    gasColdFraction: galaxy.gas_cold_fraction(),
     lensScale: galaxy.bh_lens_scale(),
   };
   (self as unknown as Worker).postMessage(payload, [
     mass.buffer,
+    fracX.buffer,
+    fracY.buffer,
     stars.buffer,
     transients.buffer,
     radiation.buffer,
@@ -105,14 +110,7 @@ function handleInit(msg: InitMsg) {
     galaxy.free();
     galaxy = null;
   }
-  galaxy = wasmMod.Galaxy.from_state(
-    msg.size,
-    msg.mass,
-    msg.velX,
-    msg.velY,
-    msg.fracX,
-    msg.fracY,
-  );
+  galaxy = wasmMod.Galaxy.from_state(msg.size, msg.mass, msg.velX, msg.velY, msg.fracX, msg.fracY);
   // Restore order matters: stars, then field, then meta.
   galaxy.restore_sim_state_stars(msg.stars);
   galaxy.restore_sim_state_field(msg.field);

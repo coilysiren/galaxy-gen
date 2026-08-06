@@ -232,7 +232,7 @@ pub struct Galaxy {
     /// Seed-time black hole mass; the renderer scales the lens depth by
     /// sqrt(bh_mass / bh_mass_initial).
     bh_mass_initial: f32,
-    /// Mass lost to Hawking radiation - a ledger sink like dissipation.
+    /// Mass lost to Hawking radiation - the irreversible ledger sink.
     radiated_total: f64,
     /// Coarse acceleration field (FIELD_RES x FIELD_RES over the world),
     /// rebuilt by process_gravity_field, bilinear-sampled by stars.
@@ -244,9 +244,9 @@ pub struct Galaxy {
     /// Per-cell sustained-density counter driving CloudCollapse. Bumped
     /// by collapse_watch when a cell stays dense, slow, and cool.
     collapse_heat: Vec<u8>,
-    /// Mass destroyed by radiation dissipation - the one documented sink
-    /// in the baryonic ledger (gas + stars + pending births + this).
-    dissipated_total: u64,
+    /// Hot gas lifted out of the visible disk by feedback. The galactic
+    /// fountain cools it back, making this a reservoir rather than a sink.
+    halo_gas_mass: u64,
     next_cluster_id: u32,
     next_star_id: u32,
     /// Causal attribution for shock-boosted collapse heat: the ShockWave
@@ -393,9 +393,20 @@ impl Galaxy {
     // with a 3x3 splat; the field decays every rebuild.
     const RAD_DEPOSIT_SCALE: f32 = 0.01;
     const RAD_DECAY: f32 = 0.85;
-    /// Above this radiation level gas dissipates (mass -> dissipated
-    /// ledger), emitting CloudDissipate when a cell empties.
+    /// Above this radiation level gas rises into the hot halo,
+    /// emitting CloudDissipate when a cell empties.
     const RAD_DISSIPATE_THRESHOLD: f32 = 60.0;
+
+    // Observable closed fountain cycle, standing in for delayed feedback
+    // and cooling without adding baryons. See docs/galaxy-rust.md.
+    const FOUNTAIN_PERIOD: u64 = 480;
+    const FOUNTAIN_COLD_MIDPOINT: f32 = 0.50;
+    const FOUNTAIN_COLD_AMPLITUDE: f32 = 0.10;
+    /// Maximum share of active gas exchanged per fountain cadence.
+    const FOUNTAIN_MAX_EXCHANGE: f32 = 0.02;
+    /// Cooled halo gas rains back in small parcels, avoiding new square
+    /// mega-clouds while pressure overflow connects neighboring cells.
+    const FOUNTAIN_PACKET_MASS: u16 = 4;
 
     // Supernova tuning. Main-sequence stars past their lifetime and at
     // or above the mass threshold detonate; lighter ones fade to
@@ -490,7 +501,7 @@ impl Galaxy {
             field_ay: vec![0.0; Galaxy::FIELD_RES * Galaxy::FIELD_RES],
             radiation: vec![0.0; Galaxy::FIELD_RES * Galaxy::FIELD_RES],
             collapse_heat: vec![0; n],
-            dissipated_total: 0,
+            halo_gas_mass: 0,
             next_cluster_id: 0,
             next_star_id: 1,
             heat_parent: vec![0; n],
@@ -514,12 +525,7 @@ impl Galaxy {
     /// Reproducible [`seed_with_mode`]: same `(additional, mode, seed)`
     /// gives byte-identical state, enabling `?seed=...` URL sharing for
     /// every scenario.
-    pub fn seed_with_mode_seeded(
-        &self,
-        additional: u16,
-        mode: Scenario,
-        seed: u64,
-    ) -> Galaxy {
+    pub fn seed_with_mode_seeded(&self, additional: u16, mode: Scenario, seed: u64) -> Galaxy {
         let mut rng = StdRng::seed_from_u64(seed);
         self.seed_mode_kernel(additional, mode, seed, &mut rng)
     }
@@ -557,7 +563,9 @@ impl Galaxy {
                         Galaxy::SMOKE_OCTAVE_RES
                             .iter()
                             .map(|&res| {
-                                (0..res * res).map(|_| rng.random_range(0.0f32..1.0)).collect()
+                                (0..res * res)
+                                    .map(|_| rng.random_range(0.0f32..1.0))
+                                    .collect()
                             })
                             .collect()
                     };
@@ -587,9 +595,7 @@ impl Galaxy {
                         let mut sum = 0.0f32;
                         let mut amp = 1.0f32;
                         let mut norm = 0.0f32;
-                        for (grid, &res) in
-                            octaves.iter().zip(Galaxy::SMOKE_OCTAVE_RES.iter())
-                        {
+                        for (grid, &res) in octaves.iter().zip(Galaxy::SMOKE_OCTAVE_RES.iter()) {
                             sum += amp * vnoise(grid, res, u, v);
                             norm += amp;
                             amp *= 0.5;
@@ -608,8 +614,7 @@ impl Galaxy {
                         // smoke trails off instead of hitting a wall.
                         let r_frac = (x * x + y * y).sqrt() / disk_r;
                         let edge = if r_frac > Galaxy::EDGE_FEATHER_START {
-                            let t = ((1.0 - r_frac)
-                                / (1.0 - Galaxy::EDGE_FEATHER_START))
+                            let t = ((1.0 - r_frac) / (1.0 - Galaxy::EDGE_FEATHER_START))
                                 .clamp(0.0, 1.0);
                             t * t * (3.0 - 2.0 * t)
                         } else {
@@ -631,18 +636,15 @@ impl Galaxy {
                         let d = fbm(&density_oct, wu, wv);
                         // Stretch, then power-law: thin bright filaments,
                         // voids that reach clean through the disk.
-                        let stretched = ((d - 0.5) * Galaxy::SMOKE_STRETCH
-                            + Galaxy::SMOKE_CENTER)
+                        let stretched = ((d - 0.5) * Galaxy::SMOKE_STRETCH + Galaxy::SMOKE_CENTER)
                             .clamp(0.0, 1.0);
-                        let smoke =
-                            stretched.powf(p.smoke_contrast) * Galaxy::SMOKE_GAIN;
+                        let smoke = stretched.powf(p.smoke_contrast) * Galaxy::SMOKE_GAIN;
                         let r = (x * x + y * y).sqrt().max(1.0);
                         let theta = y.atan2(x);
                         // Two-arm density wave: cos(2 theta - pitch ln r).
                         let arm = 1.0
                             + p.spiral_amp
-                                * (2.0 * theta - Galaxy::SPIRAL_PITCH * r.ln()
-                                    + spiral_phase)
+                                * (2.0 * theta - Galaxy::SPIRAL_PITCH * r.ln() + spiral_phase)
                                     .cos();
                         let w = smoke * arm * edge * envelope * rng.random_range(0.85f32..1.15);
                         if w > 0.0 {
@@ -810,7 +812,7 @@ impl Galaxy {
         g.radiated_total = 0.0;
         g.radiation = vec![0.0; Galaxy::FIELD_RES * Galaxy::FIELD_RES];
         g.collapse_heat = vec![0; self.n];
-        g.dissipated_total = 0;
+        g.halo_gas_mass = 0;
         g.next_cluster_id = 0;
         g.next_star_id = 1;
         g.heat_parent = vec![0; self.n];
@@ -890,8 +892,18 @@ impl Galaxy {
         let (lifetime, luminosity, class_index) = Galaxy::star_attrs(m);
         let id = self.next_star_id;
         self.next_star_id += 1;
-        self.stars
-            .spawn(x, y, vx, vy, m, lifetime, luminosity, class_index, NO_CLUSTER, id)
+        self.stars.spawn(
+            x,
+            y,
+            vx,
+            vy,
+            m,
+            lifetime,
+            luminosity,
+            class_index,
+            NO_CLUSTER,
+            id,
+        )
     }
 
     /// Renderer transients: [kind, x, y, ticks_ago, magnitude] per recent
@@ -954,6 +966,18 @@ impl Galaxy {
         (self.bh_mass / self.bh_mass_initial).max(0.0).sqrt()
     }
 
+    /// Cold disk share of the active gas reservoir. The galactic fountain
+    /// moves it between roughly 0.4 and 0.6 after feedback starts.
+    pub fn gas_cold_fraction(&self) -> f32 {
+        let cold: u64 = self.mass.iter().map(|&m| m as u64).sum();
+        let active = cold + self.halo_gas_mass;
+        if active == 0 {
+            0.0
+        } else {
+            cold as f32 / active as f32
+        }
+    }
+
     /// Executed-event count by kind index (EventKind discriminant).
     /// Instrumentation surface for debug_sim and the UI stats row.
     pub fn events_executed(&self, kind: u32) -> u64 {
@@ -1003,7 +1027,7 @@ impl Galaxy {
 
     /// Versioned scheduler/event/RNG state: [version=5, tick lo/hi, seed
     /// lo/hi, bh_mass bits, bh_initial bits, radiated f64 bits lo/hi,
-    /// dissipated lo/hi, next_cluster, next_star, scenario, n_cells,
+    /// halo-gas lo/hi, next_cluster, next_star, scenario, n_cells,
     /// heat bytes packed 4-per-u32, heat_parent lo/hi per cell, then the
     /// event-queue flat form]. Opaque to JS.
     pub fn sim_state_meta(&self) -> Vec<u32> {
@@ -1019,8 +1043,8 @@ impl Galaxy {
         let rad_bits = self.radiated_total.to_bits();
         out.push(rad_bits as u32);
         out.push((rad_bits >> 32) as u32);
-        out.push(self.dissipated_total as u32);
-        out.push((self.dissipated_total >> 32) as u32);
+        out.push(self.halo_gas_mass as u32);
+        out.push((self.halo_gas_mass >> 32) as u32);
         out.push(self.next_cluster_id);
         out.push(self.next_star_id);
         out.push(self.scenario as u32);
@@ -1048,9 +1072,8 @@ impl Galaxy {
         self.master_seed = data[3] as u64 | ((data[4] as u64) << 32);
         self.bh_mass = f32::from_bits(data[5]);
         self.bh_mass_initial = f32::from_bits(data[6]);
-        self.radiated_total =
-            f64::from_bits(data[7] as u64 | ((data[8] as u64) << 32));
-        self.dissipated_total = data[9] as u64 | ((data[10] as u64) << 32);
+        self.radiated_total = f64::from_bits(data[7] as u64 | ((data[8] as u64) << 32));
+        self.halo_gas_mass = data[9] as u64 | ((data[10] as u64) << 32);
         self.next_cluster_id = data[11];
         self.next_star_id = data[12];
         self.scenario = Scenario::from_u32(data[13]);
@@ -1373,7 +1396,7 @@ impl Galaxy {
         }
     }
 
-    /// Irradiated gas evaporates into the dissipated ledger.
+    /// Irradiated gas evaporates into the hot circumgalactic reservoir.
     pub(crate) fn process_gas_dissipation(&mut self, _time: f32) {
         let tick = self.tick_count;
         let mut dissipate_events = 0u32;
@@ -1387,7 +1410,7 @@ impl Galaxy {
             }
             let lose = (m / 50).max(1).min(m);
             self.mass[i] = m - lose;
-            self.dissipated_total += lose as u64;
+            self.halo_gas_mass += lose as u64;
             if self.mass[i] == 0 && dissipate_events < 32 {
                 dissipate_events += 1;
                 self.events.emit(
@@ -1400,6 +1423,145 @@ impl Galaxy {
                 );
             }
         }
+    }
+
+    /// Exchange visible disk gas with the hot halo on a feedback/cooling
+    /// limit cycle. See docs/galaxy-rust.md.
+    pub(crate) fn process_gas_fountain(&mut self, _time: f32) {
+        if self.stars.len() == 0 && self.halo_gas_mass == 0 {
+            return;
+        }
+        let cold: u64 = self.mass.iter().map(|&m| m as u64).sum();
+        let active = cold + self.halo_gas_mass;
+        if active == 0 {
+            return;
+        }
+
+        let phase = std::f32::consts::TAU * (self.tick_count % Galaxy::FOUNTAIN_PERIOD) as f32
+            / Galaxy::FOUNTAIN_PERIOD as f32;
+        let target_fraction =
+            Galaxy::FOUNTAIN_COLD_MIDPOINT + Galaxy::FOUNTAIN_COLD_AMPLITUDE * phase.sin();
+        let target_cold = (active as f32 * target_fraction).round() as u64;
+        let exchange_cap = ((active as f32 * Galaxy::FOUNTAIN_MAX_EXCHANGE).ceil() as u64).max(1);
+
+        if cold > target_cold {
+            let requested = (cold - target_cold).min(exchange_cap);
+            let lifted = self.lift_gas_to_halo(requested);
+            self.halo_gas_mass += lifted;
+        } else if cold < target_cold && self.halo_gas_mass > 0 {
+            let requested = (target_cold - cold)
+                .min(exchange_cap)
+                .min(self.halo_gas_mass);
+            let cooled = self.cool_halo_gas(requested);
+            self.halo_gas_mass -= cooled;
+        }
+    }
+
+    /// Lift gas into the halo, preferring irradiated cells before a
+    /// deterministic pass over the rest of the disk.
+    fn lift_gas_to_halo(&mut self, requested: u64) -> u64 {
+        let mut remaining = requested;
+        let start = (splitmix64(self.master_seed ^ self.tick_count) as usize) % self.n;
+        for hot_only in [true, false] {
+            for offset in 0..self.n {
+                if remaining == 0 {
+                    break;
+                }
+                let i = (start + offset) % self.n;
+                let m = self.mass[i];
+                if m == 0 {
+                    continue;
+                }
+                if hot_only && self.radiation_at_cell(i) < Galaxy::COLLAPSE_RADIATION_RESIST {
+                    continue;
+                }
+                let per_cell = if hot_only {
+                    (m / 4).max(1)
+                } else {
+                    (m / 16).max(1)
+                };
+                let take = (per_cell as u64).min(remaining) as u16;
+                self.mass[i] -= take;
+                remaining -= take as u64;
+            }
+            if remaining == 0 {
+                break;
+            }
+        }
+        requested - remaining
+    }
+
+    /// Cool halo gas into the evolved disk. Parcels inherit circular flow
+    /// plus a slight inward drift so they visibly keep moving.
+    fn cool_halo_gas(&mut self, requested: u64) -> u64 {
+        let mut remaining = requested;
+        let size = self.size as i32;
+        let center = self.size as f32 * 0.5;
+        let disk_r = self.disk_radius();
+        let p = self.scenario.params();
+        let rc = p.halo_core_frac * disk_r;
+        let rc2 = rc * rc;
+        let start = (splitmix64(self.master_seed ^ self.tick_count ^ 0xA076_1D64_78BD_642F)
+            as usize)
+            % self.n;
+
+        for seed_empty in [false, true] {
+            for offset in 0..self.n {
+                if remaining == 0 {
+                    break;
+                }
+                let i = (start + offset) % self.n;
+                let hash = splitmix64(i as u64 ^ self.tick_count);
+                // Rain onto existing filaments first so the evolved shape
+                // survives. A sparse fallback seeds empty annular cells.
+                if seed_empty == (self.mass[i] > 0) {
+                    continue;
+                }
+                if seed_empty && hash & 0b11 != 0 {
+                    continue;
+                }
+                let col = i as i32 % size;
+                let row = i as i32 / size;
+                let x = col as f32 + 0.5 - center;
+                let y = row as f32 + 0.5 - center;
+                let r2 = x * x + y * y;
+                let r = r2.sqrt();
+                if r < disk_r * 0.25 || r > disk_r * 0.9 {
+                    continue;
+                }
+                let capacity = Galaxy::CELL_MASS_CAP.saturating_sub(self.mass[i] as u32);
+                if capacity == 0 {
+                    continue;
+                }
+                let add = (Galaxy::FOUNTAIN_PACKET_MASS as u64)
+                    .min(capacity as u64)
+                    .min(remaining) as u16;
+                if add == 0 {
+                    continue;
+                }
+
+                let vc = p.flow_support * p.v_flat * r / (r2 + rc2).sqrt();
+                let inward = 0.06;
+                let rain_vx = -y / r * vc - x / r * inward;
+                let rain_vy = x / r * vc - y / r * inward;
+                let old = self.mass[i] as f32;
+                let new = old + add as f32;
+                self.vel_x[i] = (self.vel_x[i] * old + rain_vx * add as f32) / new;
+                self.vel_y[i] = (self.vel_y[i] * old + rain_vy * add as f32) / new;
+                if self.mass[i] == 0 {
+                    let jx = ((hash & 0xFF) as f32 / 255.0 - 0.5) * 0.35;
+                    let jy = (((hash >> 8) & 0xFF) as f32 / 255.0 - 0.5) * 0.35;
+                    self.frac_x[i] = jx;
+                    self.frac_y[i] = jy;
+                }
+                self.mass[i] += add;
+                remaining -= add as u64;
+            }
+            if remaining == 0 {
+                break;
+            }
+        }
+        requested - remaining
     }
 
     /// Advance stellar ages by the sim time elapsed since the last run
@@ -1551,14 +1713,11 @@ impl Galaxy {
         let c = size / 2;
         for dr in -Galaxy::BH_ACCRETION_RADIUS..=Galaxy::BH_ACCRETION_RADIUS {
             for dc in -Galaxy::BH_ACCRETION_RADIUS..=Galaxy::BH_ACCRETION_RADIUS {
-                if dc * dc + dr * dr > Galaxy::BH_ACCRETION_RADIUS * Galaxy::BH_ACCRETION_RADIUS
-                {
+                if dc * dc + dr * dr > Galaxy::BH_ACCRETION_RADIUS * Galaxy::BH_ACCRETION_RADIUS {
                     continue;
                 }
-                let i = self.col_row_to_index(
-                    wrap(c + dc, size) as u16,
-                    wrap(c + dr, size) as u16,
-                ) as usize;
+                let i = self.col_row_to_index(wrap(c + dc, size) as u16, wrap(c + dr, size) as u16)
+                    as usize;
                 let m = self.mass[i];
                 if m == 0 {
                     continue;
@@ -1603,8 +1762,8 @@ impl Galaxy {
             return;
         }
         let elapsed = time * 8.0;
-        let loss = (Galaxy::HAWKING_COEFF / (self.bh_mass * self.bh_mass) * elapsed)
-            .min(self.bh_mass);
+        let loss =
+            (Galaxy::HAWKING_COEFF / (self.bh_mass * self.bh_mass) * elapsed).min(self.bh_mass);
         self.bh_mass -= loss;
         self.radiated_total += loss as f64;
         if self.bh_mass < 1.0 {
@@ -1782,13 +1941,13 @@ impl Galaxy {
     }
 
     /// Baryonic ledger: gas + stars + in-flight births + the black hole
-    /// + the dissipated and radiated sinks.
+    /// + the hot halo reservoir and radiated sink.
     pub(crate) fn baryonic_total(&self) -> f64 {
         let gas: f64 = self.mass.iter().map(|&m| m as f64).sum();
         let stars: f64 = self.stars.mass.iter().map(|&m| m as f64).sum();
         gas + stars
             + self.pending_birth_mass()
-            + self.dissipated_total as f64
+            + self.halo_gas_mass as f64
             + self.bh_mass as f64
             + self.radiated_total
     }
@@ -2222,7 +2381,6 @@ impl Galaxy {
             }
         }
     }
-
 }
 
 /// splitmix64 finalizer - cheap, well-mixed u64 -> u64 for RNG stream
@@ -2760,6 +2918,45 @@ mod tests_dynamics {
     use super::*;
 
     #[test]
+    fn test_galactic_fountain_changes_direction_and_closes_ledger() {
+        let mut g = Galaxy::new(30, 0).seed_with_mode_seeded(15, Scenario::IrregularSpiral, 42);
+
+        // Start the controller at an even cold/hot split without
+        // changing the baryonic ledger.
+        let mut lifted = 0u64;
+        for m in &mut g.mass {
+            let take = *m / 2;
+            *m -= take;
+            lifted += take as u64;
+        }
+        g.halo_gas_mass += lifted;
+        let ledger = g.baryonic_total();
+        let midpoint = g.gas_cold_fraction();
+
+        // Quarter-cycle targets 60% visible gas, so halo gas cools into
+        // the disk. Three-quarter-cycle targets 40%, so gas lifts out.
+        g.tick_count = Galaxy::FOUNTAIN_PERIOD / 4;
+        g.process_gas_fountain(0.5);
+        let rising = g.gas_cold_fraction();
+        assert!(
+            rising > midpoint,
+            "cold reservoir must rise toward its 60% target"
+        );
+
+        g.tick_count = Galaxy::FOUNTAIN_PERIOD * 3 / 4;
+        g.process_gas_fountain(0.5);
+        let falling = g.gas_cold_fraction();
+        assert!(
+            falling < rising,
+            "cold reservoir must fall toward its 40% target"
+        );
+        assert!(
+            (g.baryonic_total() - ledger).abs() < 1.0,
+            "fountain exchange must conserve baryonic mass"
+        );
+    }
+
+    #[test]
     fn test_gas_dissipation_relaxes_toward_circular_flow_not_rest() {
         // Mechanism guard for the rotation reflow: dissipation must pull
         // velocity toward the local circular flow u(r), NOT toward zero
@@ -2780,7 +2977,9 @@ mod tests_dynamics {
         // (0, -1) scaled - i.e. negative vy.
         let vc = p.flow_support * p.v_flat * r / (r * r + rc * rc).sqrt();
         let next = g.tick(0.5);
-        let moved = (0..next.n).find(|&i| next.mass[i] == 50).expect("cell survives");
+        let moved = (0..next.n)
+            .find(|&i| next.mass[i] == 50)
+            .expect("cell survives");
         // After one tick from rest: v = a_halo dt + (v0 + a dt - u) part;
         // radially the halo pulls +x (toward center), tangentially the
         // relaxation closes the gap from 0 toward -vc by (1 - decay).
@@ -2813,8 +3012,8 @@ mod tests_golden {
     }
 
     /// Golden values pin the mass field after 100 ticks per scenario
-    /// (size 50, dt 0.5). Last recaptured for the scenario reflow: halo
-    /// rotation curve, flow-relaxation drag, and per-scenario seeders.
+    /// (size 50, dt 0.5). Last recaptured for the galactic-fountain
+    /// lifecycle, after the scenario reflow goldens it supersedes.
     /// If another deliberate change lands, recapture and say so in the
     /// commit.
     #[test]
@@ -2823,7 +3022,7 @@ mod tests_golden {
             (Scenario::BangRing, 7u64, 18067255989933722781u64),
             (Scenario::BangSpiral, 7, 9722024055075967181),
             (Scenario::IrregularSpiral, 42, 18393590699964816686),
-            (Scenario::IrregularElliptical, 42, 13495946556133575458),
+            (Scenario::IrregularElliptical, 42, 12427796941177419012),
         ] {
             let mut g = Galaxy::new(50, 0).seed_with_mode_seeded(25, mode, seed);
             for _ in 0..100 {
@@ -2847,7 +3046,10 @@ mod tests_golden {
         let draws2: Vec<u32> = (0..8).map(|_| a2.random()).collect();
         let draws_b: Vec<u32> = (0..8).map(|_| b.random()).collect();
         assert_eq!(draws1, draws2, "same (seed, process, tick) must repeat");
-        assert_ne!(draws1, draws_b, "different processes must not share a stream");
+        assert_ne!(
+            draws1, draws_b,
+            "different processes must not share a stream"
+        );
         let g2 = g.tick(0.5);
         let mut a_next = g2.rng_stream(1);
         let draws_next: Vec<u32> = (0..8).map(|_| a_next.random()).collect();
@@ -2877,17 +3079,20 @@ mod tests_stars_dynamics {
     #[test]
     fn test_ejected_star_stays_inside_hard_clip_and_rejoins_disk() {
         let mut g = Galaxy::new(50, 0).seed_with_mode_seeded(25, Scenario::IrregularSpiral, 42);
-        g.spawn_star(25.0, 25.0, 6.0, 0.0, 10.0);
+        let star_index = g.spawn_star(25.0, 25.0, 6.0, 0.0, 10.0);
+        let star_id = g.stars.id[star_index];
         let soft = 24.0f32;
         let hard = soft * Galaxy::HARD_CLIP_FACTOR;
         let mut max_r = 0.0f32;
+        let mut last_r = 0.0f32;
         let mut g = g;
         for _ in 0..4000 {
             g = g.tick(0.5);
-            if g.star_count() == 0 {
+            let Some(i) = g.stars.id.iter().position(|&id| id == star_id) else {
                 break;
-            }
-            let r = (g.stars.pos_x[0] - 25.0).hypot(g.stars.pos_y[0] - 25.0);
+            };
+            let r = (g.stars.pos_x[i] - 25.0).hypot(g.stars.pos_y[i] - 25.0);
+            last_r = r;
             if r > max_r {
                 max_r = r;
             }
@@ -2903,10 +3108,9 @@ mod tests_stars_dynamics {
         // Halo drag decays the excursion into a skim orbit at the disk
         // edge - "returned" means out of the deep halo, not parked at a
         // fixed rim like the old hard-stop.
-        let r_final = (g.stars.pos_x[0] - 25.0).hypot(g.stars.pos_y[0] - 25.0);
         assert!(
-            r_final < soft * 1.2,
-            "halo drag must decay ejecta back to the disk edge: final r {r_final:.1}"
+            last_r < soft * 1.2,
+            "halo drag must decay ejecta back to the disk edge: final r {last_r:.1}"
         );
     }
 
@@ -2932,14 +3136,7 @@ mod tests_stars_dynamics {
         for _ in 0..5 {
             a = a.tick(0.5);
         }
-        let mut b = Galaxy::from_state(
-            30,
-            a.mass(),
-            a.vel_x(),
-            a.vel_y(),
-            a.frac_x(),
-            a.frac_y(),
-        );
+        let mut b = Galaxy::from_state(30, a.mass(), a.vel_x(), a.vel_y(), a.frac_x(), a.frac_y());
         b.restore_sim_state_stars(&a.sim_state_stars());
         b.restore_sim_state_field(&a.sim_state_field());
         b.restore_sim_state_meta(&a.sim_state_meta());
@@ -2947,8 +3144,14 @@ mod tests_stars_dynamics {
             a = a.tick(0.5);
             b = b.tick(0.5);
         }
-        assert_eq!(a.stars.pos_x, b.stars.pos_x, "star x trajectories must match");
-        assert_eq!(a.stars.pos_y, b.stars.pos_y, "star y trajectories must match");
+        assert_eq!(
+            a.stars.pos_x, b.stars.pos_x,
+            "star x trajectories must match"
+        );
+        assert_eq!(
+            a.stars.pos_y, b.stars.pos_y,
+            "star y trajectories must match"
+        );
         assert_eq!(a.mass, b.mass, "gas must match");
         assert_eq!(a.tick_count, b.tick_count);
     }
@@ -3004,8 +3207,7 @@ mod tests_causal_loop {
         // event log, checked at two depths to catch cadence-boundary
         // nondeterminism. Both depths reach into the star-formation era.
         fn run(n: usize) -> (Vec<f32>, Vec<f32>, u64, [u64; 5]) {
-            let mut g =
-                Galaxy::new(50, 0).seed_with_mode_seeded(25, Scenario::IrregularSpiral, 42);
+            let mut g = Galaxy::new(50, 0).seed_with_mode_seeded(25, Scenario::IrregularSpiral, 42);
             for _ in 0..n {
                 g = g.tick(0.5);
             }
@@ -3113,7 +3315,10 @@ mod tests_black_hole {
         // land in the radiated sink, and take the lens with it.
         let mut g = Galaxy::new(20, 0).seed_with_mode_seeded(2, Scenario::IrregularSpiral, 7);
         let bh0 = g.bh_mass_value();
-        assert!(bh0 > 0.0 && bh0 < 100.0, "test wants a small hole, got {bh0}");
+        assert!(
+            bh0 > 0.0 && bh0 < 100.0,
+            "test wants a small hole, got {bh0}"
+        );
         let initial = g.baryonic_total();
         for _ in 0..2000 {
             g = g.tick(0.5);

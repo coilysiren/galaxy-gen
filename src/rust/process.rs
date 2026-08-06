@@ -21,6 +21,7 @@ pub enum StateKey {
     CollapseWatch,
     EventQueue,
     BlackHole,
+    HaloGas,
 }
 
 pub struct ProcessDescriptor {
@@ -66,7 +67,11 @@ static REGISTRY: &[ProcessDescriptor] = &[
     },
     ProcessDescriptor {
         name: "integrate_gas",
-        reads: &[StateKey::GasMass, StateKey::GasKinematics, StateKey::GasAccel],
+        reads: &[
+            StateKey::GasMass,
+            StateKey::GasKinematics,
+            StateKey::GasAccel,
+        ],
         writes: &[StateKey::GasMass, StateKey::GasKinematics],
         requires_fresh: &[StateKey::GasAccel],
         cadence: 1,
@@ -124,7 +129,11 @@ static REGISTRY: &[ProcessDescriptor] = &[
         // The hole feeds: core gas accretion plus BlackHoleCapture
         // emission for stars inside the capture radius.
         name: "bh_accretion",
-        reads: &[StateKey::GasMass, StateKey::StarKinematics, StateKey::BlackHole],
+        reads: &[
+            StateKey::GasMass,
+            StateKey::StarKinematics,
+            StateKey::BlackHole,
+        ],
         writes: &[StateKey::GasMass, StateKey::BlackHole, StateKey::EventQueue],
         requires_fresh: &[],
         cadence: 8,
@@ -143,14 +152,34 @@ static REGISTRY: &[ProcessDescriptor] = &[
         run: Galaxy::process_bh_evaporation,
     },
     ProcessDescriptor {
-        // Emits CloudDissipate; feeds the dissipated ledger sink.
+        // Emits CloudDissipate; irradiated gas rises into the hot halo.
         name: "gas_dissipation",
         reads: &[StateKey::GasMass, StateKey::RadiationField],
-        writes: &[StateKey::GasMass, StateKey::EventQueue],
+        writes: &[StateKey::GasMass, StateKey::HaloGas, StateKey::EventQueue],
         requires_fresh: &[],
         cadence: 8,
         phase_offset: 5,
         run: Galaxy::process_gas_dissipation,
+    },
+    ProcessDescriptor {
+        // Feedback lifts visible gas into the halo, then cooling returns
+        // it to the rotating disk so the cold reservoir breathes.
+        name: "gas_fountain",
+        reads: &[
+            StateKey::GasMass,
+            StateKey::GasKinematics,
+            StateKey::StarLifecycle,
+            StateKey::HaloGas,
+        ],
+        writes: &[
+            StateKey::GasMass,
+            StateKey::GasKinematics,
+            StateKey::HaloGas,
+        ],
+        requires_fresh: &[],
+        cadence: 8,
+        phase_offset: 1,
+        run: Galaxy::process_gas_fountain,
     },
 ];
 
@@ -219,6 +248,7 @@ mod tests_graph {
                 "bh_accretion",
                 "bh_evaporation",
                 "gas_dissipation",
+                "gas_fountain",
             ]
         );
     }

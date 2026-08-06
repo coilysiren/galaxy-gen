@@ -9,7 +9,7 @@ const MAX_ZOOM = 50;
 // radius), fading to invisible by FADE_END x soft. Matter deeper in the
 // halo band exists in the sim but does not render - the sim's hard clip
 // sits at 3x soft, far past visibility.
-const FADE_END = 1.5;
+const FADE_END = 1.35;
 
 // The canvas views a world span wider than the grid, centered on the
 // disk. 1.1 x size lets the disk own the frame; the near-halo spills
@@ -90,6 +90,13 @@ function cellJitter(i: number, salt: number): number {
   return (h % 1024) / 1024;
 }
 
+function radialFade(radius: number, softRadius: number): number {
+  if (radius <= softRadius) return 1;
+  const u = Math.min(1, (radius / softRadius - 1) / (FADE_END - 1));
+  const smooth = u * u * (3 - 2 * u);
+  return 1 - smooth;
+}
+
 function buildGasSprites() {
   if (gasSprites.length > 0) return;
   for (const tier of GAS_TIERS) {
@@ -102,9 +109,9 @@ function buildGasSprites() {
       const half = GAS_SPRITE_PX / 2;
       const grad = cctx.createRadialGradient(half, half, 0, half, half, half);
       // Low alpha on purpose: dense clumps stack dozens of overlaps.
-      grad.addColorStop(0, `rgba(${r},${g},${b},0.16)`);
-      grad.addColorStop(0.35, `rgba(${r},${g},${b},0.07)`);
-      grad.addColorStop(0.7, `rgba(${r},${g},${b},0.025)`);
+      grad.addColorStop(0, `rgba(${r},${g},${b},0.145)`);
+      grad.addColorStop(0.35, `rgba(${r},${g},${b},0.064)`);
+      grad.addColorStop(0.7, `rgba(${r},${g},${b},0.022)`);
       grad.addColorStop(1, `rgba(${r},${g},${b},0)`);
       cctx.fillStyle = grad;
       cctx.fillRect(0, 0, GAS_SPRITE_PX, GAS_SPRITE_PX);
@@ -129,7 +136,6 @@ function buildGasSprites() {
   dctx.fillRect(0, 0, GAS_SPRITE_PX, GAS_SPRITE_PX);
   dustSprite = d;
 }
-
 
 interface Camera {
   // Screen-space (CSS px) transform: screen = zoom * world + translate.
@@ -159,6 +165,8 @@ interface State {
   camera: Camera;
   simTick: number;
   lastMass: Uint16Array | null;
+  lastFracX: Float32Array | null;
+  lastFracY: Float32Array | null;
   lastStars: Float32Array | null;
   lastTransients: Float32Array | null;
   lastRadiation: Float32Array | null;
@@ -224,8 +232,7 @@ export function initViz(galaxyFrontend: galaxy.Frontend) {
   // transform itself always runs (identity by default); only the
   // pointer/wheel/dblclick surface is conditional.
   const debugCamera =
-    typeof window !== "undefined" &&
-    new URLSearchParams(window.location.search).has("debug");
+    typeof window !== "undefined" && new URLSearchParams(window.location.search).has("debug");
   canvas.style.cursor = debugCamera ? "grab" : "default";
 
   buildGasSprites();
@@ -292,7 +299,7 @@ export function initViz(galaxyFrontend: galaxy.Frontend) {
         zoom: state.camera.zoom,
       },
       state.cw,
-      state.ch,
+      state.ch
     );
     publishCamera(state);
     redraw();
@@ -375,6 +382,8 @@ export function initViz(galaxyFrontend: galaxy.Frontend) {
     camera,
     simTick: 0,
     lastMass: null,
+    lastFracX: null,
+    lastFracY: null,
     lastStars: null,
     lastTransients: null,
     lastRadiation: null,
@@ -395,6 +404,8 @@ export function updateData(galaxyFrontend: galaxy.Frontend, simTick?: number) {
   // Copy so zoom/pan interactions after the sim stops still have data
   // to redraw from.
   state.lastMass = mass.slice();
+  state.lastFracX = galaxyFrontend.fracXArray().slice();
+  state.lastFracY = galaxyFrontend.fracYArray().slice();
   state.lastStars = galaxyFrontend.starRenderArray().slice();
   state.lastTransients = galaxyFrontend.transientsArray().slice();
   state.lastRadiation = galaxyFrontend.radiationArray().slice();
@@ -437,6 +448,8 @@ function drawFrame(s: State, mass: Uint16Array) {
   const rad = s.lastRadiation;
   const radRes = rad ? Math.round(Math.sqrt(rad.length)) : 0;
   const radScale = radRes / size;
+  const fracX = s.lastFracX;
+  const fracY = s.lastFracY;
 
   // Recent supernova shells, for the [OIII] teal tier: gas near an
   // expanding front is shock-ionized and glows teal, lingering after
@@ -488,8 +501,10 @@ function drawFrame(s: State, mass: Uint16Array) {
       if (cellJitter(i, 4) < 0.7 === foreground) continue;
       const col = i % size;
       const row = (i / size) | 0;
-      const rx = col - center;
-      const ry = row - center;
+      const gasX = col + (fracX?.[i] ?? 0);
+      const gasY = row + (fracY?.[i] ?? 0);
+      const rx = gasX - center;
+      const ry = gasY - center;
       const radSq = rx * rx + ry * ry;
       if (radSq > fadeEndSq) continue;
       const t = Math.log(m + 1) * invLogMax;
@@ -521,15 +536,14 @@ function drawFrame(s: State, mass: Uint16Array) {
       teal = teal > 0 ? teal * teal * (3 - 2 * teal) : 0;
       // Fuzz overflows the cell on purpose, with per-cell size and
       // brightness jitter so the field is cloudy rather than uniform.
-      const footprint =
-        Math.max(8, (0.5 + t * rMax * 1.4) * 10) * (0.75 + cellJitter(i, 1));
-      let brightness = 0.45 + 0.75 * cellJitter(i, 2);
+      const footprint = Math.max(7, (0.5 + t * rMax * 1.4) * 6) * (0.75 + cellJitter(i, 1));
+      let brightness = 0.48 + 0.54 * cellJitter(i, 2);
       // Dust darkens by emitting less - absence of glow cannot leave
       // overlay artifacts the way a multiply stamp can.
       if (isDusty(i, col, row)) brightness *= 0.45;
-      const alpha = (radSq > softSq ? 0.3 : 1.0) * brightness;
-      const dx = toCx(col) - footprint / 2;
-      const dy = toCy(row) - footprint / 2;
+      const alpha = radialFade(Math.sqrt(radSq), softR) * brightness;
+      const dx = toCx(gasX) - footprint / 2;
+      const dy = toCy(gasY) - footprint / 2;
       const base = Math.min(2, Math.floor(tierF));
       const frac = Math.min(1, tierF - base);
       const temp = 1 - teal;
@@ -561,13 +575,15 @@ function drawFrame(s: State, mass: Uint16Array) {
       const ry = row - center;
       if (rx * rx + ry * ry > softSq) continue;
       const footprint = Math.max(10, rMax * 12) * (0.8 + 0.5 * cellJitter(i, 6));
+      const gasX = col + (fracX?.[i] ?? 0);
+      const gasY = row + (fracY?.[i] ?? 0);
       ctx.globalAlpha = 0.16;
       ctx.drawImage(
         dustSprite!,
-        toCx(col) - footprint / 2,
-        toCy(row) - footprint / 2,
+        toCx(gasX) - footprint / 2,
+        toCy(gasY) - footprint / 2,
         footprint,
-        footprint,
+        footprint
       );
     }
     ctx.globalAlpha = 1.0;
@@ -615,7 +631,12 @@ function applyShockShimmer(s: State) {
     const sy = (camera.zoom * cy + camera.ty) * dpr;
     const front = blastRadius(t[i + 4], age) * scale * camera.zoom * dpr;
     if (front < 6) continue;
-    if (sx + front < 0 || sy + front < 0 || sx - front > canvas.width || sy - front > canvas.height) {
+    if (
+      sx + front < 0 ||
+      sy + front < 0 ||
+      sx - front > canvas.width ||
+      sy - front > canvas.height
+    ) {
       continue;
     }
     const thickness = Math.max(3, front * 0.13);
@@ -749,11 +770,7 @@ const BLAST_LIFE = 42;
 // Event flashes: supernova blast waves and star-birth glints. Duration
 // and brightness are render exaggerations of instantaneous events -
 // nothing here is sim state.
-function drawTransients(
-  s: State,
-  toCx: (x: number) => number,
-  toCy: (y: number) => number,
-) {
+function drawTransients(s: State, toCx: (x: number) => number, toCy: (y: number) => number) {
   const t = s.lastTransients;
   if (!t || t.length === 0) return;
   const { ctx, scale } = s;
@@ -861,11 +878,7 @@ function classColor(ci: number): [number, number, number] {
 // are bare points of their class color; the bright minority get a tight
 // glow; only the rare giants (top of the luminosity range) earn
 // diffraction spikes.
-function drawStars(
-  s: State,
-  toCx: (x: number) => number,
-  toCy: (y: number) => number,
-) {
+function drawStars(s: State, toCx: (x: number) => number, toCy: (y: number) => number) {
   const stars = s.lastStars;
   if (!stars || stars.length === 0) return;
   const { ctx, size } = s;
@@ -879,8 +892,7 @@ function drawStars(
   for (let i = 0; i < stars.length; i += 4) {
     // Radial fade into the halo; deep-halo stars do not render.
     const rad = Math.hypot(stars[i] - center, stars[i + 1] - center);
-    const fade =
-      rad <= softR ? 1 : Math.max(0, 1 - (rad / softR - 1) / (FADE_END - 1));
+    const fade = radialFade(rad, softR);
     if (fade <= 0.02) continue;
     const px = toCx(stars[i] - 0.5);
     const py = toCy(stars[i + 1] - 0.5);
@@ -888,28 +900,28 @@ function drawStars(
     // usable brightness scale.
     const b = Math.pow(Math.min(stars[i + 2], maxLum) / maxLum, 0.25);
     const [cr, cg, cb] = classColor(stars[i + 3]);
-    const core = 0.4 + 1.7 * b;
-    const alpha = (0.3 + 0.7 * b) * fade;
-    if (b > 0.62) {
+    const core = 0.38 + 1.42 * b;
+    const alpha = (0.3 + 0.64 * b) * fade;
+    if (b > 0.82) {
       // Giants: diffraction spikes plus a tight glow.
-      const spike = core * (2.0 + 5.0 * b);
-      ctx.strokeStyle = `rgba(${cr},${cg},${cb},${(0.5 * fade).toFixed(3)})`;
-      ctx.lineWidth = 0.7;
+      const spike = core * (1.8 + 3.2 * b);
+      ctx.strokeStyle = `rgba(${cr},${cg},${cb},${(0.36 * fade).toFixed(3)})`;
+      ctx.lineWidth = 0.55;
       ctx.beginPath();
       ctx.moveTo(px - spike, py);
       ctx.lineTo(px + spike, py);
       ctx.moveTo(px, py - spike);
       ctx.lineTo(px, py + spike);
       ctx.stroke();
-      ctx.fillStyle = `rgba(${cr},${cg},${cb},${(0.16 * fade).toFixed(3)})`;
+      ctx.fillStyle = `rgba(${cr},${cg},${cb},${(0.11 * fade).toFixed(3)})`;
       ctx.beginPath();
-      ctx.arc(px, py, core * 2.4, 0, Math.PI * 2);
+      ctx.arc(px, py, core * 2.0, 0, Math.PI * 2);
       ctx.fill();
     } else if (b > 0.45) {
       // Mid-bright: a faint tight glow, no spikes.
-      ctx.fillStyle = `rgba(${cr},${cg},${cb},${(0.12 * fade).toFixed(3)})`;
+      ctx.fillStyle = `rgba(${cr},${cg},${cb},${(0.08 * fade).toFixed(3)})`;
       ctx.beginPath();
-      ctx.arc(px, py, core * 1.9, 0, Math.PI * 2);
+      ctx.arc(px, py, core * 1.65, 0, Math.PI * 2);
       ctx.fill();
     }
     ctx.globalAlpha = alpha;
