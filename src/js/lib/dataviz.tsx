@@ -19,7 +19,7 @@ const FRAME_RATE_SCALE: Record<galaxy.Scenario, number> = {
 
 // Lead the calibrated stellar frame so gas crossing star-forming regions
 // reads clearly at normal playback speed.
-const FRAME_RATE_PRESENTATION_MULTIPLIER = 8;
+const FRAME_RATE_PRESENTATION_MULTIPLIER = 16;
 
 // Radial render fade starts inside the nominal disk and reaches black well
 // before the canvas. This turns the finite simulation domain into a broad
