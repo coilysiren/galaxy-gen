@@ -10,7 +10,11 @@ const wasm = import("galaxy_gen_backend/galaxy_gen_backend");
 /// this value anyway.
 const DT = 0.5;
 
-const DEFAULT_GALAXY_SIZE = 250;
+/// 500x500 = 250k cells. Raised from 250 once the renderer stopped
+/// scaling its per-frame work with the grid: gas is composited per
+/// screen-space block rather than per cell, so a finer sim costs the
+/// canvas almost nothing. See docs/perf-rewrite.md.
+const DEFAULT_GALAXY_SIZE = 500;
 /// Fixed seed-mass intensity. Was the ?mass= URL knob; retired.
 const SEED_MASS = 25;
 
@@ -744,11 +748,15 @@ export function Interface() {
                     </tr>
                     <tr>
                       <td>tick ms</td>
-                      <td className="text-right">{tickMs.toFixed(1)}</td>
+                      <td className="text-right" data-testid="stat-tick-ms">
+                        {tickMs.toFixed(1)}
+                      </td>
                     </tr>
                     <tr>
                       <td>fps</td>
-                      <td className="text-right">{fps}</td>
+                      <td className="text-right" data-testid="stat-fps">
+                        {fps}
+                      </td>
                     </tr>
                   </>
                 )}

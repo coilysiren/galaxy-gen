@@ -1,5 +1,9 @@
 import { test, expect, Page } from "@playwright/test";
 
+// Mirrors DEFAULT_GALAXY_SIZE in src/js/lib/application.tsx. Kept as one
+// constant so changing the shipped default is a single edit here too.
+const DEFAULT_SIZE = 500;
+
 async function waitForWasm(page: Page) {
   await expect(page.getByTestId("app")).toHaveAttribute("data-wasm-ready", "true", {
     timeout: 30_000,
@@ -39,7 +43,7 @@ test.describe("Galaxy Generator", () => {
 
   test("renders the UI shell with controls", async ({ page }) => {
     await expect(page.getByRole("heading", { name: "Galaxy Generator" })).toBeVisible();
-    await expect(page.getByTestId("input-galaxy-size")).toHaveValue("250");
+    await expect(page.getByTestId("input-galaxy-size")).toHaveValue(String(DEFAULT_SIZE));
     await expect(page.getByTestId("stat-ticks")).toHaveText("0");
     await expect(page.locator("table tbody tr")).toHaveCount(7);
     await expect(page.getByTestId("stat-sn")).toHaveText("0");
@@ -80,7 +84,7 @@ test.describe("Galaxy Generator", () => {
       return { cells: frontend.cells().length, nonzero };
     });
     expect(stats).not.toBeNull();
-    expect(stats!.cells).toBe(250 * 250);
+    expect(stats!.cells).toBe(DEFAULT_SIZE * DEFAULT_SIZE);
     expect(stats!.nonzero).toBeGreaterThan(0);
   });
 
@@ -95,7 +99,7 @@ test.describe("Galaxy Generator", () => {
     const frameAngle = Number(await host.getAttribute("data-frame-angle"));
     const frameRate = Number(await host.getAttribute("data-frame-rate"));
     expect(frameAngle).toBeGreaterThan(0);
-    expect(frameRate).toBeCloseTo((16 * 0.0085) / Math.sqrt(250), 8);
+    expect(frameRate).toBeCloseTo((16 * 0.0085) / Math.sqrt(DEFAULT_SIZE), 8);
     // Stepping stamps the tick into the URL - the moment's address.
     expect(new URL(page.url()).searchParams.get("t")).toBe("2");
   });
@@ -281,7 +285,7 @@ test.describe("Galaxy Generator", () => {
     test.skip(!hasAdapter, "WebGPU adapter not available in this Chromium");
 
     // Small grid: the WGSL kernel is O(N²) per tick and 60 ticks at the
-    // 250 default blows the test timeout.
+    // shipped default blows the test timeout.
     await page.getByTestId("input-galaxy-size").fill("50");
     await page.getByTestId("btn-init").click();
 
@@ -569,7 +573,7 @@ test.describe("Galaxy Generator", () => {
         return Array.from(fe.massArray() as Uint16Array);
       });
       frameRates[mode] = Number(await page.locator("#dataviz").getAttribute("data-frame-rate"));
-      expect(snapshots[mode].length).toBe(250 * 250);
+      expect(snapshots[mode].length).toBe(DEFAULT_SIZE * DEFAULT_SIZE);
     }
 
     // Compare by diff count; nonzero-cell ordering is too strict.

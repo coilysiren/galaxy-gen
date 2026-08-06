@@ -1,11 +1,9 @@
 import { test, expect, Page } from "@playwright/test";
 
 async function waitForWasm(page: Page) {
-  await expect(page.getByTestId("app")).toHaveAttribute(
-    "data-wasm-ready",
-    "true",
-    { timeout: 30_000 }
-  );
+  await expect(page.getByTestId("app")).toHaveAttribute("data-wasm-ready", "true", {
+    timeout: 30_000,
+  });
 }
 
 // Browser-side perf probe. Logs only; no pass/fail.
@@ -20,21 +18,24 @@ test.describe("perf bench", () => {
       await page.getByTestId("input-galaxy-size").fill(String(size));
       await page.getByTestId("btn-init").click();
 
-      const result = await page.evaluate((iters) => {
-        const fe: any = (window as any).__galaxyGen.frontend;
-        // warmup
-        fe.tick(0.01);
-        const samples: number[] = [];
-        for (let i = 0; i < iters; i++) {
-          const t0 = performance.now();
+      const result = await page.evaluate(
+        (iters) => {
+          const fe: any = (window as any).__galaxyGen.frontend;
+          // warmup
           fe.tick(0.01);
-          samples.push(performance.now() - t0);
-        }
-        samples.sort((a, b) => a - b);
-        const mean = samples.reduce((a, b) => a + b, 0) / samples.length;
-        const median = samples[Math.floor(samples.length / 2)];
-        return { mean, median, min: samples[0], max: samples[samples.length - 1] };
-      }, size <= 75 ? 20 : size <= 150 ? 5 : 3);
+          const samples: number[] = [];
+          for (let i = 0; i < iters; i++) {
+            const t0 = performance.now();
+            fe.tick(0.01);
+            samples.push(performance.now() - t0);
+          }
+          samples.sort((a, b) => a - b);
+          const mean = samples.reduce((a, b) => a + b, 0) / samples.length;
+          const median = samples[Math.floor(samples.length / 2)];
+          return { mean, median, min: samples[0], max: samples[samples.length - 1] };
+        },
+        size <= 75 ? 20 : size <= 150 ? 5 : 3
+      );
 
       console.log(
         `TICK  size=${size.toString().padStart(3)}  ` +
@@ -44,22 +45,25 @@ test.describe("perf bench", () => {
 
       // Now measure tick + canvas render combined — this is what the
       // `run` loop actually does per frame.
-      const render = await page.evaluate((iters) => {
-        const fe: any = (window as any).__galaxyGen.frontend;
-        // Pull live dataviz module via the well-known symbol.
-        const dataviz: any = (window as any).__galaxyGen.dataviz;
-        const samples: number[] = [];
-        for (let i = 0; i < iters; i++) {
-          const t0 = performance.now();
-          fe.tick(0.5);
-          if (dataviz && dataviz.updateData) dataviz.updateData(fe);
-          samples.push(performance.now() - t0);
-        }
-        samples.sort((a, b) => a - b);
-        const mean = samples.reduce((a, b) => a + b, 0) / samples.length;
-        const median = samples[Math.floor(samples.length / 2)];
-        return { mean, median };
-      }, size <= 75 ? 20 : size <= 150 ? 5 : 3);
+      const render = await page.evaluate(
+        (iters) => {
+          const fe: any = (window as any).__galaxyGen.frontend;
+          // Pull live dataviz module via the well-known symbol.
+          const dataviz: any = (window as any).__galaxyGen.dataviz;
+          const samples: number[] = [];
+          for (let i = 0; i < iters; i++) {
+            const t0 = performance.now();
+            fe.tick(0.5);
+            if (dataviz && dataviz.updateData) dataviz.updateData(fe);
+            samples.push(performance.now() - t0);
+          }
+          samples.sort((a, b) => a - b);
+          const mean = samples.reduce((a, b) => a + b, 0) / samples.length;
+          const median = samples[Math.floor(samples.length / 2)];
+          return { mean, median };
+        },
+        size <= 75 ? 20 : size <= 150 ? 5 : 3
+      );
 
       console.log(
         `FRAME size=${size.toString().padStart(3)}  ` +

@@ -56,6 +56,12 @@ commands:
   test-e2e:
     run: bash scripts/ward-command.sh test-e2e
     description: Run Playwright end-to-end tests.
+  perf-profile:
+    run: bash scripts/ward-command.sh perf-profile
+    description: Attribute one native tick to each process in the registry. Takes size and tick count.
+  test-perf:
+    run: bash scripts/ward-command.sh test-perf
+    description: Run the render-frame and live frame-pacing probes against system Chrome on real GPU.
   test-e2e-ui:
     run: bash scripts/ward-command.sh test-e2e-ui
     description: Run Playwright tests in UI mode.

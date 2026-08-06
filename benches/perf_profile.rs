@@ -14,9 +14,8 @@ use galaxy_gen_backend::galaxy::Galaxy;
 use galaxy_gen_backend::process;
 use std::time::{Duration, Instant};
 
-/// Warm ticks discarded before timing. The ticks right after seeding run
-/// with an empty star population and a cold event queue, so they do not
-/// represent a run in progress.
+/// Warm ticks discarded before timing: right after seeding there are no
+/// stars and no queued events, which is not a run in progress.
 const WARMUP_TICKS: u32 = 8;
 
 const DT: f32 = 0.5;

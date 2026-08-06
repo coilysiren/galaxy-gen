@@ -32,7 +32,7 @@ getrandom = { version = "^0.4", features = ["wasm_js"] }
 rand = "^0.10"
 
 [profile.release]
-opt-level = "s"
+opt-level = 3
 lto = true
 codegen-units = 1
 

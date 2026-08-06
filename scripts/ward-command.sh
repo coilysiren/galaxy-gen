@@ -85,6 +85,18 @@ case "${1:-}" in
   test-e2e)
     test_e2e
     ;;
+  perf-profile)
+    shift
+    cargo run --release --bin perf_profile -- "$@"
+    ;;
+  test-perf)
+    # Real GPU, not the default config's SwiftShader: Canvas2D cost
+    # attribution is meaningless under software rasterization.
+    build_wasm
+    npm install ./pkg --no-save
+    npx playwright test --config playwright.gpu.config.ts --headed --workers=1 \
+      render-perf runtime-perf
+    ;;
   test-e2e-ui)
     build_wasm
     npm install ./pkg --no-save

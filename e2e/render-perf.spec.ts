@@ -1,14 +1,10 @@
 import { test, expect, Page } from "@playwright/test";
 
-// Render-only probe. `perf.spec.ts` times tick+render together, which was
-// the right shape when physics ran on the main thread. Physics now lives
-// in the worker, so the number that decides whether the UI stutters is
-// the canvas frame on its own.
-//
-// Warp first: an unwarped galaxy has no stars, no transients and no
-// metallicity, so it renders a fraction of the real workload.
+// Render-only probe: physics is in the worker, so the canvas frame on
+// its own is what decides whether the UI stutters. See docs/perf-rewrite.md.
 
-const WARP_TICKS = 300;
+// Warp first: a young galaxy has no stars or transients to draw.
+const WARP_TICKS = 1000;
 const FIXED_SEED = 424242;
 
 async function waitForWasm(page: Page) {

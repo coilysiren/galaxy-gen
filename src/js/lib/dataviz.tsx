@@ -39,10 +39,16 @@ const VIEW_SPAN = 1.42;
 // seam. Einstein radius as a fraction of world size:
 const LENS_THETA_E_FRAC = 0.035;
 
-// Sentinels in the cached lens displacement map: outside the lens region,
-// and inside the shadow. Both are invalid pixel offsets.
-const LENS_UNTOUCHED = -1;
-const LENS_SHADOW = -2;
+// The lens warp is approximated by concentric annuli, each a uniformly
+// scaled self-blit. Roughly one ring per 2.5 device px keeps the radial
+// stepping below what the eye resolves; the bounds stop a tiny lens from
+// paying for rings it cannot show and a huge one from issuing hundreds.
+const LENS_RING_PX = 2.5;
+const LENS_MIN_RINGS = 16;
+const LENS_MAX_RINGS = 72;
+// Near the Einstein radius the analytic magnification diverges. The clamp
+// keeps a ring from sampling a single source pixel across its whole band.
+const LENS_MAX_MAGNIFICATION = 8;
 
 // Soft nebular sprites for gas, one per color bucket, pre-rendered once.
 // drawImage of a gradient sprite is far cheaper than per-cell gradients
@@ -185,6 +191,13 @@ interface Camera {
 // independent of grid size: the sim gets finer, the sprite field does not.
 // At size 250 on a typical viewport this resolves to 1 (a block per cell,
 // i.e. exactly the pre-aggregation renderer); at 500 it resolves to 2.
+//
+// A side effect worth stating: the gas field now looks the same at any
+// grid size. It did not before. Brightness comes from overlapping sprites
+// accumulating, so doubling the grid doubled the sprite count over the
+// same screen area and quietly brightened the whole galaxy - grid
+// resolution was acting as an exposure control. Blocks decouple the two,
+// so a bigger sim now means more detail at the same exposure.
 const GAS_TARGET_SPRITE_SPACING_PX = 2.5;
 
 /// Per-frame gas block scratch. Every array is indexed by block and
@@ -235,10 +248,8 @@ interface State {
   /// dimension; wide screens gain space and halo at the sides.
   cw: number;
   ch: number;
-  /// Small scratch canvas for the lens: pixel read-back happens here so
-  /// the main canvas never gets a willReadFrequently (CPU) context -
-  /// that flag silently software-renders ALL compositing, which tripled
-  /// frame times when the lens first landed.
+  /// Scratch canvas holding a frozen copy of the lens region, so the
+  /// ring blits all sample the same source instead of each other.
   lensCanvas: HTMLCanvasElement;
   lensCtx: CanvasRenderingContext2D;
   dpr: number;
@@ -263,9 +274,9 @@ interface State {
   lastQuasarPulsePeriod: number;
   lastQuasarAxis: number;
   gas: GasBlocks | null;
-  /// Lens source-offset map, rebuilt only when the lens geometry moves.
-  lensMap: Int32Array | null;
-  lensMapKey: string;
+  /// Landing buffers for the per-frame snapshot copies, reused across
+  /// frames. See `copyInto`.
+  snapshotPool: Record<string, Uint16Array | Float32Array>;
   cleanup: () => void;
 }
 
@@ -529,7 +540,9 @@ export function initViz(
   const lensCanvas = document.createElement("canvas");
   lensCanvas.width = 8;
   lensCanvas.height = 8;
-  const lensCtx = lensCanvas.getContext("2d", { willReadFrequently: true })!;
+  // No `willReadFrequently`: the lens no longer reads pixels back, and
+  // that flag pins the canvas to CPU rasterization.
+  const lensCtx = lensCanvas.getContext("2d")!;
 
   state = {
     host,
@@ -563,8 +576,7 @@ export function initViz(
     lastQuasarPulsePeriod: 1,
     lastQuasarAxis: 0,
     gas: null,
-    lensMap: null,
-    lensMapKey: "",
+    snapshotPool: {},
     cleanup,
   };
   publishView(state);
@@ -574,20 +586,43 @@ export function initData(galaxyFrontend: galaxy.Frontend) {
   updateData(galaxyFrontend, 0);
 }
 
+/// Copy `src` into a persistent landing buffer and hand back a view of
+/// exactly `src.length`. The buffer only ever grows, so star and
+/// transient arrays that change length frame to frame still avoid
+/// reallocating. Callers keep reading `.length`, so the view matters.
+function copyInto<T extends Uint16Array | Float32Array>(
+  s: State,
+  key: string,
+  src: T,
+  Ctor: { new (n: number): T }
+): T {
+  let buf = s.snapshotPool[key] as T | undefined;
+  if (!buf || buf.length < src.length || !(buf instanceof Ctor)) {
+    buf = new Ctor(Math.max(src.length, 1));
+    s.snapshotPool[key] = buf;
+  }
+  buf.set(src);
+  return buf.length === src.length ? buf : (buf.subarray(0, src.length) as T);
+}
+
 export function updateData(galaxyFrontend: galaxy.Frontend, simTick?: number) {
   if (!state) return;
   if (simTick != null) state.simTick = simTick;
   const mass = galaxyFrontend.massArray();
-  // Copy so zoom/pan interactions after the sim stops still have data
-  // to redraw from.
+  // Copy so zoom/pan interactions after the sim stops still have data to
+  // redraw from. The copies land in buffers that persist across frames:
+  // `slice()` here allocated seven arrays every snapshot - several MB per
+  // second of pure garbage at size 500 - and the resulting major
+  // collections were long enough to show up as a visible hitch.
   const t0 = performance.now();
-  state.lastMass = mass.slice();
-  state.lastFracX = galaxyFrontend.fracXArray().slice();
-  state.lastFracY = galaxyFrontend.fracYArray().slice();
-  state.lastStars = galaxyFrontend.starRenderArray().slice();
-  state.lastTransients = galaxyFrontend.transientsArray().slice();
-  state.lastRadiation = galaxyFrontend.radiationArray().slice();
-  state.lastMetallicity = galaxyFrontend.metallicityArray().slice();
+  const s = state;
+  s.lastMass = copyInto(s, "mass", mass, Uint16Array);
+  s.lastFracX = copyInto(s, "fracX", galaxyFrontend.fracXArray(), Float32Array);
+  s.lastFracY = copyInto(s, "fracY", galaxyFrontend.fracYArray(), Float32Array);
+  s.lastStars = copyInto(s, "stars", galaxyFrontend.starRenderArray(), Float32Array);
+  s.lastTransients = copyInto(s, "transients", galaxyFrontend.transientsArray(), Float32Array);
+  s.lastRadiation = copyInto(s, "radiation", galaxyFrontend.radiationArray(), Float32Array);
+  s.lastMetallicity = copyInto(s, "metallicity", galaxyFrontend.metallicityArray(), Float32Array);
   frameTimings.snapshotCopy = performance.now() - t0;
   state.lastLensScale = galaxyFrontend.lensScale();
   state.lastStellarHaloMass = galaxyFrontend.stellarHaloMass();
@@ -1133,97 +1168,71 @@ function applyBlackHoleLens(s: State) {
   if (x1 <= x0 || y1 <= y0) return;
   const w = x1 - x0;
   const h = y1 - y0;
-  // Blit the lens region to the scratch canvas and read back from
-  // there - the small readback is cheap and the main canvas stays GPU.
+  // Snapshot the lens region GPU-to-GPU. Every ring below samples this
+  // frozen copy, so a ring never picks up pixels an earlier ring wrote.
   const { lensCanvas, lensCtx } = s;
   if (lensCanvas.width < w || lensCanvas.height < h) {
     lensCanvas.width = w;
     lensCanvas.height = h;
   }
-  lensCtx.clearRect(0, 0, w, h);
+  lensCtx.clearRect(0, 0, lensCanvas.width, lensCanvas.height);
   lensCtx.drawImage(canvas, x0, y0, w, h, 0, 0, w, h);
-  const img = lensCtx.getImageData(0, 0, w, h);
-  const data = img.data;
-  const src = new Uint8ClampedArray(data);
 
-  // The deflection depends only on the lens geometry, not on what is
-  // under it, so the whole (destination -> source) mapping is rebuilt
-  // only when that geometry moves. `te` is quantized because the hole's
-  // mass drifts continuously and a sub-quarter-pixel change in the
-  // Einstein radius is not visible - without the quantization the cache
-  // would miss on every single frame.
-  const key = `${w}x${h}:${Math.round(bx - x0)}:${Math.round(by - y0)}:${(te * 4) | 0}:${R | 0}`;
-  if (s.lensMapKey !== key || !s.lensMap || s.lensMap.length !== w * h) {
-    const map = new Int32Array(w * h);
-    const te2 = te * te;
-    const shadowR = te * 0.3;
-    const taperStart = R * 0.75;
-    const R2 = R * R;
-    for (let py = 0; py < h; py++) {
-      const dy = py + y0 - by;
-      const rowBase = py * w;
-      // Only the horizontal span inside the lens radius can map at all.
-      const span = R2 - dy * dy;
-      const halfSpan = span > 0 ? Math.sqrt(span) : -1;
-      if (halfSpan < 0) {
-        map.fill(LENS_UNTOUCHED, rowBase, rowBase + w);
-        continue;
-      }
-      const pxLo = Math.max(0, Math.ceil(bx - halfSpan - x0));
-      const pxHi = Math.min(w - 1, Math.floor(bx + halfSpan - x0));
-      map.fill(LENS_UNTOUCHED, rowBase, rowBase + w);
-      for (let px = pxLo; px <= pxHi; px++) {
-        const dx = px + x0 - bx;
-        const r2 = dx * dx + dy * dy;
-        if (r2 >= R2) continue;
-        const r = Math.sqrt(r2) || 1e-3;
-        if (r < shadowR) {
-          map[rowBase + px] = LENS_SHADOW;
-          continue;
-        }
-        let f = (r - te2 / r) / r;
-        if (r > taperStart) {
-          const t = (r - taperStart) / (R - taperStart);
-          f = f + (1 - f) * t * t * (3 - 2 * t);
-        }
-        let sx = Math.round(bx + dx * f) - x0;
-        let sy = Math.round(by + dy * f) - y0;
-        if (sx < 0) sx = 0;
-        else if (sx >= w) sx = w - 1;
-        if (sy < 0) sy = 0;
-        else if (sy >= h) sy = h - 1;
-        map[rowBase + px] = (sy * w + sx) * 4;
-      }
-    }
-    s.lensMap = map;
-    s.lensMapKey = key;
-  }
+  // The deflection r_src = r - thetaE^2 / r is purely radial, so the warp
+  // is a stack of annuli each uniformly scaled about the hole. Drawing
+  // them as clipped self-blits keeps the whole effect on the GPU: the
+  // per-pixel version had to read the framebuffer back every frame, and
+  // that stall alone was most of the frame at any grid size.
+  const shadowR = te * 0.3;
+  const taperStart = R * 0.75;
+  const rings = Math.max(LENS_MIN_RINGS, Math.min(LENS_MAX_RINGS, Math.round(R / LENS_RING_PX)));
 
-  // Per-frame work is now the gather alone.
-  const map = s.lensMap;
-  for (let i = 0, o = 0; i < map.length; i++, o += 4) {
-    const so = map[i];
-    if (so === LENS_UNTOUCHED) continue;
-    if (so === LENS_SHADOW) {
-      data[o] = 0;
-      data[o + 1] = 0;
-      data[o + 2] = 4;
-      data[o + 3] = 255;
-      continue;
-    }
-    data[o] = src[so];
-    data[o + 1] = src[so + 1];
-    data[o + 2] = src[so + 2];
-    data[o + 3] = src[so + 3];
-  }
-  lensCtx.putImageData(img, 0, 0);
   ctx.save();
   ctx.setTransform(1, 0, 0, 1, 0, 0);
-  // Clear before drawing back: the scratch holds the region's exact
-  // pixels, and compositing them source-over onto the originals
-  // double-blends every semi-transparent pixel into a visible square.
+  // Clear first: these are the region's own pixels, and compositing them
+  // source-over onto the originals double-blends every semi-transparent
+  // pixel into a visible square. Then lay the untouched snapshot back
+  // down - the rings only cover the disc of radius R, so without this the
+  // square's corners stay cleared and the lens shows as a dark box.
   ctx.clearRect(x0, y0, w, h);
   ctx.drawImage(lensCanvas, 0, 0, w, h, x0, y0, w, h);
+  for (let i = 0; i < rings; i++) {
+    const r0 = (R * i) / rings;
+    const r1 = (R * (i + 1)) / rings;
+    const rm = (r0 + r1) * 0.5;
+    if (r1 <= shadowR) continue;
+    let f = (rm - (te * te) / rm) / rm;
+    if (rm > taperStart) {
+      const t = (rm - taperStart) / (R - taperStart);
+      f = f + (1 - f) * t * t * (3 - 2 * t);
+    }
+    // A destination radius r shows the source at r*f, so the blit is
+    // scaled by 1/f. Negative f is the inverted image inside the
+    // Einstein radius: a negative scale mirrors through the center,
+    // which is exactly that inversion.
+    let k = f === 0 ? LENS_MAX_MAGNIFICATION : 1 / f;
+    if (k > LENS_MAX_MAGNIFICATION) k = LENS_MAX_MAGNIFICATION;
+    else if (k < -LENS_MAX_MAGNIFICATION) k = -LENS_MAX_MAGNIFICATION;
+    ctx.save();
+    ctx.beginPath();
+    // Overlap adjacent rings by half a pixel so antialiased clip edges
+    // do not leave hairline seams between them.
+    ctx.arc(bx, by, r1 + 0.5, 0, TAU);
+    if (r0 > 0) ctx.arc(bx, by, Math.max(0, r0 - 0.5), 0, TAU, true);
+    ctx.clip();
+    ctx.translate(bx, by);
+    ctx.scale(k, k);
+    ctx.translate(-bx, -by);
+    ctx.drawImage(lensCanvas, 0, 0, w, h, x0, y0, w, h);
+    ctx.restore();
+  }
+  // Shadow: the hole itself, drawn over the innermost rings.
+  if (shadowR > 0) {
+    ctx.fillStyle = "rgb(0,0,4)";
+    ctx.beginPath();
+    ctx.arc(bx, by, shadowR, 0, TAU);
+    ctx.fill();
+  }
   ctx.restore();
 
   // Photon ring hugging the shadow edge.

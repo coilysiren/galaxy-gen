@@ -12,14 +12,14 @@ All measurements are **WASM tick time in Chromium** (Playwright). `frame`
 column is `tick + canvas render` combined, which is what the live `run`
 loop actually spends per frame.
 
-| size    | cells   | **original tick** | direct-O(A²) tick | **Barnes-Hut tick** | frame w/ canvas |
-|--------:|--------:|-----------:|---------:|-------------------:|----------------:|
-| 20×20   |     400 | 7.3 ms     | 0.6 ms   | 0.6 ms             | 0.09 ms         |
-| 50×50   |   2,500 | 243 ms     | 6.5 ms   | **1.9 ms**         | 1.35 ms         |
-| 75×75   |   5,625 | 1,238 ms   | 34 ms    | **3.6 ms**         | 2.3 ms          |
-| 100×100 |  10,000 | 3,808 ms   | 97 ms    | **6.4 ms**         | 8 ms            |
-| 150×150 |  22,500 | (DNF)      | ~280 ms  | **16 ms**          | 17 ms           |
-| 250×250 |  62,500 | (DNF)      | >3,000 ms| **44 ms**          | **54 ms**       |
+|    size |  cells | **original tick** | direct-O(A²) tick | **Barnes-Hut tick** | frame w/ canvas |
+| ------: | -----: | ----------------: | ----------------: | ------------------: | --------------: |
+|   20×20 |    400 |            7.3 ms |            0.6 ms |              0.6 ms |         0.09 ms |
+|   50×50 |  2,500 |            243 ms |            6.5 ms |          **1.9 ms** |         1.35 ms |
+|   75×75 |  5,625 |          1,238 ms |             34 ms |          **3.6 ms** |          2.3 ms |
+| 100×100 | 10,000 |          3,808 ms |             97 ms |          **6.4 ms** |            8 ms |
+| 150×150 | 22,500 |             (DNF) |           ~280 ms |           **16 ms** |           17 ms |
+| 250×250 | 62,500 |             (DNF) |         >3,000 ms |           **44 ms** |       **54 ms** |
 
 Translating the 250×250 column into frame-rate: **<0.3 FPS → ~18 FPS**,
 or roughly 55× faster. At smaller sizes the cumulative wins are even
@@ -36,7 +36,7 @@ Every change was measured twice: once in native Rust, once in the
 browser. Two benches got added to the repo:
 
 - `benches/tick_bench.rs` — native Rust via `cargo run --release --bin
-  tick_bench`. Six grid sizes (20 → 250) × several ticks each, reports
+tick_bench`. Six grid sizes (20 → 250) × several ticks each, reports
   per-tick mean.
 - `e2e/perf.spec.ts` — Playwright harness that loads the dev server,
   boots WASM, and calls `fe.tick(0.5)` 3-20 times per size. Also
@@ -58,10 +58,10 @@ Chasing the measurement saved several dead ends.
 Five commits drove the perf rewrite. Every diff in this document is
 extracted from one of these:
 
-| sha     | title                                                               |
-|---------|---------------------------------------------------------------------|
-| 284aab3 | Fix WASM table-grow error by removing unused specs dep              |
-| 4d3b6d5 | Rewrite simulation for 25-40x tick speedup                          |
+| sha     | title                                                                |
+| ------- | -------------------------------------------------------------------- |
+| 284aab3 | Fix WASM table-grow error by removing unused specs dep               |
+| 4d3b6d5 | Rewrite simulation for 25-40x tick speedup                           |
 | 22a83bc | Make the sim visibly move: velocity integration + sub-grid fractions |
 | 3199c27 | Switch dataviz SVG → canvas; bump default dt to 0.5                  |
 | 623b858 | Barnes-Hut quadtree: 250x250 from <1 FPS to ~18 FPS                  |
@@ -131,11 +131,11 @@ diff --git a/Cargo.toml b/Cargo.toml
  authors = ["Kai Siren <coilysiren@gmail.com>"]
  license = "AGPL"
 +edition = "2021"
- 
+
  [lib]
  crate-type = ["cdylib", "rlib"]
 @@ -14,14 +15,11 @@ path = "src/rust/lib.rs"
- 
+
  [dependencies]
  console_error_panic_hook = "^0.1"
 -specs = "^0.20"
@@ -143,7 +143,7 @@ diff --git a/Cargo.toml b/Cargo.toml
  wasm-bindgen = "^0.2"
  getrandom = { version = "^0.3", features = ["wasm_js"] }
  rand = "^0.9"
- 
+
 -[dev-dependencies]
 -cargo-watch = "^8"
 -
@@ -392,7 +392,7 @@ because its fallback path was already slower. But the table-lookup
 approach also prevents branch-prediction fights around the sqrt NaN
 path and lets the optimizer keep the inner loop tight.
 
-For what it's worth, I tried `r2.powf(-1.5)` first — was *slower* than
+For what it's worth, I tried `r2.powf(-1.5)` first — was _slower_ than
 `1.0 / sqrt()` cubed, because `powf` is a transcendental library call.
 Table lookup beats both.
 
@@ -408,7 +408,7 @@ Newton's third law says gravity on `i` from `j` equals `-` gravity on
 `j` from `i`. If you compute each pair once and write `+Δa` to `i` and
 `-Δa` to `j`, you halve the math. Textbook N-body optimization.
 
-### The insight (what *didn't* work)
+### The insight (what _didn't_ work)
 
 I implemented the symmetric version:
 
@@ -434,7 +434,7 @@ for i in 0..n {
 ```
 
 On native Rust: slight win. On WASM: **slower than the non-symmetric
-version**. The `acc_x[j] -= …` writes are *scatter writes* — the
+version**. The `acc_x[j] -= …` writes are _scatter writes_ — the
 destination address depends on a runtime value. The WASM JIT can't
 prove these don't alias `acc_x[i+1]`, so it forces a full memory
 round-trip on every write. The non-symmetric version keeps the
@@ -694,8 +694,7 @@ export function updateData(galaxyFrontend: galaxy.Frontend) {
   const mass = galaxyFrontend.massArray();
 
   let maxMass = 1;
-  for (let i = 0; i < mass.length; i++)
-    if (mass[i] > maxMass) maxMass = mass[i];
+  for (let i = 0; i < mass.length; i++) if (mass[i] > maxMass) maxMass = mass[i];
   const invLogMax = 1 / Math.log(maxMass + 1);
 
   ctx.clearRect(0, 0, CANVAS, CANVAS);
@@ -704,7 +703,9 @@ export function updateData(galaxyFrontend: galaxy.Frontend) {
   // the rasterizer), bulk fills are cheap. Group every cell into a
   // bucket and do one fillStyle + one fill() per bucket.
   const buckets = 6;
-  const bucketColors = [/* precomputed rgb() strings */];
+  const bucketColors = [
+    /* precomputed rgb() strings */
+  ];
 
   for (let b = 0; b < buckets; b++) {
     ctx.fillStyle = bucketColors[b];
@@ -723,7 +724,7 @@ export function updateData(galaxyFrontend: galaxy.Frontend) {
       ctx.moveTo(cx + r, cy);
       ctx.arc(cx, cy, r, 0, Math.PI * 2);
     }
-    ctx.fill();   // ← one fill call for all cells in this bucket
+    ctx.fill(); // ← one fill call for all cells in this bucket
   }
 }
 ```
@@ -740,7 +741,7 @@ so those assertions keep passing unchanged:
 // Keep a hidden SVG peer so existing tests asserting `#dataviz svg`
 // and circle counts still pass.
 const svg = document.createElementNS(svgNs, "svg");
-svg.style.width = "0";   // invisible
+svg.style.width = "0"; // invisible
 svg.style.height = "0";
 svg.style.position = "absolute";
 // (populate with empty <circle>s for the count assertion)
@@ -946,11 +947,11 @@ Notes on the implementation:
 
 ### The result
 
-| size    | before BH     | with BH      | speedup |
-|--------:|--------------:|-------------:|--------:|
-|  2,500  |   6.5 ms      |   1.4 ms     |   5×    |
-| 10,000  |    78 ms      |   8.0 ms     |  10×    |
-| 22,500  |  ~280 ms est  |    17 ms     |  16×    |
+|       size |     before BH |   with BH |  speedup |
+| ---------: | ------------: | --------: | -------: |
+|      2,500 |        6.5 ms |    1.4 ms |       5× |
+|     10,000 |         78 ms |    8.0 ms |      10× |
+|     22,500 |   ~280 ms est |     17 ms |      16× |
 | **62,500** | **>3,000 ms** | **54 ms** | **~55×** |
 
 250×250 went from **<1 FPS to ~18 FPS**. Smaller sizes also benefited
@@ -1026,7 +1027,9 @@ a function component:
 export function Interface() {
   let wasmModule: any = null;
   let galaxyFrontend: galaxy.Frontend = null;
-  wasm.then((module) => { wasmModule = module; });
+  wasm.then((module) => {
+    wasmModule = module;
+  });
   // ...
 }
 ```
@@ -1160,3 +1163,174 @@ npx playwright test e2e/perf.spec.ts --reporter=line
 If you re-run these on a different machine, absolute numbers will shift
 but the ratios between sizes should hold. The shape of the curve is the
 interesting part.
+
+---
+
+# Part two — raising the default to 500x500
+
+The first pass made the **tick** fast. This one made the **frame** fast,
+which turned out to be a different problem with a different bottleneck.
+
+## The observation
+
+At 250x250 the sim ran but stuttered, and 500x500 was unusable. The
+obvious suspect was physics, and the obvious suspect was wrong.
+
+Physics had already moved into a Web Worker (the lever Part One left
+unpulled). So the worker could not stutter the UI no matter how slow it
+got - it could only make the sim evolve more slowly. Everything the
+viewer perceives as a hitch happens on the main thread, and the main
+thread was doing exactly one thing: drawing the canvas.
+
+Measured on Chrome with real GPU, seed 424242, at the sim's own tick cap
+of 30/s:
+
+| case       |  fps | p50 frame | p99 frame | janked frames |
+| ---------- | ---: | --------: | --------: | ------------: |
+| 250 fresh  | 39.0 |    32.0ms |    53.8ms |  94/234 (40%) |
+| 250 mature | 35.5 |    35.2ms |    51.4ms | 122/213 (57%) |
+| 500 fresh  | 12.8 |    77.5ms |    99.2ms |  77/77 (100%) |
+| 500 mature | 16.0 |    62.5ms |    71.8ms |  96/96 (100%) |
+
+Every frame at 500 was a dropped frame. The worker's tick, meanwhile, sat
+at 16-38ms against a 33ms budget - not the thing to fix first.
+
+## Method note that changed the answer
+
+The Playwright config pins Chromium to SwiftShader so the WebGPU compute
+tests get a deterministic adapter. That also software-rasterizes every
+Canvas2D operation. Under SwiftShader cost tracks pixel fill area; on a
+real GPU it tracks draw calls and pipeline stalls. The two rank the
+render passes differently, and optimizing against the software profile
+sends you at the wrong pass.
+
+`playwright.gpu.config.ts` runs the system Chrome with hardware
+acceleration for exactly this reason. Two of the changes below only look
+worthwhile in one of the two profiles - the lens especially, which is
+nearly free in software and was 80% of the frame on real hardware.
+
+## Lever 1 — gas as screen-space blocks
+
+Three separate walks over all 250,000 cells (background gas, foreground
+gas, dust) each recomputed the same per-cell hash jitter, log density,
+radiation-field lookup and dust predicate.
+
+The deeper problem was that gas sprites never draw smaller than 7 CSS px
+while a cell at size 500 covers about 1 px. The renderer was stacking
+sprites into space already covered - paying a composite per cell for
+detail that could not appear on screen.
+
+Cells now fold into square blocks sized so sprite spacing stays near a
+constant number of _screen_ pixels regardless of grid size. One walk over
+cells and two over blocks replace the three full-grid walks, and every
+per-block value the three passes share is computed once. At 250 the block
+resolves to 1 and the renderer is bit-for-bit what it was.
+
+**A side effect worth knowing about:** the gas field now looks the same
+at every grid size. It did not before. Brightness comes from overlapping
+sprites accumulating, so doubling the grid doubled the sprite count over
+the same screen area and quietly brightened the whole galaxy - grid
+resolution was acting as an exposure control. A fresh 500 galaxy is
+therefore _dimmer_ than it used to be, and identical to a fresh 250 one.
+That is the intended behavior: size should buy detail, not exposure.
+
+Shock-front teal moved from "test every cell against every live front" to
+"stamp each front into its own annulus", which costs the shells' area
+instead of cells x fronts.
+
+## Lever 2 — the lens was a framebuffer readback
+
+The black-hole lens warped the finished frame with a per-pixel gather,
+which meant `getImageData` on the main canvas every frame. On a real GPU
+that is a full pipeline stall, and it measured **17ms of a 22ms frame at
+both grid sizes** - the one cost that did not care how big the sim was.
+
+Caching the displacement map changed nothing, which was the tell: the
+arithmetic was never the cost, the stall was.
+
+The deflection `r_src = r - thetaE^2 / r` is purely radial, so the warp
+is a stack of annuli each uniformly scaled about the hole. Drawing them
+as clipped self-blits off a frozen GPU-to-GPU snapshot keeps the whole
+effect on the GPU. Negative scale factors inside the Einstein radius
+mirror through the center, which is exactly the inverted image the
+per-pixel version produced. `applyShockShimmer` already used this
+technique; the lens just predated it.
+
+17.3ms -> 0.14ms, visually indistinguishable (slightly smoother, since
+ring blits sample bilinearly where the gather was nearest-neighbour).
+
+## Lever 3 — star discs batched by quantized color and alpha
+
+Each star drew `arc` + `fill` per layer with a freshly built
+`rgba(...)` string. A mature 500 galaxy resolves ~20,000 stars.
+
+Colors quantize into 24 class buckets plus three remnant colors, built
+once. Alpha quantizes onto a square-root ladder - linear collapses every
+faint glow onto one rung - and each (color, alpha) bucket emits as a
+single path with a single fill. ~10k draw calls become a few hundred.
+
+This is safe specifically because the star layer composites with
+`screen`, which is commutative: batching cannot disturb layering. Alpha
+still varies per star, so a dense swarm still accumulates into a glow.
+
+**Tried and rejected:** a pre-rendered sprite atlas for star discs. It
+was measurably _slower_ - scaled `drawImage` of a 32px source down to a
+1-4px radius costs more than the arc it replaces.
+
+## Lever 4 — the frame's allocation churn
+
+`updateData` called `.slice()` on seven typed arrays per snapshot, at 27
+snapshots/s - several MB/s of pure garbage. The resulting major
+collections showed up as isolated 130-230ms hitches. Copies now land in
+buffers that persist across frames, handed back as exact-length views.
+
+## Lever 5 — smaller Rust wins
+
+Barnes-Hut traversal took a `Vec` allocation per body (250k mallocs per
+tick at size 500) and re-derived "is this a leaf" from a 4-way child scan
+on every node visit. Both are gone: caller-owned scratch stack, leaf flag
+resolved once after the build. `opt-level` went from `"s"` to `3`, worth
+about 6% of the tick for 15KB of wasm.
+
+Worth recording as a negative result: **reordering the active-cell list
+into tiles for locality did nothing.** The tree is ~76k nodes / 3.6MB and
+already fits in cache, so the traversal was never memory-bound. The
+remaining gravity cost is the node-visit count itself, which is where a
+future FMM or SIMD pass would have to go.
+
+## The result
+
+Same machine, same seed, same tick cap:
+
+| case       | fps before | fps after |   jank before |   jank after |
+| ---------- | ---------: | --------: | ------------: | -----------: |
+| 250 fresh  |       39.0 |      90.3 |  94/234 (40%) |  27/542 (5%) |
+| 250 mature |       35.5 |     120.2 | 122/213 (57%) |   0/721 (0%) |
+| 500 fresh  |       12.8 |     119.5 |  77/77 (100%) | 1/717 (0.1%) |
+| 500 mature |       16.0 |     119.8 |  96/96 (100%) |   0/719 (0%) |
+
+500x500 is now smoother than 250x250 ever was, so `DEFAULT_GALAXY_SIZE`
+moved to 500.
+
+## What is still on the table
+
+- **The fresh phase at 500 runs the sim at ~21 ticks/s, not the 30 cap.**
+  A just-seeded galaxy has gas in every cell, so the Barnes-Hut active
+  set is at its largest; the worker tick is ~27ms. It recovers to the cap
+  as gas collapses. Gravity is ~78% of that tick (`ward exec perf-profile`
+  attributes it), so this is where SIMD or an FMM would pay.
+- **250 fresh still janks ~5% of frames.** A full grid of gas is the
+  renderer's worst case at any size, and 250 renders more frames per
+  second than 500 does, so it has less headroom per frame.
+- The frame is no longer dominated by any single pass, which is the sign
+  that the cheap structural wins are spent.
+
+## Reproducing part two
+
+```bash
+ward exec perf-profile 500 30   # which process owns the tick
+ward exec test-perf             # render frame + live pacing, real GPU
+```
+
+`test-perf` needs the system Chrome. Running the perf specs under the
+default Playwright config measures SwiftShader, not your GPU.
