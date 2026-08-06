@@ -57,6 +57,19 @@ static REGISTRY: &[ProcessDescriptor] = &[
         run: Galaxy::process_gravity,
     },
     ProcessDescriptor {
+        name: "spiral_density_wave",
+        reads: &[
+            StateKey::GasMass,
+            StateKey::GasKinematics,
+            StateKey::GasAccel,
+        ],
+        writes: &[StateKey::GasAccel],
+        requires_fresh: &[StateKey::GasAccel],
+        cadence: 1,
+        phase_offset: 0,
+        run: Galaxy::process_spiral_density_wave,
+    },
+    ProcessDescriptor {
         // Offset 1 so the field exists from the first tick after seeding
         // instead of three ticks of zero-field star drift.
         name: "gravity_field",
@@ -287,6 +300,7 @@ mod tests_graph {
             names,
             vec![
                 "gravity",
+                "spiral_density_wave",
                 "gravity_field",
                 "integrate_gas",
                 "integrate_stars",

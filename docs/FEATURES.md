@@ -10,10 +10,10 @@ Baseline of what ships. Pairs with `README.md` (pitch) and `development.md` (arc
 - Sub-grid fractional offsets across ticks, per-tick step cap (`MAX_SUBGRID_STEP = 1.0`), and softening length (`SOFTENING_SQ = 1.0`).
 - Mass-merge on collision via a `Vec<u32>` scratch buffer instead of a HashMap.
 - Immutable-style API: `seed()` and `tick()` return new `Galaxy`. Reuses scratch internally.
-- Four scenarios (`Scenario` enum, exposed to JS), each a hardcoded `start => end-shape` pair whose physics constants steer the run toward its promised shape at t ~= 1000: `bang => ring`, `bang => spiral`, `irregular => spiral`, `irregular => elliptical`. A static halo rotation curve plus flow-relaxation dissipation (drag toward the local circular flow, not toward rest) keeps every scenario visibly rotating at t=1000. See [galaxy-rust.md](galaxy-rust.md).
+- Four scenarios (`Scenario` enum, exposed to JS), each a hardcoded `start => end-shape` pair whose physics constants steer the run toward its promised shape: `bang => ring`, `bang => spiral`, `irregular => spiral`, `irregular => elliptical`. A static halo rotation curve plus flow-relaxation dissipation (drag toward the local circular flow, not toward rest) keeps each disk rotating. The spiral scenarios add a persistent rotating logarithmic density wave, conservative gas pressure, and cold-gas transport into broad compression lanes. Stars remain collisionless, while gas that stays dense in an arm enters the ordinary collapse and birth loop. See [spiral-density-waves.md](spiral-density-waves.md) and [galaxy-rust.md](galaxy-rust.md).
 - Reproducible seeding via ChaCha `StdRng`. Same `(additional, seed)` -> byte-identical galaxies. Powers `?seed=...` URL sharing.
 - `from_state(...)` rebuild from raw arrays. Used to ship state across the Web Worker boundary without re-seeding.
-- `tick_with_accel(time, acc_x, acc_y)` external-acceleration tick path so a WebGPU backend can supply the force field and reuse the CPU integrator + collision step.
+- `tick_with_accel(time, acc_x, acc_y)` external-gravity tick path so a WebGPU backend can supply the N-body force field and reuse Rust scenario forces, gas integration, and collision handling.
 - Zero-copy typed-array exports (`mass_ptr` / `mass_len` plus `mass` / `x` / `y` / `vel_x` / `vel_y` / `frac_x` / `frac_y`).
 - Rust unit tests in-file under `mod tests_*`. Benches at `benches/{tick_bench,debug_sim}.rs`.
 

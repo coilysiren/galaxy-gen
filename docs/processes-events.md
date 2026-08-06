@@ -33,9 +33,11 @@ Same seed + same tick count + same dt sequence -> identical state. Guarded by go
 
 ## The causal loop
 
-Registry order (also the golden-ordering test): gravity, gravity_field, integrate_gas, integrate_stars, radiation_field, collapse_watch, stellar_halo, stellar_aging, bh_accretion, bh_evaporation, gas_dissipation, gas_fountain. Motion runs every tick, fields every 4 ticks, and lifecycle rules every 8-16 ticks.
+Registry order (also the golden-ordering test): gravity, spiral_density_wave, gravity_field, integrate_gas, integrate_stars, radiation_field, collapse_watch, stellar_halo, stellar_aging, bh_accretion, bh_evaporation, gas_dissipation, gas_fountain. Motion runs every tick, fields every 4 ticks, and lifecycle rules every 8-16 ticks.
 
-The loop, end to end: gas clumps under gravity -> cells that stay dense and cool accumulate collapse heat -> CloudCollapse consumes gas into a birth budget -> StarBirth joins or creates a temporary stellar association whose masses sum exactly to the budget -> stars deposit radiation, which resists further collapse and lifts hot gas out of the visible disk -> the galactic fountain cools halo gas back into moving disk filaments while its cold share follows a deterministic 40-60% limit cycle -> stellar_aging retires light stars to temporary remnants and detonates heavy ones -> Supernova returns about 80% of the star's mass to nearby gas, leaves a neutron star, and emits ShockWave -> the shock boosts collapse heat around the blast and preserves causal parentage for any induced CloudCollapse and StarBirth.
+The loop, end to end: gas clumps under gravity -> spiral gas also crosses the rotating density-wave force and resolves conservative pressure during integration -> broad arm lanes stay dense and cool long enough to accumulate collapse heat -> CloudCollapse consumes gas into a birth budget -> StarBirth joins or creates a temporary stellar association whose masses sum exactly to the budget -> stars deposit radiation, which resists further collapse and lifts hot gas out of the visible disk -> the galactic fountain cools halo gas back into moving disk filaments while its cold share follows a deterministic 40-60% limit cycle -> stellar_aging retires light stars to temporary remnants and detonates heavy ones -> Supernova returns about 80% of the star's mass to nearby gas, leaves a neutron star, and emits ShockWave -> the shock boosts collapse heat around the blast and preserves causal parentage for any induced CloudCollapse and StarBirth.
+
+`spiral_density_wave` writes gas acceleration only, including the arm force and isothermal density-gradient response. It does not alter the coarse field consumed by stars. The following `integrate_gas` process applies conservative neighbor pressure flux and bounded cold-gas transport down the arm potential. Mass, heavy elements, and linear momentum remain closed across these transfers. See [spiral-density-waves.md](spiral-density-waves.md).
 
 `integrate_stars` also owns association binding and release. It rebuilds deterministic mass-weighted aggregates from the stars' persisted `cluster_id` values, applies a softened internal force, subtracts each association's mass-weighted recoil, and clears ids when age, membership, or the local tide dissolves the group. Clearing an id is a lifecycle mutation only. It does not alter the released star's phase-space state.
 
@@ -50,5 +52,6 @@ Conservation: the baryonic ledger (cold gas + hot halo gas + resolved stars + di
 ## See also
 
 - [galaxy-rust.md](galaxy-rust.md) - constants, buffers, hot path
+- [spiral-density-waves.md](spiral-density-waves.md) - persistent arm physics and morphology checks
 - [tick-worker.md](tick-worker.md) - worker message protocol
 - [FEATURES.md](FEATURES.md) - capability inventory

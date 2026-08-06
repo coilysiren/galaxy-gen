@@ -23,6 +23,10 @@ struct Metrics {
     central_frac: f64,
     /// m=2 azimuthal Fourier amplitude over the disk - arms/lobes.
     m2: f64,
+    /// Pitch-aware logarithmic m=2 amplitude - rejects bars and blobs.
+    spiral: f64,
+    /// Fraction of radial bands carrying the same pitched arm phase.
+    spiral_coverage: f64,
     /// Star population tangential velocity (same annulus) - the stars
     /// must rotate too, not just the gas.
     star_vt: f64,
@@ -123,6 +127,8 @@ fn metrics(g: &Galaxy, size: u16) -> Metrics {
         } else {
             0.0
         },
+        spiral: g.spiral_coherence() as f64,
+        spiral_coverage: g.spiral_coverage() as f64,
         star_vt: if svt_den > 0.0 {
             svt_num / svt_den
         } else {
@@ -153,7 +159,9 @@ fn main() {
         .nth(4)
         .and_then(|a| a.parse().ok())
         .unwrap_or(12345);
-    let checkpoints = [0usize, 250, 500, 1000, 2000, 4000];
+    let checkpoints = [
+        0usize, 250, 500, 900, 1000, 1100, 1200, 1500, 2000, 3000, 4000,
+    ];
 
     for (mode, name) in [
         (Scenario::BangRing, "bang=>ring"),
@@ -185,7 +193,7 @@ fn main() {
                 }
                 let m = metrics(&g, size);
                 println!(
-                    "t={cp:5}  nz={:5}  gas={:6}  vt={:+.3}  rot={:+.2}  r_pk={:.2}  ctr={:.2}  m2={:.2}  svt={:+.3}  sctr={:.2}  stars={:5}  mixed={:5}  ev(col/b/sn/sh/d/cap/nsm/grb/pn/ia)={}/{}/{}/{}/{}/{}/{}/{}/{}/{}",
+                    "t={cp:5}  nz={:5}  gas={:6}  vt={:+.3}  rot={:+.2}  r_pk={:.2}  ctr={:.2}  m2={:.2}  spi={:.2}  cov={:.2}  svt={:+.3}  sctr={:.2}  stars={:5}  mixed={:5}  ev(col/b/sn/sh/d/cap/nsm/grb/pn/ia)={}/{}/{}/{}/{}/{}/{}/{}/{}/{}",
                     m.nonzero,
                     m.total,
                     m.vt,
@@ -193,6 +201,8 @@ fn main() {
                     m.r_peak_frac,
                     m.central_frac,
                     m.m2,
+                    m.spiral,
+                    m.spiral_coverage,
                     m.star_vt,
                     m.star_central,
                     g.star_count(),

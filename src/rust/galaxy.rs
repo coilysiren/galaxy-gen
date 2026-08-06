@@ -18,11 +18,11 @@ pub enum Scenario {
     /// Central explosion; ejecta circularize near their turnaround
     /// radius into a rotating ring with a hollow core.
     BangRing = 0,
-    /// Central explosion with a two-lobed ejection; differential
-    /// rotation winds the lobes into spiral arms.
+    /// Central explosion with a two-lobed ejection; a rotating density
+    /// wave gathers its cooling gas into sustained spiral arms.
     BangSpiral = 1,
-    /// Clumpy smoke-noise disk with a seeded two-arm density wave that
-    /// shear maintains as a pinwheel.
+    /// Clumpy smoke-noise disk that settles into a rotating, star-forming
+    /// two-arm density wave.
     IrregularSpiral = 2,
     /// Clumpy smoke-noise cloud with weak rotation and high dispersion
     /// that relaxes into a smooth centrally concentrated spheroid.
@@ -79,6 +79,18 @@ pub struct ScenarioParams {
     pub eject_swirl: f32,
     /// Irregular: amplitude of the seeded two-arm density wave.
     pub spiral_amp: f32,
+    /// Ongoing logarithmic density-wave potential strength. Gas responds
+    /// to the wave; collisionless stars do not.
+    pub spiral_wave_strength: f32,
+    /// Isothermal pressure response to neighboring gas-density gradients
+    /// in wave-bearing disks. This keeps arms broad instead of point-like.
+    pub spiral_gas_pressure: f32,
+    /// Cold-gas transport rate down the arm potential. The conservative
+    /// drift models gas cooling into the compression lane.
+    pub spiral_arm_transport: f32,
+    /// Phase advance per tick in m-theta space. Dividing by two gives the
+    /// visible two-arm pattern speed.
+    pub spiral_pattern_step: f32,
     /// Irregular: power-law contrast of the smoke field (clumpiness).
     pub smoke_contrast: f32,
     /// Irregular: exponential radial density envelope scale as a
@@ -116,6 +128,10 @@ impl Scenario {
                 eject_lobes: 0.0,
                 eject_swirl: 0.15,
                 spiral_amp: 0.0,
+                spiral_wave_strength: 0.0,
+                spiral_gas_pressure: 0.0,
+                spiral_arm_transport: 0.0,
+                spiral_pattern_step: 0.0,
                 smoke_contrast: 1.8,
                 radial_scale_frac: 0.0,
                 seed_gain: 1.0,
@@ -136,6 +152,10 @@ impl Scenario {
                 eject_lobes: 0.35,
                 eject_swirl: 0.6,
                 spiral_amp: 0.0,
+                spiral_wave_strength: 0.65,
+                spiral_gas_pressure: 0.4,
+                spiral_arm_transport: 0.12,
+                spiral_pattern_step: 0.1,
                 smoke_contrast: 1.8,
                 radial_scale_frac: 0.0,
                 seed_gain: 1.0,
@@ -156,6 +176,10 @@ impl Scenario {
                 eject_lobes: 0.0,
                 eject_swirl: 0.0,
                 spiral_amp: 0.7,
+                spiral_wave_strength: 0.7,
+                spiral_gas_pressure: 0.5,
+                spiral_arm_transport: 0.14,
+                spiral_pattern_step: 0.1,
                 smoke_contrast: 1.8,
                 radial_scale_frac: 0.0,
                 seed_gain: 1.5,
@@ -176,6 +200,10 @@ impl Scenario {
                 eject_lobes: 0.0,
                 eject_swirl: 0.0,
                 spiral_amp: 0.0,
+                spiral_wave_strength: 0.0,
+                spiral_gas_pressure: 0.0,
+                spiral_arm_transport: 0.0,
+                spiral_pattern_step: 0.0,
                 smoke_contrast: 0.9,
                 radial_scale_frac: 0.28,
                 seed_gain: 1.5,
@@ -998,6 +1026,9 @@ impl Galaxy {
         } else {
             vec![0.0; n]
         };
+        // External backends replace gravity only. Scenario-owned gas
+        // forces still run in Rust so CPU and WebGPU share one model.
+        next.process_spiral_density_wave(time);
         next.apply_acceleration(time);
         next
     }
@@ -1396,8 +1427,155 @@ impl Galaxy {
 impl Galaxy {
     // Process entry points, referenced by name in process::REGISTRY.
 
+    /// Pitch-aware logarithmic m=2 amplitude of the visible gas disk.
+    /// Unlike a plain azimuthal m=2 score, this rejects bars and opposite
+    /// clumps that do not follow the configured spiral pitch.
+    pub fn spiral_coherence(&self) -> f32 {
+        self.spiral_structure().0
+    }
+
+    /// Fraction of radial disk bands that carry the same pitched arm phase.
+    /// Sparse clumps can score well globally, so visible morphology requires
+    /// both coherence and radial coverage.
+    pub fn spiral_coverage(&self) -> f32 {
+        self.spiral_structure().1
+    }
+
+    fn spiral_structure(&self) -> (f32, f32) {
+        const BINS: usize = 8;
+        let center = self.size as f32 * 0.5;
+        let disk_r = self.disk_radius();
+        let mut re = 0.0f64;
+        let mut im = 0.0f64;
+        let mut total = 0.0f64;
+        let mut bin_re = [0.0f64; BINS];
+        let mut bin_im = [0.0f64; BINS];
+        let mut bin_mass = [0.0f64; BINS];
+        let mut bin_occupied = [0usize; BINS];
+        for i in 0..self.n {
+            let mass = self.mass[i] as f64;
+            if mass == 0.0 {
+                continue;
+            }
+            let x = self.xs_i[i] as f32 + self.frac_x[i] - center;
+            let y = self.ys_i[i] as f32 + self.frac_y[i] - center;
+            let r = (x * x + y * y).sqrt();
+            if r < disk_r * 0.12 || r > disk_r * 0.94 {
+                continue;
+            }
+            let phase = 2.0 * y.atan2(x) - Galaxy::SPIRAL_PITCH * r.max(1.0).ln();
+            re += mass * phase.cos() as f64;
+            im += mass * phase.sin() as f64;
+            total += mass;
+            let radial_fraction = r / disk_r;
+            let bin = (((radial_fraction - 0.12) / 0.82) * BINS as f32)
+                .floor()
+                .clamp(0.0, (BINS - 1) as f32) as usize;
+            bin_re[bin] += mass * phase.cos() as f64;
+            bin_im[bin] += mass * phase.sin() as f64;
+            bin_mass[bin] += mass;
+            bin_occupied[bin] += 1;
+        }
+        if total == 0.0 {
+            return (0.0, 0.0);
+        }
+        let amplitude = (re * re + im * im).sqrt();
+        let coherence = (amplitude / total) as f32;
+        if amplitude == 0.0 {
+            return (coherence, 0.0);
+        }
+        let mut covered = 0usize;
+        for bin in 0..BINS {
+            let bin_amplitude = (bin_re[bin] * bin_re[bin] + bin_im[bin] * bin_im[bin]).sqrt();
+            let bin_coherence = if bin_mass[bin] > 0.0 {
+                bin_amplitude / bin_mass[bin]
+            } else {
+                0.0
+            };
+            let alignment = if bin_amplitude > 0.0 {
+                (bin_re[bin] * re + bin_im[bin] * im) / (bin_amplitude * amplitude)
+            } else {
+                0.0
+            };
+            if bin_occupied[bin] >= 4
+                && bin_mass[bin] >= total * 0.02
+                && bin_coherence >= 0.25
+                && alignment >= std::f64::consts::FRAC_1_SQRT_2
+            {
+                covered += 1;
+            }
+        }
+        (coherence, covered as f32 / BINS as f32)
+    }
+
     pub(crate) fn process_gravity(&mut self, _time: f32) {
         self.gravitate_all();
+    }
+
+    /// Apply a rotating logarithmic density-wave potential to gas. The
+    /// force is normal to the configured arm phase, so orbiting gas crosses
+    /// the wave, compresses along it, and can collapse into stars there.
+    pub(crate) fn process_spiral_density_wave(&mut self, _time: f32) {
+        let p = self.scenario.params();
+        if p.spiral_wave_strength <= 0.0 {
+            return;
+        }
+        let center = self.size as f32 * 0.5;
+        let disk_r = self.disk_radius();
+        let inner = disk_r * 0.12;
+        let outer = disk_r * 0.94;
+        let taper_width = disk_r * 0.12;
+        let pattern_phase = p.spiral_pattern_step * self.tick_count as f32;
+        let size = self.size as i32;
+        let pressure_scale = p.spiral_gas_pressure / (2.0 * Galaxy::CELL_MASS_CAP as f32);
+        for i in 0..self.n {
+            if self.mass[i] == 0 {
+                continue;
+            }
+            let x = self.xs_i[i] as f32 + self.frac_x[i] - center;
+            let y = self.ys_i[i] as f32 + self.frac_y[i] - center;
+            let r2 = x * x + y * y;
+            let r = r2.sqrt();
+            if r <= inner || r >= outer {
+                continue;
+            }
+            let inner_t = ((r - inner) / taper_width).clamp(0.0, 1.0);
+            let outer_t = ((outer - r) / taper_width).clamp(0.0, 1.0);
+            let taper = inner_t
+                * inner_t
+                * (3.0 - 2.0 * inner_t)
+                * outer_t
+                * outer_t
+                * (3.0 - 2.0 * outer_t);
+            let phase = 2.0 * y.atan2(x) - Galaxy::SPIRAL_PITCH * r.ln() - pattern_phase;
+            // grad(2 theta - pitch ln r).
+            let inv_r2 = 1.0 / r2;
+            let grad_x = (-2.0 * y - Galaxy::SPIRAL_PITCH * x) * inv_r2;
+            let grad_y = (2.0 * x - Galaxy::SPIRAL_PITCH * y) * inv_r2;
+            let force = -p.spiral_wave_strength * taper * phase.sin();
+            self.acc_x[i] += force * grad_x;
+            self.acc_y[i] += force * grad_y;
+
+            // -grad(rho): parcels on a cloud edge accelerate toward the
+            // lower-density side. The arm potential still compresses the
+            // lane, while this local term prevents irreversible knotting.
+            let col = i as i32 % size;
+            let row = i as i32 / size;
+            let left = self.mass
+                [self.col_row_to_index(wrap(col - 1, size) as u16, row as u16) as usize]
+                as f32;
+            let right = self.mass
+                [self.col_row_to_index(wrap(col + 1, size) as u16, row as u16) as usize]
+                as f32;
+            let up = self.mass
+                [self.col_row_to_index(col as u16, wrap(row - 1, size) as u16) as usize]
+                as f32;
+            let down = self.mass
+                [self.col_row_to_index(col as u16, wrap(row + 1, size) as u16) as usize]
+                as f32;
+            self.acc_x[i] += pressure_scale * (left - right);
+            self.acc_y[i] += pressure_scale * (up - down);
+        }
     }
 
     pub(crate) fn process_integrate_gas(&mut self, time: f32) {
@@ -3493,6 +3671,8 @@ impl Galaxy {
             self.acc_y[i] = 0.0;
         }
 
+        self.diffuse_spiral_gas(time);
+
         // Pressure overflow: cells above the cap shed the excess to their
         // four neighbors, carrying momentum with the shed mass. Without
         // this a capped region gridlocks permanently (transfer rejection
@@ -3539,6 +3719,176 @@ impl Galaxy {
                     (self.metal_mass[ni] + moved_metals).min(self.mass[ni] as f32);
             }
         }
+    }
+
+    /// Resolve sub-cell isothermal pressure as a conservative mass flux.
+    /// Grid parcels otherwise merge irreversibly whenever their paths meet,
+    /// so acceleration alone cannot keep a diffuse cloud resolved. This
+    /// exchange carries the source metal fraction and momentum exactly.
+    fn diffuse_spiral_gas(&mut self, time: f32) {
+        let p = self.scenario.params();
+        let diffusion = (p.spiral_gas_pressure * time).clamp(0.0, 0.45);
+        let arm_transport = (p.spiral_arm_transport * time).clamp(0.0, 0.2);
+        if diffusion <= 0.0 && arm_transport <= 0.0 {
+            return;
+        }
+
+        let size = self.size as i32;
+        let center = self.size as f32 * 0.5;
+        let disk_r = self.disk_radius();
+        let inner = disk_r * 0.12;
+        let outer = disk_r * 0.94;
+        let taper_width = disk_r * 0.12;
+        let pattern_phase = p.spiral_pattern_step * self.tick_count as f32;
+        let mut delta_mass = vec![0i32; self.n];
+        for i in 0..self.n {
+            self.scratch_mass[i] = self.mass[i] as u32;
+            self.scratch_metal_mass[i] = 0.0;
+            self.acc_x[i] = 0.0;
+            self.acc_y[i] = 0.0;
+        }
+        let offsets = [(1, 0), (0, 1), (-1, 0), (0, -1)];
+
+        for i in 0..self.n {
+            let mass = self.scratch_mass[i] as u16;
+            if mass < 2 {
+                continue;
+            }
+            let col = i as i32 % size;
+            let row = i as i32 / size;
+            let neighbors = offsets.map(|(dc, dr)| {
+                self.col_row_to_index(wrap(col + dc, size) as u16, wrap(row + dr, size) as u16)
+                    as usize
+            });
+            let neighborhood_mass = neighbors
+                .iter()
+                .fold(mass as u32, |total, &ni| total + self.scratch_mass[ni]);
+            let local_mean = (neighborhood_mass / 5) as u16;
+            let excess = mass.saturating_sub(local_mean);
+            let budget = (excess as f32 * diffusion).floor() as u16;
+            let deficits =
+                neighbors.map(|ni| local_mean.saturating_sub(self.scratch_mass[ni] as u16));
+            let total_deficit: u32 = deficits.iter().map(|&deficit| deficit as u32).sum();
+            let mut transfers = [0u16; 4];
+            if budget > 0 && total_deficit > 0 {
+                transfers = deficits.map(|deficit| {
+                    ((budget as u32 * deficit as u32) / total_deficit).min(deficit as u32) as u16
+                });
+            }
+            let mut allocated: u16 = transfers.iter().copied().sum();
+            let start = (self.tick_count as usize + i) % offsets.len();
+            while allocated < budget && total_deficit > 0 {
+                let mut progressed = false;
+                for step in 0..offsets.len() {
+                    let k = (start + step) % offsets.len();
+                    if transfers[k] < deficits[k] {
+                        transfers[k] += 1;
+                        allocated += 1;
+                        progressed = true;
+                        if allocated == budget {
+                            break;
+                        }
+                    }
+                }
+                if !progressed {
+                    break;
+                }
+            }
+
+            // Cooling gas also drifts a small distance down the rotating
+            // arm potential. This conservative sub-grid transport stops
+            // parcel merging from erasing the density wave between cells.
+            if arm_transport > 0.0 && allocated < mass {
+                let x = self.xs_i[i] as f32 + self.frac_x[i] - center;
+                let y = self.ys_i[i] as f32 + self.frac_y[i] - center;
+                let r = (x * x + y * y).sqrt();
+                if r > inner && r < outer {
+                    let inner_t = ((r - inner) / taper_width).clamp(0.0, 1.0);
+                    let outer_t = ((outer - r) / taper_width).clamp(0.0, 1.0);
+                    let taper = inner_t
+                        * inner_t
+                        * (3.0 - 2.0 * inner_t)
+                        * outer_t
+                        * outer_t
+                        * (3.0 - 2.0 * outer_t);
+                    let source_phase =
+                        2.0 * y.atan2(x) - Galaxy::SPIRAL_PITCH * r.ln() - pattern_phase;
+                    let source_score = source_phase.cos();
+                    let mut best = (source_score, start);
+                    for step in 0..offsets.len() {
+                        let k = (start + step) % offsets.len();
+                        let ni = neighbors[k];
+                        let nx = self.xs_i[ni] as f32 + self.frac_x[ni] - center;
+                        let ny = self.ys_i[ni] as f32 + self.frac_y[ni] - center;
+                        let nr = (nx * nx + ny * ny).sqrt().max(1.0);
+                        let score =
+                            (2.0 * ny.atan2(nx) - Galaxy::SPIRAL_PITCH * nr.ln() - pattern_phase)
+                                .cos();
+                        if score > best.0 {
+                            best = (score, k);
+                        }
+                    }
+                    let improvement = (best.0 - source_score).max(0.0);
+                    let arm_budget =
+                        (mass as f32 * arm_transport * taper * improvement * 0.5).round() as u16;
+                    let arm_budget = arm_budget.min(mass - allocated);
+                    transfers[best.1] = transfers[best.1].saturating_add(arm_budget);
+                }
+            }
+
+            let metal_fraction = self.metal_mass[i] / mass as f32;
+            for (k, &amount) in transfers.iter().enumerate() {
+                if amount == 0 {
+                    continue;
+                }
+                let ni = neighbors[k];
+                let amount_i = amount as i32;
+                let amount_f = amount as f32;
+                let metals = metal_fraction * amount_f;
+                let px = self.vel_x[i] * amount_f;
+                let py = self.vel_y[i] * amount_f;
+                delta_mass[i] -= amount_i;
+                delta_mass[ni] += amount_i;
+                self.scratch_metal_mass[i] -= metals;
+                self.scratch_metal_mass[ni] += metals;
+                self.acc_x[i] -= px;
+                self.acc_x[ni] += px;
+                self.acc_y[i] -= py;
+                self.acc_y[ni] += py;
+            }
+        }
+
+        for i in 0..self.n {
+            if delta_mass[i] == 0
+                && self.scratch_metal_mass[i] == 0.0
+                && self.acc_x[i] == 0.0
+                && self.acc_y[i] == 0.0
+            {
+                continue;
+            }
+            let old_mass = self.mass[i] as f32;
+            let new_mass_i = self.mass[i] as i32 + delta_mass[i];
+            debug_assert!(new_mass_i >= 0);
+            let new_mass = new_mass_i.max(0) as u16;
+            if new_mass == 0 {
+                self.mass[i] = 0;
+                self.metal_mass[i] = 0.0;
+                self.vel_x[i] = 0.0;
+                self.vel_y[i] = 0.0;
+                self.frac_x[i] = 0.0;
+                self.frac_y[i] = 0.0;
+                continue;
+            }
+            let new_mass_f = new_mass as f32;
+            self.mass[i] = new_mass;
+            self.metal_mass[i] =
+                (self.metal_mass[i] + self.scratch_metal_mass[i]).clamp(0.0, new_mass_f);
+            self.vel_x[i] = (self.vel_x[i] * old_mass + self.acc_x[i]) / new_mass_f;
+            self.vel_y[i] = (self.vel_y[i] * old_mass + self.acc_y[i]) / new_mass_f;
+        }
+        self.acc_x.fill(0.0);
+        self.acc_y.fill(0.0);
+        self.scratch_metal_mass.fill(0.0);
     }
 }
 
@@ -4061,6 +4411,7 @@ mod tests_intial_generation {
         // half-cell transfer threshold. (A seeded galaxy no longer
         // works here - seeding bakes in orbital velocity by design.)
         let mut g = Galaxy::new(8, 2);
+        g.scenario = Scenario::IrregularElliptical;
         g.mass[2 * 8 + 3] = 30;
         g.mass[5 * 8 + 5] = 40;
         let n = g.n;
@@ -4075,6 +4426,155 @@ mod tests_intial_generation {
 #[cfg(test)]
 mod tests_dynamics {
     use super::*;
+
+    #[test]
+    fn test_disabled_spiral_wave_leaves_acceleration_untouched() {
+        let mut g = Galaxy::new(20, 0);
+        g.scenario = Scenario::IrregularElliptical;
+        let i = 10 * 20 + 15;
+        g.mass[i] = 40;
+        g.acc_x[i] = 0.25;
+        g.acc_y[i] = -0.5;
+
+        g.process_spiral_density_wave(0.5);
+
+        assert_eq!(g.acc_x[i], 0.25);
+        assert_eq!(g.acc_y[i], -0.5);
+    }
+
+    #[test]
+    fn test_spiral_wave_accelerates_gas_toward_an_arm() {
+        let mut g = Galaxy::new(40, 0);
+        g.scenario = Scenario::IrregularSpiral;
+        let center = g.size as f32 * 0.5;
+        let disk_r = g.disk_radius();
+        let i = (0..g.n)
+            .find(|&i| {
+                let x = g.xs_i[i] as f32 - center;
+                let y = g.ys_i[i] as f32 - center;
+                let r = (x * x + y * y).sqrt();
+                if r < disk_r * 0.3 || r > disk_r * 0.8 {
+                    return false;
+                }
+                let phase = 2.0 * y.atan2(x) - Galaxy::SPIRAL_PITCH * r.ln();
+                phase.sin().abs() > 0.7
+            })
+            .expect("grid must contain an off-arm cell");
+        g.mass[i] = 40;
+        let x = g.xs_i[i] as f32 - center;
+        let y = g.ys_i[i] as f32 - center;
+        let r2 = x * x + y * y;
+        let phase = 2.0 * y.atan2(x) - Galaxy::SPIRAL_PITCH * r2.sqrt().ln();
+        let grad_x = (-2.0 * y - Galaxy::SPIRAL_PITCH * x) / r2;
+        let grad_y = (2.0 * x - Galaxy::SPIRAL_PITCH * y) / r2;
+
+        g.process_spiral_density_wave(0.5);
+
+        let phase_acceleration = grad_x * g.acc_x[i] + grad_y * g.acc_y[i];
+        assert!(
+            phase.sin() * phase_acceleration < 0.0,
+            "wave acceleration must reduce the arm phase error"
+        );
+    }
+
+    #[test]
+    fn test_spiral_pressure_flux_conserves_mass_metals_and_momentum() {
+        let mut g = Galaxy::new(20, 0);
+        g.scenario = Scenario::IrregularSpiral;
+        let i = 10 * 20 + 15;
+        g.mass[i] = 100;
+        g.metal_mass[i] = 30.0;
+        g.vel_x[i] = 1.25;
+        g.vel_y[i] = -0.4;
+        let mass_before: u64 = g.mass.iter().map(|&mass| mass as u64).sum();
+        let metals_before: f32 = g.metal_mass.iter().sum();
+        let px_before: f32 = g
+            .mass
+            .iter()
+            .enumerate()
+            .map(|(i, &mass)| mass as f32 * g.vel_x[i])
+            .sum();
+        let py_before: f32 = g
+            .mass
+            .iter()
+            .enumerate()
+            .map(|(i, &mass)| mass as f32 * g.vel_y[i])
+            .sum();
+
+        g.diffuse_spiral_gas(0.5);
+
+        let mass_after: u64 = g.mass.iter().map(|&mass| mass as u64).sum();
+        let metals_after: f32 = g.metal_mass.iter().sum();
+        let px_after: f32 = g
+            .mass
+            .iter()
+            .enumerate()
+            .map(|(i, &mass)| mass as f32 * g.vel_x[i])
+            .sum();
+        let py_after: f32 = g
+            .mass
+            .iter()
+            .enumerate()
+            .map(|(i, &mass)| mass as f32 * g.vel_y[i])
+            .sum();
+        assert!(g.mass.iter().filter(|&&mass| mass > 0).count() > 1);
+        assert_eq!(mass_after, mass_before);
+        assert!((metals_after - metals_before).abs() < 1e-4);
+        assert!((px_after - px_before).abs() < 1e-4);
+        assert!((py_after - py_before).abs() < 1e-4);
+    }
+
+    #[test]
+    fn test_spiral_remains_resolved_star_forming_and_coherent_for_100_ticks() {
+        let mut g = Galaxy::new(50, 0).seed_with_mode_seeded(25, Scenario::BangSpiral, 42);
+        let mut start_births = None;
+        let mut min_coherence = (f32::INFINITY, 0);
+        let mut min_coverage = (f32::INFINITY, 0);
+        let mut min_occupied = (usize::MAX, 0);
+        for tick in 1..=1100 {
+            g = g.tick(0.5);
+            if tick < 1000 {
+                continue;
+            }
+            let coherence = g.spiral_coherence();
+            let coverage = g.spiral_coverage();
+            let occupied = g.mass.iter().filter(|&&mass| mass > 0).count();
+            let births = g.events_executed(crate::events::EventKind::StarBirth as u32);
+            start_births.get_or_insert(births);
+            if coherence < min_coherence.0 {
+                min_coherence = (coherence, tick);
+            }
+            if coverage < min_coverage.0 {
+                min_coverage = (coverage, tick);
+            }
+            if occupied < min_occupied.0 {
+                min_occupied = (occupied, tick);
+            }
+        }
+        assert!(
+            min_coherence.0 >= 0.3,
+            "tick {} coherence was {}",
+            min_coherence.1,
+            min_coherence.0
+        );
+        assert!(
+            min_coverage.0 >= 0.5,
+            "tick {} coverage was {}",
+            min_coverage.1,
+            min_coverage.0
+        );
+        assert!(
+            min_occupied.0 >= 200,
+            "tick {} had only {} gas cells",
+            min_occupied.1,
+            min_occupied.0
+        );
+        assert!(
+            g.events_executed(crate::events::EventKind::StarBirth as u32)
+                > start_births.expect("tick 1000 checkpoint"),
+            "the coherent arm window must remain actively star-forming"
+        );
+    }
 
     #[test]
     fn test_galactic_fountain_changes_direction_and_closes_ledger() {
@@ -4124,6 +4624,9 @@ mod tests_dynamics {
         // tangential motion, and the gap to the flow closes by exactly
         // exp(-flow_drag dt) per tick after the halo kick.
         let mut g = Galaxy::new(20, 0);
+        // Isolate axisymmetric flow relaxation from the spiral scenarios'
+        // additional non-axisymmetric density-wave force.
+        g.scenario = Scenario::IrregularElliptical;
         // Cell left of center: x = -5, y = 0 relative to center (10,10).
         let idx = 10 * 20 + 5;
         g.mass[idx] = 50;
@@ -4171,8 +4674,8 @@ mod tests_golden {
     }
 
     /// Golden values pin the mass field after 100 ticks per scenario
-    /// (size 50, dt 0.5). Last recaptured for coherent stellar-association
-    /// births, binding, and tidal release.
+    /// (size 50, dt 0.5). Last recaptured for the persistent spiral
+    /// density wave and conservative gas-pressure transport.
     /// If another deliberate change lands, recapture and say so in the
     /// commit.
     #[test]
@@ -4195,8 +4698,8 @@ mod tests_golden {
             actual,
             vec![
                 3175198802015567231u64,
-                16676742571752694121,
-                16206595836715500053,
+                11971691907940808674,
+                4260859134213941995,
                 4274638675712473258,
             ]
         );
