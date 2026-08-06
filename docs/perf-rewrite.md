@@ -1319,9 +1319,9 @@ moved to 500.
   fills every cell, so the Barnes-Hut active set is at its largest and
   the tick runs ~30ms. That is what set the tick cap below. SIMD or an
   FMM is where the next win lives.
-- **250 fresh still janks ~5% of frames.** A full grid of gas is the
-  renderer's worst case at any size, and 250 renders more frames per
-  second than 500 does, so it has less headroom per frame.
+- **250 fresh still janks a few percent of frames.** The opening of a run
+  is the renderer's worst case at any size - see the coda for why 250
+  sits in it longer than 500 does.
 - The frame is no longer dominated by any single pass, which is the sign
   that the cheap structural wins are spent.
 
@@ -1359,7 +1359,42 @@ The cost is real and worth stating plainly: the galaxy evolves a third
 slower in wall-clock time.
 
 Note what this did _not_ fix. A freshly seeded 250 grid still drops ~6%
-of frames, because that jank is per-frame render cost in the full-gas
-phase, not render frequency - every one of its 62,500 blocks holds gas,
-which is the renderer's worst case at any size. Fewer frames per second
-means proportionally fewer expensive frames, not cheaper ones.
+of frames, because that jank is per-frame render cost, not render
+frequency. Fewer frames per second means fewer expensive frames, not
+cheaper ones.
+
+## Why 250 janks and 500 does not
+
+The obvious reading of that last row - 250 janks, 500 does not, so the
+small grid is somehow worse - is wrong, and the counters say so. A frame
+of a freshly seeded galaxy costs **38.6ms at 250 and 38.6ms at 500**,
+drawing 36,158 and 36,770 lit blocks respectively. Identical, which is
+exactly what screen-space blocks were built to do.
+
+The difference is not how expensive that state is. It is how long the
+galaxy stays in it. Frame cost against sim tick, same seed:
+
+| tick | 250 lit blocks | 250 frame | 500 lit blocks | 500 frame |
+| ---: | -------------: | --------: | -------------: | --------: |
+|    0 |         36,158 |    38.6ms |         36,770 |    38.6ms |
+|   40 |         28,763 |    30.8ms |         12,020 |    14.3ms |
+|   80 |         21,392 |    23.0ms |         10,268 |    12.1ms |
+|  120 |         15,560 |    18.0ms |          7,849 |    10.4ms |
+|  200 |          9,320 |    11.5ms |          5,932 |    10.2ms |
+
+500 drains out of the diffuse full-grid state in about 40 ticks. 250
+takes closer to 200. Cells at 500 hold a quarter of the mass each, so
+they empty into their neighbours far sooner in tick terms as gas advects
+and clumps.
+
+So the live "fresh" probe - which samples the first ~130 ticks - catches
+250 sitting inside its expensive window and 500 already past it. Both
+grids pay the same peak; only one is still paying it when you look.
+
+The consequence for anyone optimizing further: the target is the
+**uniform-gas frame**, not the small grid. It is the same 38.6ms
+everywhere, and it is heavily overdrawn - 36k sprites composited into a
+disc a few hundred pixels across, each sprite covering far more area than
+the spacing between sprites. Coarsening blocks by occupancy rather than
+by screen scale alone would cut it, at the cost of the size-independent
+exposure described above.

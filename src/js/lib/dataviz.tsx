@@ -348,6 +348,15 @@ export function lastFrameTimings(): Record<string, number> {
   return { ...frameTimings };
 }
 
+// Work counts behind those timings. A pass that got slower because it has
+// more to draw and a pass that got slower per draw want different fixes,
+// and the timings alone cannot tell those apart.
+const frameCounts: Record<string, number> = {};
+
+export function lastFrameCounts(): Record<string, number> {
+  return { ...frameCounts };
+}
+
 function timed<T>(label: string, fn: () => T): T {
   const t0 = performance.now();
   const out = fn();
@@ -805,6 +814,9 @@ function buildGasBlocks(s: State, mass: Uint16Array): GasBlocks {
   g.backgroundCount = bgCount;
   g.foregroundCount = fgCount;
   g.dustCount = dustCount;
+  frameCounts.gasBlockSize = block;
+  frameCounts.gasBlocksLit = bgCount + fgCount;
+  frameCounts.dustBlocks = dustCount;
   return g;
 }
 
@@ -875,6 +887,7 @@ function drawFrame(s: State, mass: Uint16Array) {
     ctx.globalCompositeOperation = "screen";
     const list = foreground ? gas.foreground : gas.background;
     const count = foreground ? gas.foregroundCount : gas.backgroundCount;
+    let draws = 0;
     for (let k = 0; k < count; k++) {
       const b = list[k];
       const footprint = gas.footprint[b];
@@ -894,18 +907,22 @@ function drawFrame(s: State, mass: Uint16Array) {
       if (a >= GAS_MIN_ALPHA) {
         ctx.globalAlpha = a;
         ctx.drawImage(gasSprites[base][bi], dx, dy, footprint, footprint);
+        draws++;
       }
       a = alpha * temp * frac;
       if (a >= GAS_MIN_ALPHA) {
         ctx.globalAlpha = a;
         ctx.drawImage(gasSprites[Math.min(2, base + 1)][bi], dx, dy, footprint, footprint);
+        draws++;
       }
       a = alpha * teal;
       if (a >= GAS_MIN_ALPHA) {
         ctx.globalAlpha = a;
         ctx.drawImage(gasSprites[3][bi], dx, dy, footprint, footprint);
+        draws++;
       }
     }
+    frameCounts[foreground ? "gasFrontDraws" : "gasBackDraws"] = draws;
     ctx.globalAlpha = 1.0;
     ctx.globalCompositeOperation = "source-over";
   };
@@ -1469,6 +1486,8 @@ function starBatchPush(color: number, alpha: number, x: number, y: number, r: nu
 }
 
 function starBatchFlush(ctx: CanvasRenderingContext2D) {
+  let discs = 0;
+  let fills = 0;
   for (let k = 0; k < starBatchTouchedCount; k++) {
     const bucket = starBatchTouched[k];
     const count = starBatchCount[bucket];
@@ -1487,7 +1506,11 @@ function starBatchFlush(ctx: CanvasRenderingContext2D) {
       ctx.arc(x, y, r, 0, TAU);
     }
     ctx.fill();
+    discs += count;
+    fills++;
   }
+  frameCounts.starDiscs = discs;
+  frameCounts.starFills = fills;
   starBatchReset();
 }
 
