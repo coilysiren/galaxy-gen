@@ -631,27 +631,9 @@ export function Interface() {
                   </td>
                 </tr>
                 <tr>
-                  <td>red giants</td>
-                  <td className="text-right" data-testid="stat-red-giants">
-                    {redGiantCount.toLocaleString()}
-                  </td>
-                </tr>
-                <tr>
-                  <td>white dwarfs</td>
-                  <td className="text-right" data-testid="stat-white-dwarfs">
-                    {whiteDwarfCount.toLocaleString()}
-                  </td>
-                </tr>
-                <tr>
-                  <td>neutron stars</td>
-                  <td className="text-right" data-testid="stat-neutron-stars">
-                    {neutronStarCount.toLocaleString()}
-                  </td>
-                </tr>
-                <tr>
                   <td>supernovae</td>
                   <td className="text-right" data-testid="stat-sn">
-                    {snCount.toLocaleString()}
+                    {(snCount + typeIaCount).toLocaleString()}
                   </td>
                 </tr>
                 <tr>
@@ -661,32 +643,10 @@ export function Interface() {
                   </td>
                 </tr>
                 <tr>
-                  <td>type ia supernovae</td>
-                  <td className="text-right" data-testid="stat-type-ia">
-                    {typeIaCount.toLocaleString()}
-                  </td>
-                </tr>
-                <tr>
-                  <td>short gamma-ray bursts</td>
-                  <td className="text-right" data-testid="stat-grb">
-                    {grbCount.toLocaleString()}
-                  </td>
-                </tr>
-                <tr>
                   <td>phase-mixed stars</td>
                   <td className="text-right" data-testid="stat-phase-mixed">
                     {phaseMixedCount.toLocaleString()}
                   </td>
-                </tr>
-                <tr>
-                  <td>associations formed</td>
-                  <td className="text-right" data-testid="stat-associations">
-                    {associationCount.toLocaleString()}
-                  </td>
-                </tr>
-                <tr>
-                  <td>eaten by black hole</td>
-                  <td className="text-right">{captureCount.toLocaleString()}</td>
                 </tr>
                 <tr>
                   <td>black hole</td>
@@ -698,6 +658,52 @@ export function Interface() {
                 </tr>
                 {debug && (
                   <>
+                    <tr>
+                      <td>red giants</td>
+                      <td className="text-right" data-testid="stat-red-giants">
+                        {redGiantCount.toLocaleString()}
+                      </td>
+                    </tr>
+                    <tr>
+                      <td>white dwarfs</td>
+                      <td className="text-right" data-testid="stat-white-dwarfs">
+                        {whiteDwarfCount.toLocaleString()}
+                      </td>
+                    </tr>
+                    <tr>
+                      <td>neutron stars</td>
+                      <td className="text-right" data-testid="stat-neutron-stars">
+                        {neutronStarCount.toLocaleString()}
+                      </td>
+                    </tr>
+                    <tr>
+                      <td>core-collapse supernovae</td>
+                      <td className="text-right" data-testid="stat-core-collapse">
+                        {snCount.toLocaleString()}
+                      </td>
+                    </tr>
+                    <tr>
+                      <td>type ia supernovae</td>
+                      <td className="text-right" data-testid="stat-type-ia">
+                        {typeIaCount.toLocaleString()}
+                      </td>
+                    </tr>
+                    <tr>
+                      <td>short gamma-ray bursts</td>
+                      <td className="text-right" data-testid="stat-grb">
+                        {grbCount.toLocaleString()}
+                      </td>
+                    </tr>
+                    <tr>
+                      <td>associations formed</td>
+                      <td className="text-right" data-testid="stat-associations">
+                        {associationCount.toLocaleString()}
+                      </td>
+                    </tr>
+                    <tr>
+                      <td>eaten by black hole</td>
+                      <td className="text-right">{captureCount.toLocaleString()}</td>
+                    </tr>
                     <tr>
                       <td>tick ms</td>
                       <td className="text-right">{tickMs.toFixed(1)}</td>

@@ -41,18 +41,26 @@ test.describe("Galaxy Generator", () => {
     await expect(page.getByRole("heading", { name: "Galaxy Generator" })).toBeVisible();
     await expect(page.getByTestId("input-galaxy-size")).toHaveValue("250");
     await expect(page.getByTestId("stat-ticks")).toHaveText("0");
-    await expect(page.getByTestId("stat-red-giants")).toHaveText("0");
-    await expect(page.getByTestId("stat-white-dwarfs")).toHaveText("0");
-    await expect(page.getByTestId("stat-neutron-stars")).toHaveText("0");
+    await expect(page.locator("table tbody tr")).toHaveCount(7);
+    await expect(page.getByTestId("stat-sn")).toHaveText("0");
     await expect(page.getByTestId("stat-planetary-nebulae")).toHaveText("0");
-    await expect(page.getByTestId("stat-type-ia")).toHaveText("0");
-    await expect(page.getByTestId("stat-grb")).toHaveText("0");
     await expect(page.getByTestId("stat-phase-mixed")).toHaveText("0");
-    await expect(page.getByTestId("stat-associations")).toHaveText("0");
     await expect(page.getByTestId("btn-init")).toBeVisible();
     await expect(page.getByTestId("btn-tick")).toBeVisible();
     // Seed mass is URL-param-only; it must not render an input.
     await expect(page.getByTestId("input-seed-mass")).toHaveCount(0);
+  });
+
+  test("debug mode exposes detailed lifecycle counters", async ({ page }) => {
+    await page.goto("/?debug=1");
+    await waitForWasm(page);
+    await expect(page.getByTestId("stat-red-giants")).toHaveText("0");
+    await expect(page.getByTestId("stat-white-dwarfs")).toHaveText("0");
+    await expect(page.getByTestId("stat-neutron-stars")).toHaveText("0");
+    await expect(page.getByTestId("stat-core-collapse")).toHaveText("0");
+    await expect(page.getByTestId("stat-type-ia")).toHaveText("0");
+    await expect(page.getByTestId("stat-grb")).toHaveText("0");
+    await expect(page.getByTestId("stat-associations")).toHaveText("0");
   });
 
   test("init creates a canvas inside the dataviz container", async ({ page }) => {

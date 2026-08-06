@@ -38,6 +38,8 @@ blue-white points. Planetary nebulae form slowly expanding cyan and pink
 shells, while Type Ia events use a brighter blue-white blast front distinct
 from warm core-collapse shells.
 
-The UI reports live red-giant and white-dwarf populations plus cumulative
-planetary nebulae and Type Ia supernovae. Every event, stage, binary id, age,
-delay, and counter survives the existing worker state round-trip.
+The compact UI reports total supernovae and planetary nebulae. Debug mode
+breaks that summary into live red-giant, white-dwarf, and neutron-star
+populations plus separate core-collapse, Type Ia, and compact-merger counters.
+Every event, stage, binary id, age, delay, and counter survives the existing
+worker state round-trip.
