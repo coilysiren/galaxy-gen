@@ -1582,6 +1582,41 @@ impl Galaxy {
     }
 }
 
+/// Native-only profiling surface. Kept out of the `#[wasm_bindgen]` impl
+/// because `Instant` has no wasm32 clock and `Duration` has no ABI.
+#[cfg(not(target_arch = "wasm32"))]
+impl Galaxy {
+    /// The same scheduler as [`Galaxy::tick`], with a timer around each
+    /// phase. `out` is filled as
+    /// `[clone, ..one entry per registry process.., events]`, so a profile
+    /// follows the declared causal chain rather than a sampled guess.
+    pub fn tick_instrumented(&self, time: f32, out: &mut Vec<std::time::Duration>) -> Galaxy {
+        use std::time::{Duration, Instant};
+        let registry = process::registry();
+        out.clear();
+        out.resize(registry.len() + 2, Duration::ZERO);
+
+        let t0 = Instant::now();
+        let mut next = self.clone();
+        out[0] = t0.elapsed();
+
+        next.tick_count += 1;
+        for (i, p) in registry.iter().enumerate() {
+            if process::is_due(p, next.tick_count) {
+                let t = Instant::now();
+                (p.run)(&mut next, time);
+                out[i + 1] = t.elapsed();
+            }
+        }
+
+        let t = Instant::now();
+        let due = next.events.take_due(next.tick_count);
+        next.execute_events(due, time);
+        out[registry.len() + 1] = t.elapsed();
+        next
+    }
+}
+
 impl Galaxy {
     // Process entry points, referenced by name in process::REGISTRY.
 
@@ -2035,6 +2070,7 @@ impl Galaxy {
         let rc2 = rc * rc;
         let v_flat_star = p.v_flat * 0.5;
         let v_flat2 = v_flat_star * v_flat_star;
+        let mut stack: Vec<u32> = Vec::with_capacity(64);
         for fy in 0..res {
             for fx in 0..res {
                 let wx = (fx as f32 + 0.5) * cell;
@@ -2045,6 +2081,7 @@ impl Galaxy {
                     theta_sq,
                     Galaxy::FIELD_SOFTENING_SQ,
                     Galaxy::GRAVATIONAL_CONSTANT,
+                    &mut stack,
                 );
                 let hx = wx - center;
                 let hy = wy - center;
@@ -3929,8 +3966,9 @@ impl Galaxy {
         let size_f = self.size as f32;
         let tree = build_quadtree(&px, &py, &pm, 0.0, 0.0, size_f);
 
+        let mut stack: Vec<u32> = Vec::with_capacity(64);
         for (ai, &i) in active.iter().enumerate() {
-            let (ax, ay) = tree.force(px[ai], py[ai], THETA_SQ, soft, g);
+            let (ax, ay) = tree.force(px[ai], py[ai], THETA_SQ, soft, g, &mut stack);
             self.acc_x[i] = ax;
             self.acc_y[i] = ay;
         }
@@ -4488,6 +4526,10 @@ struct Node {
     body: u32,
     // Quadrants: NE=0, NW=1, SW=2, SE=3.
     children: [u32; 4],
+    /// Childless, resolved once after the build. The traversal tests this
+    /// per node visit, and re-deriving it from a 4-way child scan every
+    /// visit was measurable at 250k bodies.
+    leaf: bool,
 }
 
 impl Node {
@@ -4501,6 +4543,7 @@ impl Node {
             com_y: 0.0,
             body: NO_CHILD,
             children: [NO_CHILD; 4],
+            leaf: true,
         }
     }
 
@@ -4525,6 +4568,10 @@ fn build_quadtree(px: &[f32], py: &[f32], pm: &[f32], ox: f32, oy: f32, size: f3
             continue;
         }
         insert(&mut nodes, 0, i as u32, px[i], py[i], pm[i]);
+    }
+    // Resolve the leaf flag once, so the traversal never re-derives it.
+    for node in &mut nodes {
+        node.leaf = node.children.iter().all(|&c| c == NO_CHILD);
     }
     Tree { nodes }
 }
@@ -4638,11 +4685,23 @@ fn subdivide_and_insert(
 
 impl Tree {
     /// Force on (bx, by). Theta criterion: s/d < theta accepts subtree CoM.
-    fn force(&self, bx: f32, by: f32, theta_sq: f32, soft: f32, g: f32) -> (f32, f32) {
+    ///
+    /// `stack` is caller-owned scratch. The traversal runs once per active
+    /// cell - 250k times per tick at size 500 - so a `Vec` allocated per
+    /// call put a quarter-million malloc/free pairs on the hot path.
+    fn force(
+        &self,
+        bx: f32,
+        by: f32,
+        theta_sq: f32,
+        soft: f32,
+        g: f32,
+        stack: &mut Vec<u32>,
+    ) -> (f32, f32) {
         let mut ax = 0.0f32;
         let mut ay = 0.0f32;
         // Iterative DFS to bound recursion on deep trees.
-        let mut stack: Vec<u32> = Vec::with_capacity(64);
+        stack.clear();
         stack.push(0);
 
         while let Some(idx) = stack.pop() {
@@ -4662,7 +4721,7 @@ impl Tree {
             let s = n.h * 2.0; // node side length
             let s2 = s * s;
 
-            if n.is_leaf() || s2 < theta_sq * d2 {
+            if n.leaf || s2 < theta_sq * d2 {
                 // Accept this node as a point mass.
                 let r2 = d2 + soft;
                 let inv_r = 1.0 / r2.sqrt();

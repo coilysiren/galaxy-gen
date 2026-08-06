@@ -39,6 +39,11 @@ const VIEW_SPAN = 1.42;
 // seam. Einstein radius as a fraction of world size:
 const LENS_THETA_E_FRAC = 0.035;
 
+// Sentinels in the cached lens displacement map: outside the lens region,
+// and inside the shadow. Both are invalid pixel offsets.
+const LENS_UNTOUCHED = -1;
+const LENS_SHADOW = -2;
+
 // Soft nebular sprites for gas, one per color bucket, pre-rendered once.
 // drawImage of a gradient sprite is far cheaper than per-cell gradients
 // and the alpha accumulation makes dense regions glow on its own.
@@ -96,6 +101,19 @@ const GAS_TIERS: [number, number, number][][] = [
 // dissipates above 60). Dithered per cell so tier edges stay organic.
 const GAS_WARM_RAD = 7;
 const GAS_HOT_RAD = 26;
+
+// Smallest sprite the gas field draws, in CSS px. Also the reason block
+// aggregation exists: below roughly this spacing, extra sprites land on
+// top of each other and cost a composite without adding an edge.
+const GAS_MIN_FOOTPRINT_PX = 7;
+
+// Sprites fainter than this never reach a visible level through the
+// screen blend, so the composite is skipped outright.
+const GAS_MIN_ALPHA = 0.02;
+
+// Shock fronts considered for the [OIII] teal tier. A busy supernova
+// epoch overlaps far more shells than are individually legible.
+const MAX_SHOCK_WAVES = 16;
 
 // Stable per-cell jitter so the gas field is cloudy, not uniform - a
 // hash of the cell index, constant across frames (no flicker).
@@ -160,6 +178,55 @@ interface Camera {
   zoom: number;
 }
 
+// Gas is drawn as soft sprites whose on-screen footprint never goes below
+// GAS_MIN_FOOTPRINT_PX, so past a certain grid density the renderer is
+// stacking many sprites into the space of one. Cells are aggregated into
+// square blocks sized to hold gas sprite spacing near this target,
+// independent of grid size: the sim gets finer, the sprite field does not.
+// At size 250 on a typical viewport this resolves to 1 (a block per cell,
+// i.e. exactly the pre-aggregation renderer); at 500 it resolves to 2.
+const GAS_TARGET_SPRITE_SPACING_PX = 2.5;
+
+/// Per-frame gas block scratch. Every array is indexed by block and
+/// reallocated only when the block grid changes, so a steady-state frame
+/// allocates nothing. Values are precomputed once and consumed by the
+/// background pass, the foreground pass, and the dust pass alike - those
+/// three used to redo the same per-cell math independently.
+interface GasBlocks {
+  /// Block edge in cells.
+  block: number;
+  /// Blocks per axis.
+  bw: number;
+  /// Mean cell mass in the block. Mean, not sum, so brightness and tier
+  /// thresholds keep the meaning they have at one cell per block.
+  meanMass: Float32Array;
+  /// Mass-weighted world position, including sub-cell gas offsets.
+  x: Float32Array;
+  y: Float32Array;
+  /// Mass-weighted metal strength, already mapped to [0, 1].
+  metal: Float32Array;
+  /// Normalized log-density in [0, 1]: the sprite color bucket driver.
+  t: Float32Array;
+  /// Continuous temperature tier (0 cold .. 2 hot) from the radiation field.
+  tier: Float32Array;
+  /// Shock-ionization weight in [0, 1] from nearby supernova fronts.
+  teal: Float32Array;
+  /// Final sprite alpha: radial fade times per-block brightness jitter.
+  alpha: Float32Array;
+  /// Sprite edge in CSS px.
+  footprint: Float32Array;
+  dusty: Uint8Array;
+  /// Block indices split into the under-stars and over-stars passes, so
+  /// neither pass walks blocks belonging to the other.
+  background: Int32Array;
+  backgroundCount: number;
+  foreground: Int32Array;
+  foregroundCount: number;
+  /// Dusty blocks that survived the dust pass's own jitter gate.
+  dustList: Int32Array;
+  dustCount: number;
+}
+
 interface State {
   host: HTMLElement;
   canvas: HTMLCanvasElement;
@@ -195,7 +262,45 @@ interface State {
   lastQuasarAge: number;
   lastQuasarPulsePeriod: number;
   lastQuasarAxis: number;
+  gas: GasBlocks | null;
+  /// Lens source-offset map, rebuilt only when the lens geometry moves.
+  lensMap: Int32Array | null;
+  lensMapKey: string;
   cleanup: () => void;
+}
+
+/// Blocks-per-axis for a grid of `size` cells at `scale` CSS px per cell.
+function gasBlockSize(size: number, scale: number): number {
+  const perSprite = GAS_TARGET_SPRITE_SPACING_PX / Math.max(1e-6, scale);
+  return Math.max(1, Math.min(size, Math.round(perSprite)));
+}
+
+function ensureGasBlocks(s: State): GasBlocks {
+  const block = gasBlockSize(s.size, s.scale);
+  const bw = Math.ceil(s.size / block);
+  if (s.gas && s.gas.block === block && s.gas.bw === bw) return s.gas;
+  const n = bw * bw;
+  s.gas = {
+    block,
+    bw,
+    meanMass: new Float32Array(n),
+    x: new Float32Array(n),
+    y: new Float32Array(n),
+    metal: new Float32Array(n),
+    t: new Float32Array(n),
+    tier: new Float32Array(n),
+    teal: new Float32Array(n),
+    alpha: new Float32Array(n),
+    footprint: new Float32Array(n),
+    dusty: new Uint8Array(n),
+    background: new Int32Array(n),
+    backgroundCount: 0,
+    foreground: new Int32Array(n),
+    foregroundCount: 0,
+    dustList: new Int32Array(n),
+    dustCount: 0,
+  };
+  return s.gas;
 }
 
 function frameAngle(s: State): number {
@@ -221,6 +326,23 @@ function publishView(s: State) {
 }
 
 let state: State | null = null;
+
+// Per-pass frame timings, refreshed every draw. A dozen `performance.now`
+// calls per frame is noise next to the passes themselves, and having the
+// breakdown always available is what keeps render tuning measured rather
+// than guessed. Read via `lastFrameTimings()`.
+const frameTimings: Record<string, number> = {};
+
+export function lastFrameTimings(): Record<string, number> {
+  return { ...frameTimings };
+}
+
+function timed<T>(label: string, fn: () => T): T {
+  const t0 = performance.now();
+  const out = fn();
+  frameTimings[label] = performance.now() - t0;
+  return out;
+}
 
 function clearChildren(node: Element) {
   while (node.firstChild) node.removeChild(node.firstChild);
@@ -277,6 +399,7 @@ export function initViz(
   canvas.style.cursor = debugCamera ? "grab" : "default";
 
   buildGasSprites();
+  buildStarColors();
   const size = galaxyFrontend.galaxySize;
   const scale = Math.min(cw, ch) / (size * VIEW_SPAN);
 
@@ -439,6 +562,9 @@ export function initViz(
     lastQuasarAge: 0,
     lastQuasarPulsePeriod: 1,
     lastQuasarAxis: 0,
+    gas: null,
+    lensMap: null,
+    lensMapKey: "",
     cleanup,
   };
   publishView(state);
@@ -454,6 +580,7 @@ export function updateData(galaxyFrontend: galaxy.Frontend, simTick?: number) {
   const mass = galaxyFrontend.massArray();
   // Copy so zoom/pan interactions after the sim stops still have data
   // to redraw from.
+  const t0 = performance.now();
   state.lastMass = mass.slice();
   state.lastFracX = galaxyFrontend.fracXArray().slice();
   state.lastFracY = galaxyFrontend.fracYArray().slice();
@@ -461,6 +588,7 @@ export function updateData(galaxyFrontend: galaxy.Frontend, simTick?: number) {
   state.lastTransients = galaxyFrontend.transientsArray().slice();
   state.lastRadiation = galaxyFrontend.radiationArray().slice();
   state.lastMetallicity = galaxyFrontend.metallicityArray().slice();
+  frameTimings.snapshotCopy = performance.now() - t0;
   state.lastLensScale = galaxyFrontend.lensScale();
   state.lastStellarHaloMass = galaxyFrontend.stellarHaloMass();
   state.lastQuasarActivity = galaxyFrontend.quasarActivity();
@@ -472,14 +600,188 @@ export function updateData(galaxyFrontend: galaxy.Frontend, simTick?: number) {
   drawFrame(state, state.lastMass);
 }
 
-function drawFrame(s: State, mass: Uint16Array) {
-  const { ctx, size, scale, rMax, camera } = s;
+/// Fold the cell grid into the gas block grid and precompute everything
+/// the three gas-consuming passes need. One walk over the cells and two
+/// over the blocks replaces three independent full-grid walks that each
+/// recomputed the same jitter, log, radiation and dust predicates.
+function buildGasBlocks(s: State, mass: Uint16Array): GasBlocks {
+  const g = ensureGasBlocks(s);
+  const { block, bw } = g;
+  const size = s.size;
+  const nb = bw * bw;
+  const fracX = s.lastFracX;
+  const fracY = s.lastFracY;
+  const metallicity = s.lastMetallicity;
 
-  let maxMass = 1;
-  for (let i = 0; i < mass.length; i++) {
-    if (mass[i] > maxMass) maxMass = mass[i];
+  const sumMass = g.meanMass;
+  const sumX = g.x;
+  const sumY = g.y;
+  const sumMetal = g.metal;
+  sumMass.fill(0);
+  sumX.fill(0);
+  sumY.fill(0);
+  sumMetal.fill(0);
+
+  // Pass 1: accumulate mass-weighted position and composition per block.
+  for (let row = 0; row < size; row++) {
+    const brow = (row / block) | 0;
+    const rowBase = row * size;
+    const blockRowBase = brow * bw;
+    for (let col = 0; col < size; col++) {
+      const i = rowBase + col;
+      const m = mass[i];
+      if (m === 0) continue;
+      const b = blockRowBase + ((col / block) | 0);
+      sumMass[b] += m;
+      sumX[b] += m * (col + (fracX ? fracX[i] : 0));
+      sumY[b] += m * (row + (fracY ? fracY[i] : 0));
+      sumMetal[b] += m * (metallicity ? metallicity[i] : 0);
+    }
   }
-  const invLogMax = 1 / Math.log(maxMass + 1);
+
+  // Normalize to means. Mean cell mass (not the block sum) keeps every
+  // downstream threshold identical to the one-cell-per-block case.
+  const cellsPerBlock = block * block;
+  let maxMean = 1;
+  for (let b = 0; b < nb; b++) {
+    const total = sumMass[b];
+    if (total === 0) continue;
+    sumX[b] /= total;
+    sumY[b] /= total;
+    const z = sumMetal[b] / total;
+    sumMetal[b] = Math.min(1, Math.max(0, (z - 0.0015) / 0.02));
+    const mean = total / cellsPerBlock;
+    sumMass[b] = mean;
+    if (mean > maxMean) maxMean = mean;
+  }
+  const invLogMax = 1 / Math.log(maxMean + 1);
+
+  // Shock-ionization weight, stamped per supernova front instead of
+  // tested per block: a front only touches the blocks in its own annulus,
+  // so this costs the shells' area rather than blocks x waves.
+  const teal = g.teal;
+  teal.fill(0);
+  const tr = s.lastTransients;
+  if (tr) {
+    let waves = 0;
+    for (let k = 0; k < tr.length && waves < MAX_SHOCK_WAVES; k += 5) {
+      if (tr[k] !== 2 && tr[k] !== 5) continue;
+      waves++;
+      const front = blastRadius(tr[k + 4], tr[k + 3]);
+      const band = 2.2 + front * 0.12;
+      const wx = tr[k + 1];
+      const wy = tr[k + 2];
+      const reach = front + band;
+      const lo = Math.max(0, Math.floor((wy - reach) / block));
+      const hi = Math.min(bw - 1, Math.floor((wy + reach) / block));
+      const loX = Math.max(0, Math.floor((wx - reach) / block));
+      const hiX = Math.min(bw - 1, Math.floor((wx + reach) / block));
+      for (let by = lo; by <= hi; by++) {
+        const dy = by * block + block * 0.5 - wy;
+        for (let bx = loX; bx <= hiX; bx++) {
+          const dx = bx * block + block * 0.5 - wx;
+          const wgt = 1 - Math.abs(Math.hypot(dx, dy) - front) / band;
+          if (wgt <= 0) continue;
+          const b = by * bw + bx;
+          if (wgt > teal[b]) teal[b] = wgt;
+        }
+      }
+    }
+  }
+
+  // Pass 2: per-block presentation values plus the pass partitions.
+  const center = size / 2;
+  const softR = size / 2 - 1;
+  const fadeEndSq = softR * FADE_END * (softR * FADE_END);
+  const rad = s.lastRadiation;
+  const radRes = rad ? Math.round(Math.sqrt(rad.length)) : 0;
+  const radScale = radRes / size;
+  // Sprite footprint tracks the block, so a coarser block grid draws
+  // proportionally larger sprites and the cloud field keeps its density.
+  const rMaxBlock = s.scale * block * 0.5;
+
+  let bgCount = 0;
+  let fgCount = 0;
+  let dustCount = 0;
+
+  for (let b = 0; b < nb; b++) {
+    g.dusty[b] = 0;
+    const mean = sumMass[b];
+    if (mean === 0) continue;
+    const gx = sumX[b];
+    const gy = sumY[b];
+    const rx = gx - center;
+    const ry = gy - center;
+    const radSq = rx * rx + ry * ry;
+    if (radSq > fadeEndSq) {
+      sumMass[b] = 0;
+      continue;
+    }
+
+    const t = Math.log(mean + 1) * invLogMax;
+    g.t[b] = t;
+
+    let heat = 0;
+    let radCold = true;
+    if (rad && radRes > 0) {
+      const fx = Math.min(radRes - 1, ((gx * radScale) | 0) as number);
+      const fy = Math.min(radRes - 1, ((gy * radScale) | 0) as number);
+      heat = rad[fy * radRes + fx];
+      radCold = heat <= GAS_WARM_RAD;
+    }
+    g.tier[b] =
+      smoothstep(GAS_WARM_RAD - 4, GAS_WARM_RAD + 4, heat) +
+      smoothstep(GAS_HOT_RAD - 8, GAS_HOT_RAD + 8, heat);
+
+    const shock = teal[b];
+    teal[b] = shock > 0 ? shock * shock * (3 - 2 * shock) * (0.3 + 0.7 * sumMetal[b]) : 0;
+
+    // Coherent dust: dense, cold, and embedded in a thick neighborhood.
+    // Isolated dense blocks stamping dark specks over the gas was the
+    // failure mode the neighbor count exists to prevent.
+    if (mean >= 78 && sumMetal[b] > 0 && radCold) {
+      const bx = b % bw;
+      const by = (b / bw) | 0;
+      let thick = 0;
+      if (bx > 0 && sumMass[b - 1] >= 55) thick++;
+      if (bx < bw - 1 && sumMass[b + 1] >= 55) thick++;
+      if (by > 0 && sumMass[b - bw] >= 55) thick++;
+      if (by < bw - 1 && sumMass[b + bw] >= 55) thick++;
+      if (thick >= 3) {
+        g.dusty[b] = 1;
+        if (cellJitter(b, 5) >= 0.5) g.dustList[dustCount++] = b;
+      }
+    }
+
+    // Fuzz overflows the block on purpose, with per-block size and
+    // brightness jitter so the field is cloudy rather than uniform.
+    g.footprint[b] =
+      Math.max(GAS_MIN_FOOTPRINT_PX, (0.5 + t * rMaxBlock * 1.4) * 6) * (0.75 + cellJitter(b, 1));
+    let brightness = 0.48 + 0.54 * cellJitter(b, 2);
+    // Dust darkens by emitting less - absence of glow cannot leave
+    // overlay artifacts the way a multiply stamp can.
+    if (g.dusty[b]) brightness *= 1 - 0.6 * sumMetal[b];
+    g.alpha[b] = radialFade(Math.sqrt(radSq), softR) * brightness;
+
+    if (cellJitter(b, 4) < 0.7) g.background[bgCount++] = b;
+    else g.foreground[fgCount++] = b;
+  }
+
+  g.backgroundCount = bgCount;
+  g.foregroundCount = fgCount;
+  g.dustCount = dustCount;
+  return g;
+}
+
+function smoothstep(a: number, b: number, x: number): number {
+  const u = Math.min(1, Math.max(0, (x - a) / (b - a)));
+  return u * u * (3 - 2 * u);
+}
+
+function drawFrame(s: State, mass: Uint16Array) {
+  const { ctx, size, scale, camera } = s;
+
+  const gas = timed("gasBlocks", () => buildGasBlocks(s, mass));
 
   ctx.save();
   ctx.setTransform(1, 0, 0, 1, 0, 0);
@@ -524,126 +826,50 @@ function drawFrame(s: State, mass: Uint16Array) {
     ctx.arc(s.cw / 2, s.ch / 2, haloR, 0, Math.PI * 2);
     ctx.fill();
   }
-  const fadeEndSq = softR * FADE_END * (softR * FADE_END);
   const softSq = softR * softR;
   const buckets = GAS_TIERS[0].length;
-  const rad = s.lastRadiation;
-  const radRes = rad ? Math.round(Math.sqrt(rad.length)) : 0;
-  const radScale = radRes / size;
-  const fracX = s.lastFracX;
-  const fracY = s.lastFracY;
-  const metallicity = s.lastMetallicity;
-  const metalStrengthAt = (i: number): number => {
-    const z = metallicity?.[i] ?? 0;
-    return Math.min(1, Math.max(0, (z - 0.0015) / 0.02));
-  };
 
-  // Recent supernova shells, for the [OIII] teal tier: gas near an
-  // expanding front is shock-ionized and glows teal, lingering after
-  // the bright wave itself has faded.
-  const waves: { x: number; y: number; front: number; band: number }[] = [];
-  const tr = s.lastTransients;
-  if (tr) {
-    for (let k = 0; k < tr.length && waves.length < 16; k += 5) {
-      if (tr[k] !== 2 && tr[k] !== 5) continue;
-      const front = blastRadius(tr[k + 4], tr[k + 3]);
-      waves.push({
-        x: tr[k + 1],
-        y: tr[k + 2],
-        front,
-        band: 2.2 + front * 0.12,
-      });
-    }
-  }
-
-  // Coherent dust predicate: a cell is dusty only when dense, cold, and
-  // embedded in a thick neighborhood - isolated dense cells stamping
-  // dark specks over the gas was the failure mode this replaces.
-  const isDusty = (i: number, col: number, row: number): boolean => {
-    if (mass[i] < 78) return false;
-    if (metalStrengthAt(i) <= 0) return false;
-    let thick = 0;
-    if (col > 0 && mass[i - 1] >= 55) thick++;
-    if (col < size - 1 && mass[i + 1] >= 55) thick++;
-    if (row > 0 && mass[i - size] >= 55) thick++;
-    if (row < size - 1 && mass[i + size] >= 55) thick++;
-    if (thick < 3) return false;
-    if (rad && radRes > 0) {
-      const fx = Math.min(radRes - 1, (col * radScale) | 0);
-      const fy = Math.min(radRes - 1, (row * radScale) | 0);
-      if (rad[fy * radRes + fx] > GAS_WARM_RAD) return false;
-    }
-    return true;
-  };
-
-  // Two gas passes split by a stable per-cell hash: most cells render
+  // Two gas passes split by a stable per-block hash: most blocks render
   // beneath the stars, a foreground share renders over them so clusters
   // sit INSIDE their clouds instead of on top. Dust comes separately.
+  // Everything either pass needs is already in `gas`; the loop below is
+  // pure compositing.
   const renderGas = (foreground: boolean) => {
     // Screen blending: overlapping clouds glow into each other but
     // saturate smoothly instead of clipping to white.
     ctx.globalCompositeOperation = "screen";
-    for (let i = 0; i < mass.length; i++) {
-      const m = mass[i];
-      if (m === 0) continue;
-      if (cellJitter(i, 4) < 0.7 === foreground) continue;
-      const col = i % size;
-      const row = (i / size) | 0;
-      const gasX = col + (fracX?.[i] ?? 0);
-      const gasY = row + (fracY?.[i] ?? 0);
-      const rx = gasX - center;
-      const ry = gasY - center;
-      const radSq = rx * rx + ry * ry;
-      if (radSq > fadeEndSq) continue;
-      const t = Math.log(m + 1) * invLogMax;
-      const bi = Math.min(buckets - 1, Math.floor(t * buckets));
-      // Continuous temperature: smoothstep crossfades between adjacent
-      // tiers instead of hard flips - a cell in a transition zone draws
-      // both sprites at fractional weights.
-      const smooth = (a: number, b: number, x: number) => {
-        const u = Math.min(1, Math.max(0, (x - a) / (b - a)));
-        return u * u * (3 - 2 * u);
-      };
-      let heat = 0;
-      if (rad && radRes > 0) {
-        const fx = Math.min(radRes - 1, (col * radScale) | 0);
-        const fy = Math.min(radRes - 1, (row * radScale) | 0);
-        heat = rad[fy * radRes + fx];
-      }
-      const tierF =
-        smooth(GAS_WARM_RAD - 4, GAS_WARM_RAD + 4, heat) +
-        smooth(GAS_HOT_RAD - 8, GAS_HOT_RAD + 8, heat);
-      // Shock teal fades with distance from the front rather than
-      // switching inside a hard annulus.
-      let teal = 0;
-      for (const w of waves) {
-        const d = Math.abs(Math.hypot(col - w.x, row - w.y) - w.front);
-        const wgt = 1 - d / w.band;
-        if (wgt > teal) teal = wgt;
-      }
-      teal = teal > 0 ? teal * teal * (3 - 2 * teal) : 0;
-      teal *= 0.3 + 0.7 * metalStrengthAt(i);
-      // Fuzz overflows the cell on purpose, with per-cell size and
-      // brightness jitter so the field is cloudy rather than uniform.
-      const footprint = Math.max(7, (0.5 + t * rMax * 1.4) * 6) * (0.75 + cellJitter(i, 1));
-      let brightness = 0.48 + 0.54 * cellJitter(i, 2);
-      // Dust darkens by emitting less - absence of glow cannot leave
-      // overlay artifacts the way a multiply stamp can.
-      if (isDusty(i, col, row)) brightness *= 1 - 0.6 * metalStrengthAt(i);
-      const alpha = radialFade(Math.sqrt(radSq), softR) * brightness;
-      const dx = toCx(gasX) - footprint / 2;
-      const dy = toCy(gasY) - footprint / 2;
+    const list = foreground ? gas.foreground : gas.background;
+    const count = foreground ? gas.foregroundCount : gas.backgroundCount;
+    for (let k = 0; k < count; k++) {
+      const b = list[k];
+      const footprint = gas.footprint[b];
+      const half = footprint * 0.5;
+      const dx = toCx(gas.x[b]) - half;
+      const dy = toCy(gas.y[b]) - half;
+      const bi = Math.min(buckets - 1, Math.floor(gas.t[b] * buckets));
+      const tierF = gas.tier[b];
       const base = Math.min(2, Math.floor(tierF));
       const frac = Math.min(1, tierF - base);
+      const teal = gas.teal[b];
+      const alpha = gas.alpha[b];
       const temp = 1 - teal;
-      const draw = (tier: number, a: number) => {
-        if (a < 0.02) return;
+      // Continuous temperature: a block in a transition zone draws both
+      // adjacent tier sprites at fractional weights instead of flipping.
+      let a = alpha * temp * (1 - frac);
+      if (a >= GAS_MIN_ALPHA) {
         ctx.globalAlpha = a;
-        ctx.drawImage(gasSprites[tier][bi], dx, dy, footprint, footprint);
-      };
-      draw(base, alpha * temp * (1 - frac));
-      draw(Math.min(2, base + 1), alpha * temp * frac);
-      draw(3, alpha * teal);
+        ctx.drawImage(gasSprites[base][bi], dx, dy, footprint, footprint);
+      }
+      a = alpha * temp * frac;
+      if (a >= GAS_MIN_ALPHA) {
+        ctx.globalAlpha = a;
+        ctx.drawImage(gasSprites[Math.min(2, base + 1)][bi], dx, dy, footprint, footprint);
+      }
+      a = alpha * teal;
+      if (a >= GAS_MIN_ALPHA) {
+        ctx.globalAlpha = a;
+        ctx.drawImage(gasSprites[3][bi], dx, dy, footprint, footprint);
+      }
     }
     ctx.globalAlpha = 1.0;
     ctx.globalCompositeOperation = "source-over";
@@ -653,27 +879,20 @@ function drawFrame(s: State, mass: Uint16Array) {
   // coherent thick-cloud interiors only. The visible dark veining comes
   // from the gas pass emitting less there; this pass exists to dim
   // stars shining through thick clouds.
+  const dustFootprintBase = Math.max(10, scale * gas.block * 6);
   const renderDust = () => {
     ctx.globalCompositeOperation = "multiply";
-    for (let i = 0; i < mass.length; i++) {
-      const col = i % size;
-      const row = (i / size) | 0;
-      if (!isDusty(i, col, row)) continue;
-      if (cellJitter(i, 5) < 0.5) continue;
-      const rx = col - center;
-      const ry = row - center;
+    for (let k = 0; k < gas.dustCount; k++) {
+      const b = gas.dustList[k];
+      const gx = gas.x[b];
+      const gy = gas.y[b];
+      const rx = gx - center;
+      const ry = gy - center;
       if (rx * rx + ry * ry > softSq) continue;
-      const footprint = Math.max(10, rMax * 12) * (0.8 + 0.5 * cellJitter(i, 6));
-      const gasX = col + (fracX?.[i] ?? 0);
-      const gasY = row + (fracY?.[i] ?? 0);
-      ctx.globalAlpha = 0.06 + 0.18 * metalStrengthAt(i);
-      ctx.drawImage(
-        dustSprite!,
-        toCx(gasX) - footprint / 2,
-        toCy(gasY) - footprint / 2,
-        footprint,
-        footprint
-      );
+      const footprint = dustFootprintBase * (0.8 + 0.5 * cellJitter(b, 6));
+      const half = footprint * 0.5;
+      ctx.globalAlpha = 0.06 + 0.18 * gas.metal[b];
+      ctx.drawImage(dustSprite!, toCx(gx) - half, toCy(gy) - half, footprint, footprint);
     }
     ctx.globalAlpha = 1.0;
     ctx.globalCompositeOperation = "source-over";
@@ -682,22 +901,22 @@ function drawFrame(s: State, mass: Uint16Array) {
   // Newborn main-sequence stars begin beneath the entire cloud field.
   // As their natal gas moves ahead, age cross-fades them into the normal
   // exposed layer instead of revealing an instantaneous pellet spray.
-  drawStars(s, toCx, toCy, "embedded");
-  renderGas(false);
-  drawAssociations(s, toCx, toCy);
-  drawStars(s, toCx, toCy, "exposed");
+  timed("starsEmbedded", () => drawStars(s, toCx, toCy, "embedded"));
+  timed("gasBack", () => renderGas(false));
+  timed("associations", () => drawAssociations(s, toCx, toCy));
+  timed("starsExposed", () => drawStars(s, toCx, toCy, "exposed"));
   // Dust sits under the foreground gas: it still dims the star field,
   // but the glow layer re-softens it so lanes read as embedded darkness
   // rather than holes punched in the clouds.
-  renderDust();
-  renderGas(true);
-  drawTransients(s, toCx, toCy);
-  drawQuasar(s, toCx, toCy);
+  timed("dust", renderDust);
+  timed("gasFront", () => renderGas(true));
+  timed("transients", () => drawTransients(s, toCx, toCy));
+  timed("quasar", () => drawQuasar(s, toCx, toCy));
 
   ctx.restore();
 
-  applyShockShimmer(s);
-  applyBlackHoleLens(s);
+  timed("shimmer", () => applyShockShimmer(s));
+  timed("lens", () => applyBlackHoleLens(s));
 }
 
 // A brief active nucleus reads the same pulse and axis as the physical
@@ -926,41 +1145,76 @@ function applyBlackHoleLens(s: State) {
   const img = lensCtx.getImageData(0, 0, w, h);
   const data = img.data;
   const src = new Uint8ClampedArray(data);
-  const te2 = te * te;
-  const shadowR = te * 0.3;
-  const taperStart = R * 0.75;
-  for (let py = 0; py < h; py++) {
-    const dy = py + y0 - by;
-    for (let px = 0; px < w; px++) {
-      const dx = px + x0 - bx;
-      const r2 = dx * dx + dy * dy;
-      if (r2 >= R * R) continue;
-      const o = (py * w + px) * 4;
-      const r = Math.sqrt(r2) || 1e-3;
-      if (r < shadowR) {
-        data[o] = 0;
-        data[o + 1] = 0;
-        data[o + 2] = 4;
-        data[o + 3] = 255;
+
+  // The deflection depends only on the lens geometry, not on what is
+  // under it, so the whole (destination -> source) mapping is rebuilt
+  // only when that geometry moves. `te` is quantized because the hole's
+  // mass drifts continuously and a sub-quarter-pixel change in the
+  // Einstein radius is not visible - without the quantization the cache
+  // would miss on every single frame.
+  const key = `${w}x${h}:${Math.round(bx - x0)}:${Math.round(by - y0)}:${(te * 4) | 0}:${R | 0}`;
+  if (s.lensMapKey !== key || !s.lensMap || s.lensMap.length !== w * h) {
+    const map = new Int32Array(w * h);
+    const te2 = te * te;
+    const shadowR = te * 0.3;
+    const taperStart = R * 0.75;
+    const R2 = R * R;
+    for (let py = 0; py < h; py++) {
+      const dy = py + y0 - by;
+      const rowBase = py * w;
+      // Only the horizontal span inside the lens radius can map at all.
+      const span = R2 - dy * dy;
+      const halfSpan = span > 0 ? Math.sqrt(span) : -1;
+      if (halfSpan < 0) {
+        map.fill(LENS_UNTOUCHED, rowBase, rowBase + w);
         continue;
       }
-      let f = (r - te2 / r) / r;
-      if (r > taperStart) {
-        const t = (r - taperStart) / (R - taperStart);
-        f = f + (1 - f) * t * t * (3 - 2 * t);
+      const pxLo = Math.max(0, Math.ceil(bx - halfSpan - x0));
+      const pxHi = Math.min(w - 1, Math.floor(bx + halfSpan - x0));
+      map.fill(LENS_UNTOUCHED, rowBase, rowBase + w);
+      for (let px = pxLo; px <= pxHi; px++) {
+        const dx = px + x0 - bx;
+        const r2 = dx * dx + dy * dy;
+        if (r2 >= R2) continue;
+        const r = Math.sqrt(r2) || 1e-3;
+        if (r < shadowR) {
+          map[rowBase + px] = LENS_SHADOW;
+          continue;
+        }
+        let f = (r - te2 / r) / r;
+        if (r > taperStart) {
+          const t = (r - taperStart) / (R - taperStart);
+          f = f + (1 - f) * t * t * (3 - 2 * t);
+        }
+        let sx = Math.round(bx + dx * f) - x0;
+        let sy = Math.round(by + dy * f) - y0;
+        if (sx < 0) sx = 0;
+        else if (sx >= w) sx = w - 1;
+        if (sy < 0) sy = 0;
+        else if (sy >= h) sy = h - 1;
+        map[rowBase + px] = (sy * w + sx) * 4;
       }
-      let sx = Math.round(bx + dx * f) - x0;
-      let sy = Math.round(by + dy * f) - y0;
-      if (sx < 0) sx = 0;
-      else if (sx >= w) sx = w - 1;
-      if (sy < 0) sy = 0;
-      else if (sy >= h) sy = h - 1;
-      const so = (sy * w + sx) * 4;
-      data[o] = src[so];
-      data[o + 1] = src[so + 1];
-      data[o + 2] = src[so + 2];
-      data[o + 3] = src[so + 3];
     }
+    s.lensMap = map;
+    s.lensMapKey = key;
+  }
+
+  // Per-frame work is now the gather alone.
+  const map = s.lensMap;
+  for (let i = 0, o = 0; i < map.length; i++, o += 4) {
+    const so = map[i];
+    if (so === LENS_UNTOUCHED) continue;
+    if (so === LENS_SHADOW) {
+      data[o] = 0;
+      data[o + 1] = 0;
+      data[o + 2] = 4;
+      data[o + 3] = 255;
+      continue;
+    }
+    data[o] = src[so];
+    data[o + 1] = src[so + 1];
+    data[o + 2] = src[so + 2];
+    data[o + 3] = src[so + 3];
   }
   lensCtx.putImageData(img, 0, 0);
   ctx.save();
@@ -1125,6 +1379,109 @@ const CLASS_STOPS: [number, [number, number, number]][] = [
   [1.0, [160, 186, 255]],
 ];
 
+// Star color is quantized into buckets whose CSS color strings are built
+// once. A galaxy in progress resolves tens of thousands of stars, and
+// composing an `rgba(...)` string per star per layer - then making the
+// canvas re-parse it - cost more than the disc it painted. Opacity moves
+// to `globalAlpha`, which is a plain number, so each star still
+// composites separately and a dense swarm accumulates into a glow.
+const STAR_CLASS_BUCKETS = 24;
+const STAR_BUCKET_RED_GIANT = STAR_CLASS_BUCKETS;
+const STAR_BUCKET_WHITE_DWARF = STAR_CLASS_BUCKETS + 1;
+const STAR_BUCKET_NEUTRON = STAR_CLASS_BUCKETS + 2;
+
+let starColors: string[] = [];
+
+function buildStarColors() {
+  if (starColors.length > 0) return;
+  const colors: string[] = [];
+  for (let i = 0; i < STAR_CLASS_BUCKETS; i++) {
+    const [r, g, b] = classColor((i + 0.5) / STAR_CLASS_BUCKETS);
+    colors.push(`rgb(${r},${g},${b})`);
+  }
+  colors.push("rgb(255,132,92)"); // red giant
+  colors.push("rgb(220,238,255)"); // white dwarf
+  colors.push("rgb(145,232,255)"); // neutron star / compact
+  starColors = colors;
+}
+
+// Each `arc` + `fill` is its own composited draw, and a mature galaxy
+// resolves tens of thousands of stars across two layers - that draw-call
+// count, not the arithmetic, is what the star pass costs. Discs are
+// queued into (color, alpha) buckets and each bucket is emitted as one
+// path with one fill, turning ~10k draws into a few hundred.
+//
+// Alpha is quantized on a square-root curve rather than linearly: the
+// faint glow layers sit near 0.01 and the cores near 0.9, and a linear
+// ladder would collapse every glow onto the same rung.
+const STAR_COLOR_COUNT = STAR_CLASS_BUCKETS + 3;
+const STAR_ALPHA_LEVELS = 24;
+const STAR_BATCH_BUCKETS = STAR_COLOR_COUNT * STAR_ALPHA_LEVELS;
+/// x, y, radius per queued disc.
+const STAR_BATCH_STRIDE = 3;
+
+const starBatch: (Float32Array | null)[] = new Array(STAR_BATCH_BUCKETS).fill(null);
+const starBatchCount = new Int32Array(STAR_BATCH_BUCKETS);
+/// Buckets touched this pass, so the flush walks only those.
+const starBatchTouched = new Int32Array(STAR_BATCH_BUCKETS);
+let starBatchTouchedCount = 0;
+
+function starLevelAlpha(level: number): number {
+  const u = level / (STAR_ALPHA_LEVELS - 1);
+  return u * u;
+}
+
+function starBatchReset() {
+  for (let k = 0; k < starBatchTouchedCount; k++) {
+    starBatchCount[starBatchTouched[k]] = 0;
+  }
+  starBatchTouchedCount = 0;
+}
+
+function starBatchPush(color: number, alpha: number, x: number, y: number, r: number) {
+  const level = Math.round(Math.sqrt(Math.min(1, Math.max(0, alpha))) * (STAR_ALPHA_LEVELS - 1));
+  if (level === 0) return;
+  const bucket = color * STAR_ALPHA_LEVELS + level;
+  const count = starBatchCount[bucket];
+  if (count === 0) starBatchTouched[starBatchTouchedCount++] = bucket;
+  let buf = starBatch[bucket];
+  const need = (count + 1) * STAR_BATCH_STRIDE;
+  if (!buf || buf.length < need) {
+    const grown = new Float32Array(Math.max(need, buf ? buf.length * 2 : 384));
+    if (buf) grown.set(buf);
+    buf = grown;
+    starBatch[bucket] = buf;
+  }
+  const o = count * STAR_BATCH_STRIDE;
+  buf[o] = x;
+  buf[o + 1] = y;
+  buf[o + 2] = r;
+  starBatchCount[bucket] = count + 1;
+}
+
+function starBatchFlush(ctx: CanvasRenderingContext2D) {
+  for (let k = 0; k < starBatchTouchedCount; k++) {
+    const bucket = starBatchTouched[k];
+    const count = starBatchCount[bucket];
+    if (count === 0) continue;
+    const buf = starBatch[bucket]!;
+    ctx.globalAlpha = starLevelAlpha(bucket % STAR_ALPHA_LEVELS);
+    ctx.fillStyle = starColors[(bucket / STAR_ALPHA_LEVELS) | 0];
+    ctx.beginPath();
+    for (let i = 0, o = 0; i < count; i++, o += STAR_BATCH_STRIDE) {
+      const x = buf[o];
+      const y = buf[o + 1];
+      const r = buf[o + 2];
+      // Each disc needs its own subpath start, or `arc` connects it to
+      // the previous one with a straight line.
+      ctx.moveTo(x + r, y);
+      ctx.arc(x, y, r, 0, TAU);
+    }
+    ctx.fill();
+  }
+  starBatchReset();
+}
+
 function classColor(ci: number): [number, number, number] {
   let lo = CLASS_STOPS[0];
   let hi = CLASS_STOPS[CLASS_STOPS.length - 1];
@@ -1279,19 +1636,22 @@ function drawStars(
             ? 0.36
             : 0.3
         : Math.pow(Math.min(stars[i + 2], maxLum) / maxLum, 0.25);
-    const [cr, cg, cb] = redGiant
-      ? [255, 132, 92]
+    const bucket = redGiant
+      ? STAR_BUCKET_RED_GIANT
       : compact
         ? whiteDwarf
-          ? [220, 238, 255]
-          : [145, 232, 255]
-        : classColor(stars[i + 3]);
+          ? STAR_BUCKET_WHITE_DWARF
+          : STAR_BUCKET_NEUTRON
+        : Math.min(STAR_CLASS_BUCKETS - 1, Math.max(0, (stars[i + 3] * STAR_CLASS_BUCKETS) | 0));
     const core = compact ? 0.7 + 0.24 * b : 0.38 + 1.42 * b;
     const alpha = (0.3 + 0.64 * b) * fade;
     if (b > 0.82) {
-      // Giants: diffraction spikes plus a tight glow.
+      // Giants: diffraction spikes plus a tight glow. Spikes are rare
+      // enough - only the heaviest main-sequence stars clear the cut -
+      // that they stay per-star strokes rather than joining the batch.
       const spike = core * (1.8 + 3.2 * b);
-      ctx.strokeStyle = `rgba(${cr},${cg},${cb},${(0.36 * fade).toFixed(3)})`;
+      ctx.globalAlpha = 0.36 * fade;
+      ctx.strokeStyle = starColors[bucket];
       ctx.lineWidth = 0.55;
       ctx.beginPath();
       ctx.moveTo(px - spike, py);
@@ -1299,24 +1659,16 @@ function drawStars(
       ctx.moveTo(px, py - spike);
       ctx.lineTo(px, py + spike);
       ctx.stroke();
-      ctx.fillStyle = `rgba(${cr},${cg},${cb},${(0.11 * fade).toFixed(3)})`;
-      ctx.beginPath();
-      ctx.arc(px, py, core * 2.0, 0, Math.PI * 2);
-      ctx.fill();
+      ctx.globalAlpha = 1.0;
+      starBatchPush(bucket, 0.11 * fade, px, py, core * 2.0);
     } else if (b > 0.45) {
       // Mid-bright: a faint tight glow, no spikes.
-      ctx.fillStyle = `rgba(${cr},${cg},${cb},${(0.08 * fade).toFixed(3)})`;
-      ctx.beginPath();
-      ctx.arc(px, py, core * 1.65, 0, Math.PI * 2);
-      ctx.fill();
+      starBatchPush(bucket, 0.08 * fade, px, py, core * 1.65);
     }
-    ctx.globalAlpha = alpha;
-    ctx.fillStyle = `rgb(${cr},${cg},${cb})`;
-    ctx.beginPath();
-    ctx.arc(px, py, core, 0, Math.PI * 2);
-    ctx.fill();
-    ctx.globalAlpha = 1.0;
+    starBatchPush(bucket, alpha, px, py, core);
   }
+  starBatchFlush(ctx);
+  ctx.globalAlpha = 1.0;
   ctx.globalCompositeOperation = "source-over";
 }
 

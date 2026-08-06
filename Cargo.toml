@@ -21,6 +21,10 @@ path = "benches/tick_bench.rs"
 name = "debug_sim"
 path = "benches/debug_sim.rs"
 
+[[bin]]
+name = "perf_profile"
+path = "benches/perf_profile.rs"
+
 [dependencies]
 console_error_panic_hook = "^0.1"
 wasm-bindgen = "^0.2"
