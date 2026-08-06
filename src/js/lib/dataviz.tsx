@@ -4,6 +4,18 @@ import * as galaxy from "./galaxy";
 
 const MIN_ZOOM = 1;
 const MAX_ZOOM = 50;
+const TAU = Math.PI * 2;
+
+// Canvas rotates into a representative stellar frame. Coefficients are
+// median resolved-star angular rates measured at size 100, tick 1200.
+// sqrt(size) scaling preserves that apparent pace as the gravitating
+// mass and world radius grow together.
+const FRAME_RATE_SCALE: Record<galaxy.Scenario, number> = {
+  [galaxy.Scenario.BangRing]: 0.028,
+  [galaxy.Scenario.BangSpiral]: 0.031,
+  [galaxy.Scenario.IrregularSpiral]: 0.0085,
+  [galaxy.Scenario.IrregularElliptical]: 0.038,
+};
 
 // Radial render fade starts inside the nominal disk and reaches black well
 // before the canvas. This turns the finite simulation domain into a broad
@@ -163,6 +175,7 @@ interface State {
   scale: number;
   rMax: number;
   camera: Camera;
+  frameAngularRate: number;
   simTick: number;
   lastMass: Uint16Array | null;
   lastFracX: Float32Array | null;
@@ -176,12 +189,18 @@ interface State {
   cleanup: () => void;
 }
 
-// Mirror camera to data-* attrs so E2E tests can observe pan/zoom.
-function publishCamera(s: State) {
+function frameAngle(s: State): number {
+  return (s.simTick * s.frameAngularRate) % TAU;
+}
+
+// Mirror presentation transforms to data-* attrs for browser validation.
+function publishView(s: State) {
   const { host, camera } = s;
   host.setAttribute("data-cam-tx", camera.tx.toFixed(2));
   host.setAttribute("data-cam-ty", camera.ty.toFixed(2));
   host.setAttribute("data-cam-zoom", camera.zoom.toFixed(4));
+  host.setAttribute("data-frame-angle", frameAngle(s).toFixed(6));
+  host.setAttribute("data-frame-rate", s.frameAngularRate.toFixed(8));
 }
 
 let state: State | null = null;
@@ -201,7 +220,10 @@ function clampPan(cam: Camera, cw: number, ch: number): Camera {
   return { ...cam, tx, ty };
 }
 
-export function initViz(galaxyFrontend: galaxy.Frontend) {
+export function initViz(
+  galaxyFrontend: galaxy.Frontend,
+  scenario: galaxy.Scenario = galaxy.Scenario.IrregularSpiral
+) {
   const host = document.getElementById("dataviz");
   if (!host) return;
 
@@ -271,7 +293,7 @@ export function initViz(galaxyFrontend: galaxy.Frontend) {
     const tx = x - k * (x - state.camera.tx);
     const ty = y - k * (y - state.camera.ty);
     state.camera = clampPan({ tx, ty, zoom: newZoom }, state.cw, state.ch);
-    publishCamera(state);
+    publishView(state);
     redraw();
   };
 
@@ -303,7 +325,7 @@ export function initViz(galaxyFrontend: galaxy.Frontend) {
       state.cw,
       state.ch
     );
-    publishCamera(state);
+    publishView(state);
     redraw();
   };
 
@@ -338,7 +360,7 @@ export function initViz(galaxyFrontend: galaxy.Frontend) {
     state.scale = Math.min(ncw, nch) / (state.size * VIEW_SPAN);
     state.rMax = state.scale * 0.5;
     state.camera = clampPan(state.camera, ncw, nch);
-    publishCamera(state);
+    publishView(state);
     redraw();
   };
   window.addEventListener("resize", onResize);
@@ -382,6 +404,7 @@ export function initViz(galaxyFrontend: galaxy.Frontend) {
     scale,
     rMax: scale * 0.5,
     camera,
+    frameAngularRate: FRAME_RATE_SCALE[scenario] / Math.sqrt(Math.max(1, size)),
     simTick: 0,
     lastMass: null,
     lastFracX: null,
@@ -394,7 +417,7 @@ export function initViz(galaxyFrontend: galaxy.Frontend) {
     lastStellarHaloMass: 0,
     cleanup,
   };
-  publishCamera(state);
+  publishView(state);
 }
 
 export function initData(galaxyFrontend: galaxy.Frontend) {
@@ -404,6 +427,7 @@ export function initData(galaxyFrontend: galaxy.Frontend) {
 export function updateData(galaxyFrontend: galaxy.Frontend, simTick?: number) {
   if (!state) return;
   if (simTick != null) state.simTick = simTick;
+  publishView(state);
   const mass = galaxyFrontend.massArray();
   // Copy so zoom/pan interactions after the sim stops still have data
   // to redraw from.
@@ -438,9 +462,13 @@ function drawFrame(s: State, mass: Uint16Array) {
   ctx.fillStyle = "#05060a";
   ctx.fillRect(0, 0, s.cw, s.ch);
 
-  // Apply the camera: screen = zoom * world + translate.
+  // Apply the camera, then rotate the world into the representative
+  // stellar frame. Physics remains in the inertial simulation frame.
   ctx.translate(camera.tx, camera.ty);
   ctx.scale(camera.zoom, camera.zoom);
+  ctx.translate(s.cw / 2, s.ch / 2);
+  ctx.rotate(frameAngle(s));
+  ctx.translate(-s.cw / 2, -s.ch / 2);
 
   const center = size / 2;
   const toCx = (x: number) => s.cw / 2 + (x + 0.5 - center) * scale;
@@ -660,8 +688,15 @@ function applyShockShimmer(s: State) {
     // World -> canvas -> screen css -> device.
     const cx = s.cw / 2 + (t[i + 1] + 0.5 - center) * scale;
     const cy = s.ch / 2 + (center - t[i + 2] - 0.5) * scale;
-    const sx = (camera.zoom * cx + camera.tx) * dpr;
-    const sy = (camera.zoom * cy + camera.ty) * dpr;
+    const angle = frameAngle(s);
+    const cos = Math.cos(angle);
+    const sin = Math.sin(angle);
+    const dx = cx - s.cw / 2;
+    const dy = cy - s.ch / 2;
+    const rotatedX = s.cw / 2 + dx * cos - dy * sin;
+    const rotatedY = s.ch / 2 + dx * sin + dy * cos;
+    const sx = (camera.zoom * rotatedX + camera.tx) * dpr;
+    const sy = (camera.zoom * rotatedY + camera.ty) * dpr;
     const front = blastRadius(t[i + 4], age) * scale * camera.zoom * dpr;
     if (front < 6) continue;
     if (
@@ -1119,7 +1154,7 @@ function drawStars(s: State, toCx: (x: number) => number, toCy: (y: number) => n
 export function resetView() {
   if (!state) return;
   state.camera = { tx: 0, ty: 0, zoom: 1 };
-  publishCamera(state);
+  publishView(state);
   if (state.lastMass) drawFrame(state, state.lastMass);
 }
 

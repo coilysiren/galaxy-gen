@@ -86,10 +86,14 @@ test.describe("Galaxy Generator", () => {
 
   test("tick advances the simulation without errors", async ({ page }) => {
     await page.getByTestId("btn-init").click();
+    const host = page.locator("#dataviz");
+    await expect(host).toHaveAttribute("data-frame-angle", "0.000000");
 
     await page.getByTestId("btn-tick").click();
     await page.getByTestId("btn-tick").click();
     await expect(page.getByTestId("stat-ticks")).toHaveText("2");
+    const frameAngle = Number(await host.getAttribute("data-frame-angle"));
+    expect(frameAngle).toBeGreaterThan(0);
     // Stepping stamps the tick into the URL - the moment's address.
     expect(new URL(page.url()).searchParams.get("t")).toBe("2");
   });
@@ -105,6 +109,12 @@ test.describe("Galaxy Generator", () => {
       const fe: any = (window as any).__galaxyGen.frontend;
       return Array.from(fe.massArray() as Uint16Array);
     });
+    const frame = await page.locator("#dataviz").evaluate((host) => ({
+      angle: host.getAttribute("data-frame-angle"),
+      rate: host.getAttribute("data-frame-rate"),
+    }));
+    expect(Number(frame.angle)).toBeGreaterThan(0);
+    expect(Number(frame.rate)).toBeGreaterThan(0);
 
     // The same address must reproduce the same universe.
     await page.goto("/?seed=12345&size=50&t=25");
@@ -116,7 +126,12 @@ test.describe("Galaxy Generator", () => {
       const fe: any = (window as any).__galaxyGen.frontend;
       return Array.from(fe.massArray() as Uint16Array);
     });
+    const frame2 = await page.locator("#dataviz").evaluate((host) => ({
+      angle: host.getAttribute("data-frame-angle"),
+      rate: host.getAttribute("data-frame-rate"),
+    }));
     expect(mass2).toEqual(mass);
+    expect(frame2).toEqual(frame);
   });
 
   test("ticks actually redistribute mass (sim is not frozen)", async ({ page }) => {
@@ -433,6 +448,7 @@ test.describe("Galaxy Generator", () => {
     // A bang start must produce a different mass field than an
     // irregular start.
     const snapshots: Record<string, number[]> = {};
+    const frameRates: Record<string, number> = {};
     for (const mode of ["1", "2"]) {
       await select.selectOption(mode);
       await page.getByTestId("btn-init").click();
@@ -442,6 +458,7 @@ test.describe("Galaxy Generator", () => {
         const fe: any = (window as any).__galaxyGen.frontend;
         return Array.from(fe.massArray() as Uint16Array);
       });
+      frameRates[mode] = Number(await page.locator("#dataviz").getAttribute("data-frame-rate"));
       expect(snapshots[mode].length).toBe(250 * 250);
     }
 
@@ -459,6 +476,7 @@ test.describe("Galaxy Generator", () => {
       diffCount(irregular, snapshots["1"]),
       "bang snapshot should differ from irregular"
     ).toBeGreaterThan(minDistinctCells);
+    expect(frameRates["1"]).not.toBe(frameRates["2"]);
     expect(nonzero(snapshots["1"])).toBeGreaterThan(0);
   });
 

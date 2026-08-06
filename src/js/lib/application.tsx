@@ -323,7 +323,7 @@ export function Interface() {
       next.seed(SEED_MASS, scenario);
     }
     galaxyFrontendRef.current = next;
-    dataviz.initViz(next);
+    dataviz.initViz(next, scenario);
     dataviz.initData(next);
     setInitialized(true);
     setTickCount(0);
