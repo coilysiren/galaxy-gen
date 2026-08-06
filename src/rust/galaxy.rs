@@ -83,14 +83,25 @@ pub struct ScenarioParams {
     /// to the wave; collisionless stars do not.
     pub spiral_wave_strength: f32,
     /// Isothermal pressure response to neighboring gas-density gradients
-    /// in wave-bearing disks. This keeps arms broad instead of point-like.
-    pub spiral_gas_pressure: f32,
+    /// in scenarios that sustain resolved gas structures.
+    pub gas_pressure: f32,
     /// Cold-gas transport rate down the arm potential. The conservative
     /// drift models gas cooling into the compression lane.
     pub spiral_arm_transport: f32,
     /// Phase advance per tick in m-theta space. Dividing by two gives the
     /// visible two-arm pattern speed.
     pub spiral_pattern_step: f32,
+    /// Axisymmetric radial restoring force for a sustained gas ring.
+    pub ring_wave_strength: f32,
+    /// Radius of the annular potential minimum as a fraction of disk_r.
+    pub ring_radius_frac: f32,
+    /// Conservative cold-gas transport rate toward the annular minimum.
+    pub ring_transport: f32,
+    /// Scenario density threshold for sustained cloud collapse, expressed
+    /// as a fraction of the per-cell mass cap.
+    pub collapse_density_fraction: f32,
+    /// Per-scan collapse probability after the sustained-density trigger.
+    pub collapse_chance: f32,
     /// Irregular: power-law contrast of the smoke field (clumpiness).
     pub smoke_contrast: f32,
     /// Irregular: exponential radial density envelope scale as a
@@ -129,9 +140,14 @@ impl Scenario {
                 eject_swirl: 0.15,
                 spiral_amp: 0.0,
                 spiral_wave_strength: 0.0,
-                spiral_gas_pressure: 0.0,
+                gas_pressure: 0.18,
                 spiral_arm_transport: 0.0,
                 spiral_pattern_step: 0.0,
+                ring_wave_strength: 0.1,
+                ring_radius_frac: 0.58,
+                ring_transport: 0.08,
+                collapse_density_fraction: 0.24,
+                collapse_chance: 0.08,
                 smoke_contrast: 1.8,
                 radial_scale_frac: 0.0,
                 seed_gain: 1.0,
@@ -153,9 +169,14 @@ impl Scenario {
                 eject_swirl: 0.6,
                 spiral_amp: 0.0,
                 spiral_wave_strength: 0.65,
-                spiral_gas_pressure: 0.4,
+                gas_pressure: 0.4,
                 spiral_arm_transport: 0.12,
                 spiral_pattern_step: 0.1,
+                ring_wave_strength: 0.0,
+                ring_radius_frac: 0.0,
+                ring_transport: 0.0,
+                collapse_density_fraction: 0.75,
+                collapse_chance: 0.35,
                 smoke_contrast: 1.8,
                 radial_scale_frac: 0.0,
                 seed_gain: 1.0,
@@ -177,9 +198,14 @@ impl Scenario {
                 eject_swirl: 0.0,
                 spiral_amp: 0.7,
                 spiral_wave_strength: 0.7,
-                spiral_gas_pressure: 0.5,
+                gas_pressure: 0.5,
                 spiral_arm_transport: 0.14,
                 spiral_pattern_step: 0.1,
+                ring_wave_strength: 0.0,
+                ring_radius_frac: 0.0,
+                ring_transport: 0.0,
+                collapse_density_fraction: 0.75,
+                collapse_chance: 0.35,
                 smoke_contrast: 1.8,
                 radial_scale_frac: 0.0,
                 seed_gain: 1.5,
@@ -201,9 +227,14 @@ impl Scenario {
                 eject_swirl: 0.0,
                 spiral_amp: 0.0,
                 spiral_wave_strength: 0.0,
-                spiral_gas_pressure: 0.0,
+                gas_pressure: 0.0,
                 spiral_arm_transport: 0.0,
                 spiral_pattern_step: 0.0,
+                ring_wave_strength: 0.0,
+                ring_radius_frac: 0.0,
+                ring_transport: 0.0,
+                collapse_density_fraction: 0.75,
+                collapse_chance: 0.35,
                 smoke_contrast: 0.9,
                 radial_scale_frac: 0.28,
                 seed_gain: 1.5,
@@ -454,15 +485,13 @@ impl Galaxy {
     const SPIRAL_AMP: f32 = 0.55;
     const SPIRAL_PITCH: f32 = 4.0;
 
-    // Cloud-collapse tuning. A cell must stay at or above the density
-    // fraction of CELL_MASS_CAP and below the radiation resist level for
+    // Cloud-collapse tuning. A cell must stay above its scenario-owned
+    // density fraction and below the radiation resist level for
     // COLLAPSE_HEAT_TRIGGER consecutive scans (collapse_watch cadence 16)
     // before it can roll for collapse. No velocity gate: jammed cells
     // accumulate large STORED velocity while standing still, so a speed
     // limit anti-selects exactly the proto-cluster cells.
-    const COLLAPSE_DENSITY_FRACTION: f32 = 0.75;
     const COLLAPSE_HEAT_TRIGGER: u8 = 6;
-    const COLLAPSE_CHANCE: f32 = 0.35;
     const COLLAPSE_RADIATION_RESIST: f32 = 20.0;
     /// Fraction of the collapsing cell's gas consumed into the birth
     /// budget; neighbors contribute half this fraction.
@@ -1029,6 +1058,8 @@ impl Galaxy {
         // External backends replace gravity only. Scenario-owned gas
         // forces still run in Rust so CPU and WebGPU share one model.
         next.process_spiral_density_wave(time);
+        next.process_ring_density_wave(time);
+        next.process_gas_pressure(time);
         next.apply_acceleration(time);
         next
     }
@@ -1441,6 +1472,27 @@ impl Galaxy {
         self.spiral_structure().1
     }
 
+    /// Fraction of visible gas mass inside the scenario's target annulus.
+    pub fn ring_concentration(&self) -> f32 {
+        self.ring_structure().0
+    }
+
+    /// Fraction of visible gas mass outside the ring's hollow core.
+    pub fn ring_core_depletion(&self) -> f32 {
+        self.ring_structure().1
+    }
+
+    /// Fraction of azimuthal sectors populated across the target annulus.
+    pub fn ring_coverage(&self) -> f32 {
+        self.ring_structure().2
+    }
+
+    /// Mass-weighted radial RMS distance from the target ring, in disk radii.
+    /// Lower values describe a narrower annulus.
+    pub fn ring_width(&self) -> f32 {
+        self.ring_structure().3
+    }
+
     fn spiral_structure(&self) -> (f32, f32) {
         const BINS: usize = 8;
         let center = self.size as f32 * 0.5;
@@ -1508,6 +1560,67 @@ impl Galaxy {
         (coherence, covered as f32 / BINS as f32)
     }
 
+    fn ring_structure(&self) -> (f32, f32, f32, f32) {
+        const SECTORS: usize = 12;
+        let center = self.size as f32 * 0.5;
+        let disk_r = self.disk_radius();
+        let configured = self.scenario.params().ring_radius_frac;
+        let target_fraction = if configured > 0.0 { configured } else { 0.58 };
+        let target = disk_r * target_fraction;
+        let half_width = disk_r * 0.12;
+        let core_radius = disk_r * (target_fraction - 0.2).max(0.12);
+        let mut total = 0.0f64;
+        let mut annular = 0.0f64;
+        let mut core = 0.0f64;
+        let mut radial_variance = 0.0f64;
+        let mut sector_mass = [0.0f64; SECTORS];
+        let mut sector_occupied = [0usize; SECTORS];
+        for i in 0..self.n {
+            let mass = self.mass[i] as f64;
+            if mass == 0.0 {
+                continue;
+            }
+            let x = self.xs_i[i] as f32 + self.frac_x[i] - center;
+            let y = self.ys_i[i] as f32 + self.frac_y[i] - center;
+            let r = (x * x + y * y).sqrt();
+            if r > disk_r * 0.94 {
+                continue;
+            }
+            total += mass;
+            radial_variance += mass * ((r - target) / disk_r).powi(2) as f64;
+            if r < core_radius {
+                core += mass;
+            }
+            if (r - target).abs() <= half_width {
+                annular += mass;
+                let theta = y.atan2(x).rem_euclid(std::f32::consts::TAU);
+                let sector = ((theta / std::f32::consts::TAU) * SECTORS as f32)
+                    .floor()
+                    .clamp(0.0, (SECTORS - 1) as f32) as usize;
+                sector_mass[sector] += mass;
+                sector_occupied[sector] += 1;
+            }
+        }
+        if total == 0.0 {
+            return (0.0, 0.0, 0.0, 0.0);
+        }
+        let covered = if annular > 0.0 {
+            (0..SECTORS)
+                .filter(|&sector| {
+                    sector_occupied[sector] >= 2 && sector_mass[sector] >= annular * 0.03
+                })
+                .count()
+        } else {
+            0
+        };
+        (
+            (annular / total) as f32,
+            (1.0 - core / total) as f32,
+            covered as f32 / SECTORS as f32,
+            (radial_variance / total).sqrt() as f32,
+        )
+    }
+
     pub(crate) fn process_gravity(&mut self, _time: f32) {
         self.gravitate_all();
     }
@@ -1526,8 +1639,6 @@ impl Galaxy {
         let outer = disk_r * 0.94;
         let taper_width = disk_r * 0.12;
         let pattern_phase = p.spiral_pattern_step * self.tick_count as f32;
-        let size = self.size as i32;
-        let pressure_scale = p.spiral_gas_pressure / (2.0 * Galaxy::CELL_MASS_CAP as f32);
         for i in 0..self.n {
             if self.mass[i] == 0 {
                 continue;
@@ -1555,10 +1666,61 @@ impl Galaxy {
             let force = -p.spiral_wave_strength * taper * phase.sin();
             self.acc_x[i] += force * grad_x;
             self.acc_y[i] += force * grad_y;
+        }
+    }
 
-            // -grad(rho): parcels on a cloud edge accelerate toward the
-            // lower-density side. The arm potential still compresses the
-            // lane, while this local term prevents irreversible knotting.
+    /// Apply an axisymmetric annular potential to gas. Ejecta cross and
+    /// settle into the minimum while newborn collisionless stars retain
+    /// the orbital velocity inherited from their natal gas.
+    pub(crate) fn process_ring_density_wave(&mut self, _time: f32) {
+        let p = self.scenario.params();
+        if p.ring_wave_strength <= 0.0 {
+            return;
+        }
+        let center = self.size as f32 * 0.5;
+        let disk_r = self.disk_radius();
+        let target = disk_r * p.ring_radius_frac;
+        let scale = (disk_r * 0.14).max(1.0);
+        for i in 0..self.n {
+            if self.mass[i] == 0 {
+                continue;
+            }
+            let x = self.xs_i[i] as f32 + self.frac_x[i] - center;
+            let y = self.ys_i[i] as f32 + self.frac_y[i] - center;
+            let r = (x * x + y * y).sqrt();
+            if r <= disk_r * 0.06 || r >= disk_r * 0.96 {
+                continue;
+            }
+            let radial_force = -p.ring_wave_strength * ((r - target) / scale).tanh();
+            self.acc_x[i] += radial_force * x / r;
+            self.acc_y[i] += radial_force * y / r;
+        }
+    }
+
+    /// Resolve the local isothermal pressure gradient before advection.
+    /// The conservative post-advection flux below carries the same model
+    /// through parcel collisions without inventing mass or momentum.
+    pub(crate) fn process_gas_pressure(&mut self, _time: f32) {
+        let p = self.scenario.params();
+        if p.gas_pressure <= 0.0 {
+            return;
+        }
+        let size = self.size as i32;
+        let center = self.size as f32 * 0.5;
+        let disk_r = self.disk_radius();
+        let pressure_scale = p.gas_pressure / (2.0 * Galaxy::CELL_MASS_CAP as f32);
+        for i in 0..self.n {
+            if self.mass[i] == 0 {
+                continue;
+            }
+            if p.spiral_wave_strength > 0.0 {
+                let x = self.xs_i[i] as f32 + self.frac_x[i] - center;
+                let y = self.ys_i[i] as f32 + self.frac_y[i] - center;
+                let r = (x * x + y * y).sqrt();
+                if r <= disk_r * 0.12 || r >= disk_r * 0.94 {
+                    continue;
+                }
+            }
             let col = i as i32 % size;
             let row = i as i32 / size;
             let left = self.mass
@@ -1962,10 +2124,13 @@ impl Galaxy {
     /// Scan for cells that have stayed dense, slow, and cool; sustained
     /// qualification plus an RNG roll emits CloudCollapse.
     pub(crate) fn process_collapse_watch(&mut self, _time: f32) {
-        let density_floor =
-            (Galaxy::CELL_MASS_CAP as f32 * Galaxy::COLLAPSE_DENSITY_FRACTION) as u16;
+        let density_floor = (Galaxy::CELL_MASS_CAP as f32
+            * self.scenario.params().collapse_density_fraction) as u16;
         let mut rng = self.rng_stream(Galaxy::RNG_COLLAPSE_WATCH);
         let tick = self.tick_count;
+        let p = self.scenario.params();
+        let center = self.size as f32 * 0.5;
+        let disk_r = self.disk_radius();
         for i in 0..self.n {
             let m = self.mass[i];
             if m < density_floor {
@@ -1979,12 +2144,22 @@ impl Galaxy {
                 self.heat_parent[i] = 0;
                 continue;
             }
+            if p.ring_wave_strength > 0.0 {
+                let x = self.xs_i[i] as f32 + self.frac_x[i] - center;
+                let y = self.ys_i[i] as f32 + self.frac_y[i] - center;
+                let ring_radius = disk_r * p.ring_radius_frac;
+                if ((x * x + y * y).sqrt() - ring_radius).abs() > disk_r * 0.14 {
+                    self.collapse_heat[i] = 0;
+                    self.heat_parent[i] = 0;
+                    continue;
+                }
+            }
             if self.radiation_at_cell(i) >= Galaxy::COLLAPSE_RADIATION_RESIST {
                 continue;
             }
             self.collapse_heat[i] = self.collapse_heat[i].saturating_add(1);
             if self.collapse_heat[i] >= Galaxy::COLLAPSE_HEAT_TRIGGER
-                && rng.random_range(0.0f32..1.0) < Galaxy::COLLAPSE_CHANCE
+                && rng.random_range(0.0f32..1.0) < p.collapse_chance
             {
                 self.collapse_heat[i] = 0;
                 let parent = self.heat_parent[i];
@@ -3671,7 +3846,7 @@ impl Galaxy {
             self.acc_y[i] = 0.0;
         }
 
-        self.diffuse_spiral_gas(time);
+        self.transport_structured_gas(time);
 
         // Pressure overflow: cells above the cap shed the excess to their
         // four neighbors, carrying momentum with the shed mass. Without
@@ -3725,11 +3900,12 @@ impl Galaxy {
     /// Grid parcels otherwise merge irreversibly whenever their paths meet,
     /// so acceleration alone cannot keep a diffuse cloud resolved. This
     /// exchange carries the source metal fraction and momentum exactly.
-    fn diffuse_spiral_gas(&mut self, time: f32) {
+    fn transport_structured_gas(&mut self, time: f32) {
         let p = self.scenario.params();
-        let diffusion = (p.spiral_gas_pressure * time).clamp(0.0, 0.45);
+        let diffusion = (p.gas_pressure * time).clamp(0.0, 0.45);
         let arm_transport = (p.spiral_arm_transport * time).clamp(0.0, 0.2);
-        if diffusion <= 0.0 && arm_transport <= 0.0 {
+        let ring_transport = (p.ring_transport * time).clamp(0.0, 0.2);
+        if diffusion <= 0.0 && arm_transport <= 0.0 && ring_transport <= 0.0 {
             return;
         }
 
@@ -3833,7 +4009,33 @@ impl Galaxy {
                         (mass as f32 * arm_transport * taper * improvement * 0.5).round() as u16;
                     let arm_budget = arm_budget.min(mass - allocated);
                     transfers[best.1] = transfers[best.1].saturating_add(arm_budget);
+                    allocated += arm_budget;
                 }
+            }
+
+            // Ring gas drifts toward the annular potential minimum. The
+            // score is radial only, so this cannot introduce an azimuthal
+            // arm or bar into the axisymmetric scenario.
+            if ring_transport > 0.0 && allocated < mass {
+                let target = disk_r * p.ring_radius_frac;
+                let x = self.xs_i[i] as f32 + self.frac_x[i] - center;
+                let y = self.ys_i[i] as f32 + self.frac_y[i] - center;
+                let source_distance = ((x * x + y * y).sqrt() - target).abs();
+                let mut best = (source_distance, start);
+                for step in 0..offsets.len() {
+                    let k = (start + step) % offsets.len();
+                    let ni = neighbors[k];
+                    let nx = self.xs_i[ni] as f32 + self.frac_x[ni] - center;
+                    let ny = self.ys_i[ni] as f32 + self.frac_y[ni] - center;
+                    let distance = ((nx * nx + ny * ny).sqrt() - target).abs();
+                    if distance < best.0 {
+                        best = (distance, k);
+                    }
+                }
+                let improvement = (source_distance - best.0).clamp(0.0, 1.0);
+                let ring_budget = (mass as f32 * ring_transport * improvement).round() as u16;
+                let ring_budget = ring_budget.min(mass - allocated);
+                transfers[best.1] = transfers[best.1].saturating_add(ring_budget);
             }
 
             let metal_fraction = self.metal_mass[i] / mass as f32;
@@ -4478,50 +4680,70 @@ mod tests_dynamics {
     }
 
     #[test]
-    fn test_spiral_pressure_flux_conserves_mass_metals_and_momentum() {
-        let mut g = Galaxy::new(20, 0);
-        g.scenario = Scenario::IrregularSpiral;
-        let i = 10 * 20 + 15;
-        g.mass[i] = 100;
-        g.metal_mass[i] = 30.0;
-        g.vel_x[i] = 1.25;
-        g.vel_y[i] = -0.4;
-        let mass_before: u64 = g.mass.iter().map(|&mass| mass as u64).sum();
-        let metals_before: f32 = g.metal_mass.iter().sum();
-        let px_before: f32 = g
-            .mass
-            .iter()
-            .enumerate()
-            .map(|(i, &mass)| mass as f32 * g.vel_x[i])
-            .sum();
-        let py_before: f32 = g
-            .mass
-            .iter()
-            .enumerate()
-            .map(|(i, &mass)| mass as f32 * g.vel_y[i])
-            .sum();
+    fn test_ring_wave_accelerates_gas_toward_the_annulus() {
+        let mut g = Galaxy::new(40, 0);
+        g.scenario = Scenario::BangRing;
+        let center = g.size as usize / 2;
+        let inside = center * 40 + center + 5;
+        let outside = center * 40 + center + 15;
+        g.mass[inside] = 40;
+        g.mass[outside] = 40;
 
-        g.diffuse_spiral_gas(0.5);
+        g.process_ring_density_wave(0.5);
 
-        let mass_after: u64 = g.mass.iter().map(|&mass| mass as u64).sum();
-        let metals_after: f32 = g.metal_mass.iter().sum();
-        let px_after: f32 = g
-            .mass
-            .iter()
-            .enumerate()
-            .map(|(i, &mass)| mass as f32 * g.vel_x[i])
-            .sum();
-        let py_after: f32 = g
-            .mass
-            .iter()
-            .enumerate()
-            .map(|(i, &mass)| mass as f32 * g.vel_y[i])
-            .sum();
-        assert!(g.mass.iter().filter(|&&mass| mass > 0).count() > 1);
-        assert_eq!(mass_after, mass_before);
-        assert!((metals_after - metals_before).abs() < 1e-4);
-        assert!((px_after - px_before).abs() < 1e-4);
-        assert!((py_after - py_before).abs() < 1e-4);
+        assert!(g.acc_x[inside] > 0.0, "inner gas must move outward");
+        assert!(g.acc_x[outside] < 0.0, "outer gas must move inward");
+        assert_eq!(g.acc_y[inside], 0.0);
+        assert_eq!(g.acc_y[outside], 0.0);
+    }
+
+    #[test]
+    fn test_structured_gas_transport_conserves_mass_metals_and_momentum() {
+        for scenario in [Scenario::BangRing, Scenario::IrregularSpiral] {
+            let mut g = Galaxy::new(20, 0);
+            g.scenario = scenario;
+            let i = 10 * 20 + 15;
+            g.mass[i] = 100;
+            g.metal_mass[i] = 30.0;
+            g.vel_x[i] = 1.25;
+            g.vel_y[i] = -0.4;
+            let mass_before: u64 = g.mass.iter().map(|&mass| mass as u64).sum();
+            let metals_before: f32 = g.metal_mass.iter().sum();
+            let px_before: f32 = g
+                .mass
+                .iter()
+                .enumerate()
+                .map(|(i, &mass)| mass as f32 * g.vel_x[i])
+                .sum();
+            let py_before: f32 = g
+                .mass
+                .iter()
+                .enumerate()
+                .map(|(i, &mass)| mass as f32 * g.vel_y[i])
+                .sum();
+
+            g.transport_structured_gas(0.5);
+
+            let mass_after: u64 = g.mass.iter().map(|&mass| mass as u64).sum();
+            let metals_after: f32 = g.metal_mass.iter().sum();
+            let px_after: f32 = g
+                .mass
+                .iter()
+                .enumerate()
+                .map(|(i, &mass)| mass as f32 * g.vel_x[i])
+                .sum();
+            let py_after: f32 = g
+                .mass
+                .iter()
+                .enumerate()
+                .map(|(i, &mass)| mass as f32 * g.vel_y[i])
+                .sum();
+            assert!(g.mass.iter().filter(|&&mass| mass > 0).count() > 1);
+            assert_eq!(mass_after, mass_before);
+            assert!((metals_after - metals_before).abs() < 1e-4);
+            assert!((px_after - px_before).abs() < 1e-4);
+            assert!((py_after - py_before).abs() < 1e-4);
+        }
     }
 
     #[test]
@@ -4573,6 +4795,80 @@ mod tests_dynamics {
             g.events_executed(crate::events::EventKind::StarBirth as u32)
                 > start_births.expect("tick 1000 checkpoint"),
             "the coherent arm window must remain actively star-forming"
+        );
+    }
+
+    #[test]
+    fn test_ring_remains_hollow_resolved_and_star_forming_for_100_ticks() {
+        let mut g = Galaxy::new(50, 0).seed_with_mode_seeded(25, Scenario::BangRing, 42);
+        let mut start_births = None;
+        let mut min_concentration = (f32::INFINITY, 0);
+        let mut min_depletion = (f32::INFINITY, 0);
+        let mut min_coverage = (f32::INFINITY, 0);
+        let mut max_width = (0.0f32, 0);
+        let mut min_occupied = (usize::MAX, 0);
+        for tick in 1..=1500 {
+            g = g.tick(0.5);
+            if tick < 1400 {
+                continue;
+            }
+            let concentration = g.ring_concentration();
+            let depletion = g.ring_core_depletion();
+            let coverage = g.ring_coverage();
+            let width = g.ring_width();
+            let occupied = g.mass.iter().filter(|&&mass| mass > 0).count();
+            let births = g.events_executed(crate::events::EventKind::StarBirth as u32);
+            start_births.get_or_insert(births);
+            if concentration < min_concentration.0 {
+                min_concentration = (concentration, tick);
+            }
+            if depletion < min_depletion.0 {
+                min_depletion = (depletion, tick);
+            }
+            if coverage < min_coverage.0 {
+                min_coverage = (coverage, tick);
+            }
+            if width > max_width.0 {
+                max_width = (width, tick);
+            }
+            if occupied < min_occupied.0 {
+                min_occupied = (occupied, tick);
+            }
+        }
+        assert!(
+            min_concentration.0 >= 0.75,
+            "tick {} ring concentration was {}",
+            min_concentration.1,
+            min_concentration.0
+        );
+        assert!(
+            min_depletion.0 >= 0.95,
+            "tick {} core depletion was {}",
+            min_depletion.1,
+            min_depletion.0
+        );
+        assert!(
+            min_coverage.0 >= 0.5,
+            "tick {} ring coverage was {}",
+            min_coverage.1,
+            min_coverage.0
+        );
+        assert!(
+            max_width.0 <= 0.12,
+            "tick {} ring width was {}",
+            max_width.1,
+            max_width.0
+        );
+        assert!(
+            min_occupied.0 >= 250,
+            "tick {} had only {} gas cells",
+            min_occupied.1,
+            min_occupied.0
+        );
+        assert!(
+            g.events_executed(crate::events::EventKind::StarBirth as u32)
+                > start_births.expect("tick 1400 checkpoint"),
+            "the coherent ring window must remain actively star-forming"
         );
     }
 
@@ -4697,7 +4993,7 @@ mod tests_golden {
         assert_eq!(
             actual,
             vec![
-                3175198802015567231u64,
+                10864616295652119511u64,
                 11971691907940808674,
                 4260859134213941995,
                 4274638675712473258,

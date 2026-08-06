@@ -27,6 +27,14 @@ struct Metrics {
     spiral: f64,
     /// Fraction of radial bands carrying the same pitched arm phase.
     spiral_coverage: f64,
+    /// Gas mass fraction inside the scenario's target annulus.
+    ring_concentration: f64,
+    /// Visible gas fraction outside the hollow ring core.
+    ring_core_depletion: f64,
+    /// Fraction of populated azimuthal sectors in the target annulus.
+    ring_coverage: f64,
+    /// Radial RMS distance from the target annulus, in disk radii.
+    ring_width: f64,
     /// Star population tangential velocity (same annulus) - the stars
     /// must rotate too, not just the gas.
     star_vt: f64,
@@ -129,6 +137,10 @@ fn metrics(g: &Galaxy, size: u16) -> Metrics {
         },
         spiral: g.spiral_coherence() as f64,
         spiral_coverage: g.spiral_coverage() as f64,
+        ring_concentration: g.ring_concentration() as f64,
+        ring_core_depletion: g.ring_core_depletion() as f64,
+        ring_coverage: g.ring_coverage() as f64,
+        ring_width: g.ring_width() as f64,
         star_vt: if svt_den > 0.0 {
             svt_num / svt_den
         } else {
@@ -193,7 +205,7 @@ fn main() {
                 }
                 let m = metrics(&g, size);
                 println!(
-                    "t={cp:5}  nz={:5}  gas={:6}  vt={:+.3}  rot={:+.2}  r_pk={:.2}  ctr={:.2}  m2={:.2}  spi={:.2}  cov={:.2}  svt={:+.3}  sctr={:.2}  stars={:5}  mixed={:5}  ev(col/b/sn/sh/d/cap/nsm/grb/pn/ia)={}/{}/{}/{}/{}/{}/{}/{}/{}/{}",
+                    "t={cp:5}  nz={:5}  gas={:6}  vt={:+.3}  rot={:+.2}  r_pk={:.2}  ctr={:.2}  m2={:.2}  spi={:.2}  cov={:.2}  ring={:.2}  hollow={:.2}  rcov={:.2}  rw={:.2}  svt={:+.3}  sctr={:.2}  stars={:5}  mixed={:5}  ev(col/b/sn/sh/d/cap/nsm/grb/pn/ia)={}/{}/{}/{}/{}/{}/{}/{}/{}/{}",
                     m.nonzero,
                     m.total,
                     m.vt,
@@ -203,6 +215,10 @@ fn main() {
                     m.m2,
                     m.spiral,
                     m.spiral_coverage,
+                    m.ring_concentration,
+                    m.ring_core_depletion,
+                    m.ring_coverage,
+                    m.ring_width,
                     m.star_vt,
                     m.star_central,
                     g.star_count(),
