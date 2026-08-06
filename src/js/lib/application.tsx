@@ -158,6 +158,10 @@ export function Interface() {
   const [associationCount, setAssociationCount] = React.useState(0);
   const [captureCount, setCaptureCount] = React.useState(0);
   const [neutronStarCount, setNeutronStarCount] = React.useState(0);
+  const [redGiantCount, setRedGiantCount] = React.useState(0);
+  const [whiteDwarfCount, setWhiteDwarfCount] = React.useState(0);
+  const [planetaryNebulaCount, setPlanetaryNebulaCount] = React.useState(0);
+  const [typeIaCount, setTypeIaCount] = React.useState(0);
   const [grbCount, setGrbCount] = React.useState(0);
   const [phaseMixedCount, setPhaseMixedCount] = React.useState(0);
   const [bhFactor, setBhFactor] = React.useState(1);
@@ -187,6 +191,10 @@ export function Interface() {
     associationCount: number;
     captureCount: number;
     neutronStarCount: number;
+    redGiantCount: number;
+    whiteDwarfCount: number;
+    planetaryNebulaCount: number;
+    typeIaCount: number;
     grbCount: number;
     phaseMixedCount: number;
     stellarHaloMass: number;
@@ -324,6 +332,10 @@ export function Interface() {
     setAssociationCount(0);
     setCaptureCount(0);
     setNeutronStarCount(0);
+    setRedGiantCount(0);
+    setWhiteDwarfCount(0);
+    setPlanetaryNebulaCount(0);
+    setTypeIaCount(0);
     setGrbCount(0);
     setPhaseMixedCount(0);
     setBhFactor(1);
@@ -366,6 +378,10 @@ export function Interface() {
     setAssociationCount(fe.associationCount());
     setCaptureCount(fe.captureCount());
     setNeutronStarCount(fe.neutronStarCount());
+    setRedGiantCount(fe.redGiantCount());
+    setWhiteDwarfCount(fe.whiteDwarfCount());
+    setPlanetaryNebulaCount(fe.planetaryNebulaCount());
+    setTypeIaCount(fe.typeIaCount());
     setGrbCount(fe.grbCount());
     setPhaseMixedCount(fe.phaseMixedCount());
     setBhFactor(fe.bhMass() / initialBhRef.current);
@@ -413,6 +429,10 @@ export function Interface() {
       setAssociationCount(snap.associationCount);
       setCaptureCount(snap.captureCount);
       setNeutronStarCount(snap.neutronStarCount);
+      setRedGiantCount(snap.redGiantCount);
+      setWhiteDwarfCount(snap.whiteDwarfCount);
+      setPlanetaryNebulaCount(snap.planetaryNebulaCount);
+      setTypeIaCount(snap.typeIaCount);
       setGrbCount(snap.grbCount);
       setPhaseMixedCount(snap.phaseMixedCount);
       setBhFactor(snap.bhMass / initialBhRef.current);
@@ -461,6 +481,10 @@ export function Interface() {
           associationCount,
           captureCount,
           neutronStarCount,
+          redGiantCount,
+          whiteDwarfCount,
+          planetaryNebulaCount,
+          typeIaCount,
           grbCount,
           phaseMixedCount,
           stellarHaloMass,
@@ -482,6 +506,10 @@ export function Interface() {
             associationCount,
             captureCount,
             neutronStarCount,
+            redGiantCount,
+            whiteDwarfCount,
+            planetaryNebulaCount,
+            typeIaCount,
             grbCount,
             phaseMixedCount,
             stellarHaloMass,
@@ -603,6 +631,18 @@ export function Interface() {
                   </td>
                 </tr>
                 <tr>
+                  <td>red giants</td>
+                  <td className="text-right" data-testid="stat-red-giants">
+                    {redGiantCount.toLocaleString()}
+                  </td>
+                </tr>
+                <tr>
+                  <td>white dwarfs</td>
+                  <td className="text-right" data-testid="stat-white-dwarfs">
+                    {whiteDwarfCount.toLocaleString()}
+                  </td>
+                </tr>
+                <tr>
                   <td>neutron stars</td>
                   <td className="text-right" data-testid="stat-neutron-stars">
                     {neutronStarCount.toLocaleString()}
@@ -612,6 +652,18 @@ export function Interface() {
                   <td>supernovae</td>
                   <td className="text-right" data-testid="stat-sn">
                     {snCount.toLocaleString()}
+                  </td>
+                </tr>
+                <tr>
+                  <td>planetary nebulae</td>
+                  <td className="text-right" data-testid="stat-planetary-nebulae">
+                    {planetaryNebulaCount.toLocaleString()}
+                  </td>
+                </tr>
+                <tr>
+                  <td>type ia supernovae</td>
+                  <td className="text-right" data-testid="stat-type-ia">
+                    {typeIaCount.toLocaleString()}
                   </td>
                 </tr>
                 <tr>

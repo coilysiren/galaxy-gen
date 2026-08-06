@@ -12,6 +12,8 @@ pub enum Stage {
     NeutronStar = 2,
     Merging = 3,
     MergedRemnant = 4,
+    RedGiant = 5,
+    WhiteDwarf = 6,
 }
 
 impl Stage {
@@ -21,6 +23,9 @@ impl Stage {
             1 => Stage::Remnant,
             2 => Stage::NeutronStar,
             3 => Stage::Merging,
+            4 => Stage::MergedRemnant,
+            5 => Stage::RedGiant,
+            6 => Stage::WhiteDwarf,
             _ => Stage::MergedRemnant,
         }
     }

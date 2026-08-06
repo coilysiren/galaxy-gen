@@ -22,9 +22,13 @@ pub enum EventKind {
     NeutronStarMerger = 6,
     /// The compact merger launched its brief relativistic jets.
     GammaRayBurst = 7,
+    /// A red giant shed its envelope and exposed a white dwarf.
+    PlanetaryNebula = 8,
+    /// A white-dwarf binary underwent thermonuclear disruption.
+    TypeIaSupernova = 9,
 }
 
-pub const EVENT_KIND_COUNT: usize = 8;
+pub const EVENT_KIND_COUNT: usize = 10;
 
 /// No-source / no-target / no-parent sentinels.
 pub const NO_REF: u32 = u32::MAX;
@@ -46,7 +50,7 @@ pub struct Event {
     pub target: u32,
     /// Kind-dependent scalar (mass budget, kick strength, ...).
     pub payload: f32,
-    /// Optional second scalar, currently composition carried by an event.
+    /// Optional second scalar for composition or a secondary stable id.
     pub aux: f32,
     /// Causal parent event id, NO_PARENT for root causes.
     pub parent: u64,
@@ -235,6 +239,8 @@ fn kind_from_u32(v: u32) -> EventKind {
         5 => EventKind::BlackHoleCapture,
         6 => EventKind::NeutronStarMerger,
         7 => EventKind::GammaRayBurst,
+        8 => EventKind::PlanetaryNebula,
+        9 => EventKind::TypeIaSupernova,
         _ => EventKind::CloudDissipate,
     }
 }
@@ -290,17 +296,20 @@ mod tests_event_queue {
         q.emit(9, EventKind::Supernova, 5, NO_REF, 1.25, NO_PARENT);
         q.emit(9, EventKind::ShockWave, 5, 77, -3.5, 1);
         q.emit(9, EventKind::GammaRayBurst, 9, 42, 18.0, 2);
+        q.emit_with_aux(9, EventKind::TypeIaSupernova, 10, 43, 8.0, 11.0, 3);
         let flat = q.to_flat();
         let mut back = EventQueue::from_flat(&flat);
         let due = back.take_due(10);
-        assert_eq!(due.len(), 3);
+        assert_eq!(due.len(), 4);
         assert_eq!(due[0].kind, EventKind::Supernova);
         assert_eq!(due[1].payload, -3.5);
         assert_eq!(due[1].parent, 1);
         assert_eq!(due[2].kind, EventKind::GammaRayBurst);
+        assert_eq!(due[3].kind, EventKind::TypeIaSupernova);
+        assert_eq!(due[3].aux, 11.0);
         // Emission after restore continues the id sequence.
         let id = back.emit(10, EventKind::CloudCollapse, 0, NO_REF, 0.0, NO_PARENT);
-        assert_eq!(id, 4);
+        assert_eq!(id, 5);
     }
 
     #[test]

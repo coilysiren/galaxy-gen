@@ -488,7 +488,7 @@ function drawFrame(s: State, mass: Uint16Array) {
   const tr = s.lastTransients;
   if (tr) {
     for (let k = 0; k < tr.length && waves.length < 16; k += 5) {
-      if (tr[k] !== 2) continue;
+      if (tr[k] !== 2 && tr[k] !== 5) continue;
       const front = blastRadius(tr[k + 4], tr[k + 3]);
       waves.push({
         x: tr[k + 1],
@@ -653,7 +653,7 @@ function applyShockShimmer(s: State) {
   ctx.save();
   ctx.setTransform(1, 0, 0, 1, 0, 0);
   for (let i = 0; i < t.length && drawn < MAX_SHIMMER_WAVES; i += 5) {
-    if (t[i] !== 2) continue;
+    if (t[i] !== 2 && t[i] !== 5) continue;
     const age = t[i + 3];
     const life = 1 - age / BLAST_LIFE;
     if (life <= 0.15) continue;
@@ -813,35 +813,37 @@ function drawTransients(s: State, toCx: (x: number) => number, toCy: (y: number)
     const py = toCy(t[i + 2]);
     const age = t[i + 3];
     const mag = t[i + 4];
-    if (kind === 2) {
+    if (kind === 2 || kind === 5) {
       // Supernova: a shell with a bright leading edge and a fading wake
       // - a wave, not a stroked circle. Size and brightness follow the
       // progenitor's stellar class, but stay understated: a big epoch
       // fires many at once.
+      const typeIa = kind === 5;
       const life = 1 - age / BLAST_LIFE;
       if (life <= 0) continue;
-      const heft = Math.min(mag / 120, 1);
+      const heft = typeIa ? Math.min(mag / 12, 1) : Math.min(mag / 120, 1);
       const front = blastRadius(mag, age) * scale;
       const inner = Math.max(front * 0.6, front - (2 + 2 * heft) * scale);
-      const peak = (0.12 + 0.13 * heft) * life;
+      const peak = (typeIa ? 0.34 : 0.12 + 0.13 * heft) * life;
+      const shell = typeIa ? [205, 224, 255] : [255, 228, 185];
       const g = ctx.createRadialGradient(px, py, inner, px, py, front);
-      g.addColorStop(0, "rgba(255,236,200,0)");
-      g.addColorStop(0.55, `rgba(255,228,185,${(peak * 0.35).toFixed(3)})`);
-      g.addColorStop(0.92, `rgba(255,244,222,${peak.toFixed(3)})`);
-      g.addColorStop(1, "rgba(255,250,240,0)");
+      g.addColorStop(0, `rgba(${shell[0]},${shell[1]},${shell[2]},0)`);
+      g.addColorStop(0.55, `rgba(${shell[0]},${shell[1]},${shell[2]},${(peak * 0.35).toFixed(3)})`);
+      g.addColorStop(0.92, `rgba(245,248,255,${peak.toFixed(3)})`);
+      g.addColorStop(1, "rgba(255,255,255,0)");
       ctx.fillStyle = g;
       ctx.beginPath();
       ctx.arc(px, py, front, 0, Math.PI * 2);
       ctx.fill();
       // Leading edge, faint.
-      ctx.strokeStyle = `rgba(255,246,226,${(peak * 0.55).toFixed(3)})`;
+      ctx.strokeStyle = `rgba(245,250,255,${(peak * 0.55).toFixed(3)})`;
       ctx.lineWidth = 0.7;
       ctx.beginPath();
       ctx.arc(px, py, front * 0.985, 0, Math.PI * 2);
       ctx.stroke();
       if (age < 10) {
         const coreLife = 1 - age / 10;
-        const coreAlpha = 0.4 + 0.25 * heft;
+        const coreAlpha = (typeIa ? 0.75 : 0.4) + 0.25 * heft;
         ctx.fillStyle = `rgba(255,255,245,${(coreAlpha * coreLife).toFixed(3)})`;
         ctx.beginPath();
         ctx.arc(px, py, (1.2 + heft * 1.5 + age * 0.15) * scale * 0.45, 0, Math.PI * 2);
@@ -867,6 +869,27 @@ function drawTransients(s: State, toCx: (x: number) => number, toCy: (y: number)
       ctx.fillStyle = `rgba(185,255,220,${a.toFixed(3)})`;
       ctx.beginPath();
       ctx.arc(px, py, r, 0, Math.PI * 2);
+      ctx.fill();
+    } else if (kind === 4 && age < 60) {
+      // Planetary nebula: a slow, cool envelope around the exposed dwarf.
+      const life = 1 - age / 60;
+      const radius = (1.4 + age * 0.08) * scale;
+      const band = Math.max(0.7, scale * 0.55);
+      const nebula = ctx.createRadialGradient(
+        px,
+        py,
+        Math.max(0, radius - band),
+        px,
+        py,
+        radius + band
+      );
+      nebula.addColorStop(0, "rgba(100,210,220,0)");
+      nebula.addColorStop(0.48, `rgba(120,225,220,${(0.22 * life).toFixed(3)})`);
+      nebula.addColorStop(0.7, `rgba(224,150,210,${(0.16 * life).toFixed(3)})`);
+      nebula.addColorStop(1, "rgba(245,190,230,0)");
+      ctx.fillStyle = nebula;
+      ctx.beginPath();
+      ctx.arc(px, py, radius + band, 0, Math.PI * 2);
       ctx.fill();
     } else if (kind === 3 && age < 16) {
       // Short gamma-ray burst: opposed relativistic jets. Their orientation
@@ -1039,13 +1062,26 @@ function drawStars(s: State, toCx: (x: number) => number, toCy: (y: number) => n
     // Fourth root compresses the huge mass-luminosity range into a
     // usable brightness scale.
     const stage = Math.round(stars[i + 4]);
-    const compact = stage >= 2;
-    const b = compact
-      ? stage === 3
-        ? 0.44
-        : 0.3
-      : Math.pow(Math.min(stars[i + 2], maxLum) / maxLum, 0.25);
-    const [cr, cg, cb] = compact ? [145, 232, 255] : classColor(stars[i + 3]);
+    const redGiant = stage === 5;
+    const whiteDwarf = stage === 6;
+    const neutronCompact = stage >= 2 && stage <= 4;
+    const compact = neutronCompact || whiteDwarf;
+    const b = redGiant
+      ? 0.78
+      : compact
+        ? stage === 3
+          ? 0.44
+          : whiteDwarf
+            ? 0.36
+            : 0.3
+        : Math.pow(Math.min(stars[i + 2], maxLum) / maxLum, 0.25);
+    const [cr, cg, cb] = redGiant
+      ? [255, 132, 92]
+      : compact
+        ? whiteDwarf
+          ? [220, 238, 255]
+          : [145, 232, 255]
+        : classColor(stars[i + 3]);
     const core = compact ? 0.7 + 0.24 * b : 0.38 + 1.42 * b;
     const alpha = (0.3 + 0.64 * b) * fade;
     if (b > 0.82) {

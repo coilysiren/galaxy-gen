@@ -22,8 +22,9 @@ Hawking radiation.
 ## Production
 
 Core-collapse supernovae return inherited heavy elements with their gas ejecta
-and synthesize a bounded yield equal to 2% of progenitor mass. The new amount is
-recorded in metal_produced_total. Tests enforce:
+and synthesize a bounded yield equal to 2% of progenitor mass. Type Ia
+supernovae convert up to 35% of their white-dwarf binary mass into heavy
+elements. The new amount is recorded in metal_produced_total. Tests enforce:
 
 ```text
 tracked heavy elements = seeded heavy elements + produced heavy elements

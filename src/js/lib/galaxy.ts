@@ -197,6 +197,22 @@ export class Frontend {
     return this.galaxy.neutron_star_count();
   }
 
+  public redGiantCount(): number {
+    return this.galaxy.red_giant_count();
+  }
+
+  public whiteDwarfCount(): number {
+    return this.galaxy.white_dwarf_count();
+  }
+
+  public planetaryNebulaCount(): number {
+    return Number(this.galaxy.events_executed(8));
+  }
+
+  public typeIaCount(): number {
+    return Number(this.galaxy.events_executed(9));
+  }
+
   public grbCount(): number {
     return Number(this.galaxy.events_executed(7));
   }
@@ -355,6 +371,10 @@ export class TickWorker {
     associationCount: number,
     captureCount: number,
     neutronStarCount: number,
+    redGiantCount: number,
+    whiteDwarfCount: number,
+    planetaryNebulaCount: number,
+    typeIaCount: number,
     grbCount: number,
     phaseMixedCount: number,
     stellarHaloMass: number,
@@ -379,6 +399,10 @@ export class TickWorker {
       associationCount: number,
       captureCount: number,
       neutronStarCount: number,
+      redGiantCount: number,
+      whiteDwarfCount: number,
+      planetaryNebulaCount: number,
+      typeIaCount: number,
       grbCount: number,
       phaseMixedCount: number,
       stellarHaloMass: number,
@@ -417,6 +441,10 @@ export class TickWorker {
         msg.associationCount,
         msg.captureCount,
         msg.neutronStarCount,
+        msg.redGiantCount,
+        msg.whiteDwarfCount,
+        msg.planetaryNebulaCount,
+        msg.typeIaCount,
         msg.grbCount,
         msg.phaseMixedCount,
         msg.stellarHaloMass,

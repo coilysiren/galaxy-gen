@@ -142,11 +142,15 @@ static REGISTRY: &[ProcessDescriptor] = &[
         run: Galaxy::process_stellar_halo,
     },
     ProcessDescriptor {
-        // Lifecycle-scale cadence. Emits supernovae and compact mergers,
-        // and advances remnant retirement clocks.
+        // Lifecycle-scale cadence. Emits envelope loss, both supernova
+        // channels, and compact mergers, and advances retirement clocks.
         name: "stellar_aging",
-        reads: &[StateKey::StarLifecycle],
-        writes: &[StateKey::StarLifecycle, StateKey::EventQueue],
+        reads: &[StateKey::StarLifecycle, StateKey::Composition],
+        writes: &[
+            StateKey::StarLifecycle,
+            StateKey::EventQueue,
+            StateKey::Composition,
+        ],
         requires_fresh: &[],
         cadence: 8,
         phase_offset: 7,

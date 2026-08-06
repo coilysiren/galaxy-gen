@@ -3,7 +3,8 @@
 [![Galaxy Generator interface showing an irregular galaxy evolving into a spiral](docs/project-galaxy-gen.gif)](https://galaxy-gen.coilysiren.me)
 
 `{ rust → wasm → js }` living-galaxy simulation. Gravitational physics,
-star birth and death, neutron-star mergers, stellar-halo phase mixing,
+star birth and death, planetary nebulae, Type Ia and core-collapse supernovae,
+neutron-star mergers, stellar-halo phase mixing,
 black-hole evolution, conserved chemical enrichment, and a cycling cold/hot gas reservoir are computed in
 Rust, compiled to WebAssembly via
 [wasm-pack](https://github.com/rustwasm/wasm-pack), and rendered on a browser

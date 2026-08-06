@@ -398,6 +398,10 @@ impl Galaxy {
     const REMNANT_RESOLVED_AGE: f32 = 360.0;
     /// Unpaired neutron stars stay resolved longer than ordinary remnants.
     const NEUTRON_STAR_RESOLVED_AGE: f32 = 1_200.0;
+    /// Brief post-main-sequence expansion before envelope loss.
+    const RED_GIANT_LIFETIME: f32 = 160.0;
+    /// Single white dwarfs remain visible before joining the stellar halo.
+    const WHITE_DWARF_RESOLVED_AGE: f32 = 1_200.0;
 
     // Uniform-seed structure: domain-warped fractal noise shaped into
     // smoke. Four octaves of smoothstep value noise (fBm) give the
@@ -503,6 +507,18 @@ impl Galaxy {
     const SN_METAL_YIELD_FRACTION: f32 = 0.02;
     const SN_KICK: f32 = 1.2;
     const SN_RADIUS: i32 = 2;
+    /// Intermediate-mass birth draws split into delayed white-dwarf pairs.
+    const WD_BINARY_SPLIT_MASS: f32 = 12.0;
+    const WD_RETAINED_FRACTION: f32 = 0.2;
+    const WD_MERGER_DELAY_MIN: f32 = 240.0;
+    const WD_MERGER_DELAY_SPAN: f32 = 640.0;
+    const WD_LUMINOSITY: f32 = 2.0;
+    const PLANETARY_NEBULA_RADIUS: i32 = 2;
+    const PLANETARY_NEBULA_KICK: f32 = 0.22;
+    const TYPE_IA_RADIUS: i32 = 3;
+    const TYPE_IA_KICK: f32 = 1.55;
+    /// Thermonuclear burning converts a large share of the binary to metals.
+    const TYPE_IA_METAL_YIELD_FRACTION: f32 = 0.35;
     /// Core-collapse-scale birth draws split into a close pair. The pair
     /// retains the system's original lifetime and fate without creating mass.
     const NS_BINARY_SPLIT_MASS: f32 = 30.0;
@@ -1023,6 +1039,22 @@ impl Galaxy {
             .count()
     }
 
+    pub fn red_giant_count(&self) -> usize {
+        self.stars
+            .stage
+            .iter()
+            .filter(|&&stage| stage == Stage::RedGiant as u8)
+            .count()
+    }
+
+    pub fn white_dwarf_count(&self) -> usize {
+        self.stars
+            .stage
+            .iter()
+            .filter(|&&stage| stage == Stage::WhiteDwarf as u8)
+            .count()
+    }
+
     pub fn stellar_halo_mass_value(&self) -> f64 {
         self.stellar_halo_mass
     }
@@ -1056,9 +1088,9 @@ impl Galaxy {
     }
 
     /// Renderer transients: [kind, x, y, ticks_ago, magnitude] per recent
-    /// executed event within the transient window (Supernova, StarBirth,
-    /// and GammaRayBurst). Magnitude is kind-specific physical mass or
-    /// budget, used only to scale the renderer's transient.
+    /// executed event within the transient window. Magnitude is
+    /// kind-specific physical mass or budget, used only to scale the
+    /// renderer's transient.
     pub fn render_transients(&self) -> Vec<f32> {
         let size = self.size as i32;
         let mut out = Vec::new();
@@ -1071,6 +1103,8 @@ impl Galaxy {
                 crate::events::EventKind::Supernova => (2.0f32, ev.target),
                 crate::events::EventKind::StarBirth => (1.0f32, ev.target),
                 crate::events::EventKind::GammaRayBurst => (3.0f32, ev.target),
+                crate::events::EventKind::PlanetaryNebula => (4.0f32, ev.target),
+                crate::events::EventKind::TypeIaSupernova => (5.0f32, ev.target),
                 _ => continue,
             };
             let cell = cell as i32;
@@ -1154,6 +1188,8 @@ impl Galaxy {
             5 => BlackHoleCapture,
             6 => NeutronStarMerger,
             7 => GammaRayBurst,
+            8 => PlanetaryNebula,
+            9 => TypeIaSupernova,
             _ => CloudDissipate,
         };
         self.events.executed_count(k)
@@ -2007,7 +2043,14 @@ impl Galaxy {
             let aged_single_neutron_star = stage == Stage::NeutronStar
                 && self.stars.binary_id[i] == NO_BINARY
                 && self.stars.age[i] >= Galaxy::NEUTRON_STAR_RESOLVED_AGE;
-            if !(spatially_mixed || aged_remnant || aged_single_neutron_star) {
+            let aged_single_white_dwarf = stage == Stage::WhiteDwarf
+                && self.stars.binary_id[i] == NO_BINARY
+                && self.stars.age[i] >= Galaxy::WHITE_DWARF_RESOLVED_AGE;
+            if !(spatially_mixed
+                || aged_remnant
+                || aged_single_neutron_star
+                || aged_single_white_dwarf)
+            {
                 i += 1;
                 continue;
             }
@@ -2029,9 +2072,9 @@ impl Galaxy {
 
     /// Advance stellar ages by the sim time elapsed since the last run
     /// (dt x cadence, assuming dt is stable between runs - dt changes
-    /// mid-run smear ages slightly, which is acceptable). Deaths: heavy
-    /// main-sequence stars past their lifetime emit Supernova; light ones
-    /// quietly fade to remnants.
+    /// mid-run smear ages slightly, which is acceptable). Massive stars
+    /// core-collapse. Lighter stars expand, shed envelopes, and leave white
+    /// dwarfs that may later produce a delayed thermonuclear supernova.
     pub(crate) fn process_stellar_aging(&mut self, time: f32) {
         let elapsed = time * 8.0;
         let tick = self.tick_count;
@@ -2041,15 +2084,36 @@ impl Galaxy {
                 continue;
             }
             self.stars.age[i] += elapsed;
-            if stage != Stage::MainSequence {
-                continue;
-            }
-            if self.stars.age[i] < self.stars.lifetime[i] {
-                continue;
-            }
-            if self.stars.mass[i] >= Galaxy::SN_MASS_THRESHOLD
-                || self.stars.binary_id[i] != NO_BINARY
+            if self.stars.age[i] < self.stars.lifetime[i]
+                || !matches!(stage, Stage::MainSequence | Stage::RedGiant)
             {
+                continue;
+            }
+            if stage == Stage::RedGiant {
+                let cell = self.cell_index_at(self.stars.pos_x[i], self.stars.pos_y[i]);
+                self.events.emit(
+                    tick,
+                    crate::events::EventKind::PlanetaryNebula,
+                    self.stars.id[i],
+                    cell as u32,
+                    self.stars.mass[i],
+                    crate::events::NO_PARENT,
+                );
+                self.stars.stage[i] = Stage::WhiteDwarf as u8;
+                self.stars.age[i] = 0.0;
+                self.stars.lifetime[i] = if self.stars.binary_id[i] == NO_BINARY {
+                    Galaxy::WHITE_DWARF_RESOLVED_AGE
+                } else {
+                    self.white_dwarf_merger_delay(self.stars.binary_id[i])
+                };
+                self.stars.luminosity[i] = Galaxy::WD_LUMINOSITY;
+                self.stars.color_index[i] = 0.72;
+                continue;
+            }
+
+            let binary_core_collapse = self.stars.binary_id[i] != NO_BINARY
+                && self.stars.mass[i] * 2.0 >= Galaxy::NS_BINARY_SPLIT_MASS;
+            if self.stars.mass[i] >= Galaxy::SN_MASS_THRESHOLD || binary_core_collapse {
                 // Target carries the nearest cell index so renderer
                 // transients and the shock handler know where it happened
                 // even after the star is gone.
@@ -2065,10 +2129,11 @@ impl Galaxy {
                 // Mark so it cannot re-emit while the event is in flight.
                 self.stars.stage[i] = Stage::Remnant as u8;
             } else {
-                self.stars.stage[i] = Stage::Remnant as u8;
+                self.stars.stage[i] = Stage::RedGiant as u8;
                 self.stars.age[i] = 0.0;
-                self.stars.lifetime[i] = Galaxy::REMNANT_RESOLVED_AGE;
-                self.stars.luminosity[i] *= 0.05;
+                self.stars.lifetime[i] = Galaxy::RED_GIANT_LIFETIME;
+                self.stars.luminosity[i] = (self.stars.luminosity[i] * 2.5).max(48.0);
+                self.stars.color_index[i] = 0.02;
             }
         }
 
@@ -2106,6 +2171,49 @@ impl Galaxy {
             self.stars.stage[j] = Stage::Merging as u8;
             scheduled_binaries.push(binary);
         }
+
+        // Intermediate-mass binaries follow the same deterministic pairing
+        // contract, but merge as white dwarfs and disrupt completely.
+        for i in 0..self.stars.len() {
+            if Stage::from_u8(self.stars.stage[i]) != Stage::WhiteDwarf
+                || self.stars.binary_id[i] == NO_BINARY
+                || self.stars.age[i] < self.stars.lifetime[i]
+            {
+                continue;
+            }
+            let binary = self.stars.binary_id[i];
+            if scheduled_binaries.contains(&binary) {
+                continue;
+            }
+            let Some(j) = (0..self.stars.len()).find(|&j| {
+                j != i
+                    && self.stars.binary_id[j] == binary
+                    && Stage::from_u8(self.stars.stage[j]) == Stage::WhiteDwarf
+                    && self.stars.age[j] >= self.stars.lifetime[j]
+            }) else {
+                continue;
+            };
+            let combined_mass = self.stars.mass[i] + self.stars.mass[j];
+            let x = (self.stars.pos_x[i] * self.stars.mass[i]
+                + self.stars.pos_x[j] * self.stars.mass[j])
+                / combined_mass;
+            let y = (self.stars.pos_y[i] * self.stars.mass[i]
+                + self.stars.pos_y[j] * self.stars.mass[j])
+                / combined_mass;
+            let cell = self.cell_index_at(x, y);
+            self.events.emit_with_aux(
+                tick,
+                crate::events::EventKind::TypeIaSupernova,
+                self.stars.id[i],
+                cell as u32,
+                combined_mass,
+                self.stars.id[j] as f32,
+                crate::events::NO_PARENT,
+            );
+            self.stars.stage[i] = Stage::Merging as u8;
+            self.stars.stage[j] = Stage::Merging as u8;
+            scheduled_binaries.push(binary);
+        }
     }
 
     fn cell_index_at(&self, x: f32, y: f32) -> usize {
@@ -2113,6 +2221,78 @@ impl Galaxy {
         let col = (x as i32).clamp(0, size - 1);
         let row = (y as i32).clamp(0, size - 1);
         (row * size + col) as usize
+    }
+
+    /// Deposit event ejecta into nearby cells, preserving momentum and
+    /// composition even when a saturated destination accepts less mass.
+    fn deposit_ejecta(
+        &mut self,
+        cell: usize,
+        requested_mass: u16,
+        requested_metals: f32,
+        kick: f32,
+        radius: i32,
+    ) -> (f32, f32) {
+        if cell >= self.n || requested_mass == 0 {
+            return (0.0, 0.0);
+        }
+        let size = self.size as i32;
+        let (center_col, center_row) = (cell as i32 % size, cell as i32 / size);
+        let mut targets: Vec<usize> = Vec::new();
+        for dr in -radius..=radius {
+            for dc in -radius..=radius {
+                if dc * dc + dr * dr > radius * radius {
+                    continue;
+                }
+                let col = wrap(center_col + dc, size) as u16;
+                let row = wrap(center_row + dr, size) as u16;
+                targets.push(self.col_row_to_index(col, row) as usize);
+            }
+        }
+
+        let share = requested_mass / targets.len() as u16;
+        let remainder = requested_mass % targets.len() as u16;
+        let mut deposits: Vec<(usize, u16)> = Vec::with_capacity(targets.len());
+        let mut distributed = 0.0f32;
+        for (order, target) in targets.into_iter().enumerate() {
+            let requested = share + u16::from(order < remainder as usize);
+            let old_mass = self.mass[target];
+            let new_mass = old_mass.saturating_add(requested);
+            let add = new_mass - old_mass;
+            if add == 0 {
+                continue;
+            }
+            let target_col = target as i32 % size;
+            let target_row = target as i32 / size;
+            let mut dx = (target_col - center_col) as f32;
+            let mut dy = (target_row - center_row) as f32;
+            let distance = (dx * dx + dy * dy).sqrt();
+            if distance > 1e-3 {
+                dx /= distance;
+                dy /= distance;
+            } else {
+                dx = 0.0;
+                dy = 0.0;
+            }
+            let old = old_mass as f32;
+            let new = new_mass as f32;
+            self.vel_x[target] = (self.vel_x[target] * old + kick * dx * add as f32) / new;
+            self.vel_y[target] = (self.vel_y[target] * old + kick * dy * add as f32) / new;
+            self.mass[target] = new_mass;
+            deposits.push((target, add));
+            distributed += add as f32;
+        }
+
+        let deposited_metals = requested_metals.clamp(0.0, requested_mass as f32) * distributed
+            / requested_mass as f32;
+        if distributed > 0.0 {
+            for (target, add) in deposits {
+                self.metal_mass[target] = (self.metal_mass[target]
+                    + deposited_metals * add as f32 / distributed)
+                    .min(self.mass[target] as f32);
+            }
+        }
+        (distributed, deposited_metals)
     }
 
     /// Supernova: return most of the star's mass to nearby gas with an
@@ -2214,6 +2394,95 @@ impl Galaxy {
             ev.source,
             ev.target,
             Galaxy::SN_KICK,
+            ev.id,
+        );
+    }
+
+    /// A red giant returns its envelope gently and leaves a white dwarf.
+    fn handle_planetary_nebula(&mut self, ev: &Event) {
+        let Some(i) = self.stars.index_of_id(ev.source) else {
+            return;
+        };
+        if Stage::from_u8(self.stars.stage[i]) != Stage::WhiteDwarf {
+            return;
+        }
+        let star_mass = self.stars.mass[i];
+        let star_metals = self.stars.metal_mass[i];
+        let requested = (star_mass * (1.0 - Galaxy::WD_RETAINED_FRACTION)).floor() as u16;
+        let inherited = if star_mass > 0.0 {
+            star_metals * requested as f32 / star_mass
+        } else {
+            0.0
+        };
+        let (distributed, deposited_metals) = self.deposit_ejecta(
+            ev.target as usize,
+            requested,
+            inherited,
+            Galaxy::PLANETARY_NEBULA_KICK,
+            Galaxy::PLANETARY_NEBULA_RADIUS,
+        );
+        self.stars.mass[i] = (star_mass - distributed).max(0.0);
+        self.stars.metal_mass[i] = (star_metals - deposited_metals)
+            .max(0.0)
+            .min(self.stars.mass[i]);
+    }
+
+    /// A mature white-dwarf pair disrupts completely. Integer gas returns
+    /// to the grid, any fractional or capacity-limited remainder enters the
+    /// radiated sink, and thermonuclear burning adds an explicit metal yield.
+    fn handle_type_ia_supernova(&mut self, ev: &Event) {
+        let (Some(source), Some(target)) = (
+            self.stars.index_of_id(ev.source),
+            self.stars.index_of_id(ev.aux as u32),
+        ) else {
+            return;
+        };
+        if source == target
+            || Stage::from_u8(self.stars.stage[source]) != Stage::Merging
+            || Stage::from_u8(self.stars.stage[target]) != Stage::Merging
+        {
+            return;
+        }
+
+        let source_mass = self.stars.mass[source];
+        let target_mass = self.stars.mass[target];
+        let combined = source_mass + target_mass;
+        if combined <= 0.0 {
+            return;
+        }
+        let combined_metals = self.stars.metal_mass[source] + self.stars.metal_mass[target];
+        let x = (self.stars.pos_x[source] * source_mass + self.stars.pos_x[target] * target_mass)
+            / combined;
+        let y = (self.stars.pos_y[source] * source_mass + self.stars.pos_y[target] * target_mass)
+            / combined;
+        let cell = self.cell_index_at(x, y);
+        let requested = combined.floor().clamp(0.0, u16::MAX as f32) as u16;
+        let inherited_ejecta = combined_metals * requested as f32 / combined;
+        let yield_metals = (combined * Galaxy::TYPE_IA_METAL_YIELD_FRACTION)
+            .min((requested as f32 - inherited_ejecta).max(0.0));
+        let (distributed, deposited_metals) = self.deposit_ejecta(
+            cell,
+            requested,
+            inherited_ejecta + yield_metals,
+            Galaxy::TYPE_IA_KICK,
+            Galaxy::TYPE_IA_RADIUS,
+        );
+
+        self.metal_produced_total += yield_metals as f64;
+        self.radiated_total += (combined - distributed) as f64;
+        self.radiated_metal_mass +=
+            (combined_metals + yield_metals - deposited_metals).max(0.0) as f64;
+        let hi = source.max(target);
+        let lo = source.min(target);
+        self.stars.swap_remove(hi);
+        self.stars.swap_remove(lo);
+
+        self.events.emit(
+            self.tick_count,
+            crate::events::EventKind::ShockWave,
+            ev.source,
+            cell as u32,
+            Galaxy::TYPE_IA_KICK,
             ev.id,
         );
     }
@@ -2477,6 +2746,8 @@ impl Galaxy {
                 crate::events::EventKind::BlackHoleCapture => self.handle_bh_capture(&ev),
                 crate::events::EventKind::NeutronStarMerger => self.handle_neutron_star_merger(&ev),
                 crate::events::EventKind::GammaRayBurst => self.handle_gamma_ray_burst(&ev),
+                crate::events::EventKind::PlanetaryNebula => self.handle_planetary_nebula(&ev),
+                crate::events::EventKind::TypeIaSupernova => self.handle_type_ia_supernova(&ev),
             }
             self.events.record_executed(ev);
         }
@@ -2565,13 +2836,13 @@ impl Galaxy {
             }
             masses[hi] += remaining;
         }
-        // Split core-collapse-scale births into equal partners. The pair
-        // shares its original system lifetime and stays close without a
-        // separate orbital sub-simulation.
+        // Split intermediate and core-collapse-scale births into equal
+        // partners. Component mass distinguishes the later white-dwarf
+        // and neutron-star channels without another per-star fate array.
         let mut expanded: Vec<f32> = Vec::with_capacity(Galaxy::BIRTH_MAX_STARS);
         let mut binary_ids: Vec<u32> = Vec::with_capacity(Galaxy::BIRTH_MAX_STARS);
         for mass in masses {
-            if mass >= Galaxy::NS_BINARY_SPLIT_MASS && expanded.len() + 2 <= Galaxy::BIRTH_MAX_STARS
+            if mass >= Galaxy::WD_BINARY_SPLIT_MASS && expanded.len() + 2 <= Galaxy::BIRTH_MAX_STARS
             {
                 let binary = self.next_binary_id;
                 self.next_binary_id = self.next_binary_id.wrapping_add(1);
@@ -2826,6 +3097,16 @@ impl Galaxy {
         );
         let unit = (hash as u32) as f32 / u32::MAX as f32;
         Galaxy::NS_MERGER_DELAY_MIN + unit * Galaxy::NS_MERGER_DELAY_SPAN
+    }
+
+    fn white_dwarf_merger_delay(&self, binary_id: u32) -> f32 {
+        let hash = splitmix64(
+            self.master_seed
+                ^ (binary_id as u64).wrapping_mul(0x94D0_49BB_1331_11EB)
+                ^ 0x243F_6A88_85A3_08D3,
+        );
+        let unit = (hash as u32) as f32 / u32::MAX as f32;
+        Galaxy::WD_MERGER_DELAY_MIN + unit * Galaxy::WD_MERGER_DELAY_SPAN
     }
 
     /// Inverse-transform sample of the truncated power-law IMF.
@@ -4189,6 +4470,94 @@ mod tests_stars_dynamics {
         );
         assert!(g.radiation.iter().copied().fold(0.0f32, f32::max) > 0.0);
         assert!((g.baryonic_total() - ledger).abs() < 1e-5);
+    }
+
+    #[test]
+    fn test_low_mass_star_sheds_a_planetary_nebula_and_leaves_a_white_dwarf() {
+        let mut g = Galaxy::new(20, 0);
+        g.master_seed = 17;
+        let star = g.spawn_star(10.0, 10.0, 0.0, 0.0, 10.0);
+        g.stars.metal_mass[star] = 1.0;
+        let baryons = g.baryonic_total();
+        let metals = g.tracked_metal_total();
+
+        g.stars.age[star] = g.stars.lifetime[star];
+        g.process_stellar_aging(0.5);
+        assert_eq!(g.stars.stage[star], Stage::RedGiant as u8);
+        assert_eq!(g.red_giant_count(), 1);
+
+        g.stars.age[star] = g.stars.lifetime[star];
+        g.process_stellar_aging(0.5);
+        assert_eq!(g.stars.stage[star], Stage::WhiteDwarf as u8);
+        g.tick_count = 1;
+        let nebulae = g.events.take_due(1);
+        assert_eq!(nebulae.len(), 1);
+        assert_eq!(nebulae[0].kind, crate::events::EventKind::PlanetaryNebula);
+        g.execute_events(nebulae, 0.5);
+
+        assert_eq!(g.white_dwarf_count(), 1);
+        assert_eq!(
+            g.events
+                .executed_count(crate::events::EventKind::PlanetaryNebula),
+            1
+        );
+        assert!(g.mass.iter().any(|&mass| mass > 0));
+        assert!(g.stars.mass[0] < 10.0);
+        assert!((g.baryonic_total() - baryons).abs() < 1e-5);
+        assert!((g.tracked_metal_total() - metals).abs() < 1e-5);
+    }
+
+    #[test]
+    fn test_white_dwarf_binary_type_ia_disrupts_and_enriches() {
+        let mut g = Galaxy::new(20, 0);
+        g.master_seed = 23;
+        let a = g.spawn_star(9.8, 10.0, 0.0, 0.0, 2.0);
+        let b = g.spawn_star(10.2, 10.0, 0.0, 0.0, 2.0);
+        for i in [a, b] {
+            g.stars.stage[i] = Stage::WhiteDwarf as u8;
+            g.stars.binary_id[i] = 12;
+            g.stars.lifetime[i] = g.white_dwarf_merger_delay(12);
+            g.stars.age[i] = g.stars.lifetime[i];
+            g.stars.metal_mass[i] = 0.2;
+        }
+        let baryons = g.baryonic_total();
+        let metals = g.tracked_metal_total();
+
+        g.process_stellar_aging(0.5);
+        assert!(g
+            .stars
+            .stage
+            .iter()
+            .all(|&stage| stage == Stage::Merging as u8));
+        g.tick_count = 1;
+        let type_ia = g.events.take_due(1);
+        assert_eq!(type_ia.len(), 1);
+        assert_eq!(type_ia[0].kind, crate::events::EventKind::TypeIaSupernova);
+        assert_eq!(type_ia[0].aux as u32, g.stars.id[b]);
+        g.execute_events(type_ia, 0.5);
+
+        assert_eq!(g.star_count(), 0);
+        assert_eq!(
+            g.events
+                .executed_count(crate::events::EventKind::TypeIaSupernova),
+            1
+        );
+        assert!(g.metal_produced_total > 0.0);
+        assert!((g.baryonic_total() - baryons).abs() < 1e-5);
+        assert!((g.tracked_metal_total() - metals - g.metal_produced_total).abs() < 1e-5);
+        assert!(g
+            .events
+            .pending()
+            .any(|event| event.kind == crate::events::EventKind::ShockWave));
+    }
+
+    #[test]
+    fn test_white_dwarf_delay_is_seeded_and_repeatable() {
+        let a = Galaxy::new(20, 0).seed_with_mode_seeded(5, Scenario::IrregularSpiral, 7);
+        let b = Galaxy::new(20, 0).seed_with_mode_seeded(5, Scenario::IrregularSpiral, 7);
+        let c = Galaxy::new(20, 0).seed_with_mode_seeded(5, Scenario::IrregularSpiral, 8);
+        assert_eq!(a.white_dwarf_merger_delay(4), b.white_dwarf_merger_delay(4));
+        assert_ne!(a.white_dwarf_merger_delay(4), c.white_dwarf_merger_delay(4));
     }
 
     #[test]
