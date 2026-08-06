@@ -9,25 +9,33 @@
 pub enum Stage {
     MainSequence = 0,
     Remnant = 1,
+    NeutronStar = 2,
+    Merging = 3,
+    MergedRemnant = 4,
 }
 
 impl Stage {
     pub fn from_u8(v: u8) -> Stage {
         match v {
             0 => Stage::MainSequence,
-            _ => Stage::Remnant,
+            1 => Stage::Remnant,
+            2 => Stage::NeutronStar,
+            3 => Stage::Merging,
+            _ => Stage::MergedRemnant,
         }
     }
 }
 
 /// No-cluster sentinel for `cluster_id`.
 pub const NO_CLUSTER: u32 = u32::MAX;
+/// No compact-binary sentinel for `binary_id`.
+pub const NO_BINARY: u32 = u32::MAX;
 
 /// Floats per star in the flat serialization (see `to_flat`).
-pub const STAR_FLOATS: usize = 12;
+pub const STAR_FLOATS: usize = 14;
 
 /// Floats per star in the render packing (see `render_data`).
-pub const RENDER_FLOATS: usize = 4;
+pub const RENDER_FLOATS: usize = 5;
 
 /// Struct-of-arrays star storage. Removal is swap-remove; indices are not
 /// stable across ticks and must never be persisted outside a tick.
@@ -44,6 +52,10 @@ pub struct Stars {
     pub luminosity: Vec<f32>,
     pub color_index: Vec<f32>,
     pub cluster_id: Vec<u32>,
+    /// Stable compact-binary identity. Paired core-collapse stars share it.
+    pub binary_id: Vec<u32>,
+    /// Consecutive halo-process scans spent beyond the phase-mixing radius.
+    pub halo_dwell: Vec<u16>,
     /// Stable identity for event targeting - indices reorder on
     /// swap_remove. Fits f32 exactly below 2^24 spawns.
     pub id: Vec<u32>,
@@ -74,6 +86,7 @@ impl Stars {
         luminosity: f32,
         color_index: f32,
         cluster_id: u32,
+        binary_id: u32,
         id: u32,
     ) -> usize {
         self.pos_x.push(pos_x);
@@ -87,6 +100,8 @@ impl Stars {
         self.luminosity.push(luminosity);
         self.color_index.push(color_index);
         self.cluster_id.push(cluster_id);
+        self.binary_id.push(binary_id);
+        self.halo_dwell.push(0);
         self.id.push(id);
         self.len() - 1
     }
@@ -103,6 +118,8 @@ impl Stars {
         self.luminosity.swap_remove(i);
         self.color_index.swap_remove(i);
         self.cluster_id.swap_remove(i);
+        self.binary_id.swap_remove(i);
+        self.halo_dwell.swap_remove(i);
         self.id.swap_remove(i);
     }
 
@@ -110,7 +127,7 @@ impl Stars {
         self.id.iter().position(|&x| x == id)
     }
 
-    /// Renderer packing: [x, y, luminosity, color_index] per star. The
+    /// Renderer packing: [x, y, luminosity, color_index, stage] per star. The
     /// renderer derives size/glow from these; nothing flows back.
     pub fn render_data(&self) -> Vec<f32> {
         let n = self.len();
@@ -120,14 +137,16 @@ impl Stars {
             out.push(self.pos_y[i]);
             out.push(self.luminosity[i]);
             out.push(self.color_index[i]);
+            out.push(self.stage[i] as f32);
         }
         out
     }
 
     /// Full flat serialization for the worker state round-trip. Layout per
     /// star: [x, y, vx, vy, mass, age, lifetime, stage, luminosity,
-    /// color_index, cluster_id]. cluster_id survives f32 because ids stay
-    /// far below 2^24.
+    /// color_index, cluster_id, binary_id, halo_dwell, id]. Integer ids
+    /// survive f32 because live ids stay far below 2^24. The u32::MAX
+    /// sentinels round-trip through Rust's saturating float cast.
     pub fn to_flat(&self) -> Vec<f32> {
         let n = self.len();
         let mut out = Vec::with_capacity(n * STAR_FLOATS);
@@ -143,6 +162,8 @@ impl Stars {
             out.push(self.luminosity[i]);
             out.push(self.color_index[i]);
             out.push(self.cluster_id[i] as f32);
+            out.push(self.binary_id[i] as f32);
+            out.push(self.halo_dwell[i] as f32);
             out.push(self.id[i] as f32);
         }
         out
@@ -162,7 +183,9 @@ impl Stars {
             s.luminosity.push(chunk[8]);
             s.color_index.push(chunk[9]);
             s.cluster_id.push(chunk[10] as u32);
-            s.id.push(chunk[11] as u32);
+            s.binary_id.push(chunk[11] as u32);
+            s.halo_dwell.push(chunk[12] as u16);
+            s.id.push(chunk[13] as u32);
         }
         s
     }
@@ -175,10 +198,13 @@ mod tests_stars {
     #[test]
     fn test_flat_round_trip_is_exact() {
         let mut s = Stars::new();
-        s.spawn(1.5, 2.5, -0.1, 0.2, 40.0, 1000.0, 250.0, 0.7, 3, 101);
-        s.spawn(9.0, 8.0, 0.3, -0.4, 12.0, 4000.0, 40.0, 0.2, NO_CLUSTER, 102);
+        s.spawn(1.5, 2.5, -0.1, 0.2, 40.0, 1000.0, 250.0, 0.7, 3, 7, 101);
+        s.spawn(
+            9.0, 8.0, 0.3, -0.4, 12.0, 4000.0, 40.0, 0.2, NO_CLUSTER, NO_BINARY, 102,
+        );
         s.age[1] = 123.5;
         s.stage[0] = Stage::Remnant as u8;
+        s.halo_dwell[0] = 4;
         let flat = s.to_flat();
         assert_eq!(flat.len(), 2 * STAR_FLOATS);
         let back = Stars::from_flat(&flat);
@@ -188,15 +214,17 @@ mod tests_stars {
         assert_eq!(back.age, s.age);
         assert_eq!(back.stage, s.stage);
         assert_eq!(back.cluster_id, s.cluster_id);
+        assert_eq!(back.binary_id, s.binary_id);
+        assert_eq!(back.halo_dwell, s.halo_dwell);
         assert_eq!(back.id, s.id);
     }
 
     #[test]
     fn test_swap_remove_keeps_arrays_parallel() {
         let mut s = Stars::new();
-        s.spawn(0.0, 0.0, 0.0, 0.0, 1.0, 1.0, 1.0, 0.0, 0, 10);
-        s.spawn(1.0, 1.0, 0.0, 0.0, 2.0, 1.0, 1.0, 0.0, 1, 11);
-        s.spawn(2.0, 2.0, 0.0, 0.0, 3.0, 1.0, 1.0, 0.0, 2, 12);
+        s.spawn(0.0, 0.0, 0.0, 0.0, 1.0, 1.0, 1.0, 0.0, 0, NO_BINARY, 10);
+        s.spawn(1.0, 1.0, 0.0, 0.0, 2.0, 1.0, 1.0, 0.0, 1, NO_BINARY, 11);
+        s.spawn(2.0, 2.0, 0.0, 0.0, 3.0, 1.0, 1.0, 0.0, 2, NO_BINARY, 12);
         s.swap_remove(0);
         assert_eq!(s.len(), 2);
         assert_eq!(s.pos_x[0], 2.0);

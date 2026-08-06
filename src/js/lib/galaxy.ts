@@ -33,6 +33,7 @@ export class Frontend {
   private overrideTransients: Float32Array | null = null;
   private overrideRadiation: Float32Array | null = null;
   private overrideLensScale: number | null = null;
+  private overrideStellarHaloMass: number | null = null;
   // CPU uses `Galaxy.tick`; WebGPU uses `tick_with_accel` after WGSL forces.
   private backend: ComputeBackend = "cpu";
   private gpuBackend: WebGPUForceBackend | null = null;
@@ -68,6 +69,7 @@ export class Frontend {
     this.overrideMass = null;
     this.overrideFracX = null;
     this.overrideFracY = null;
+    this.overrideStellarHaloMass = null;
     const next = this.galaxy.seed_with_mode(additionalMass, mode as unknown as wasm.Scenario);
     this.galaxy.free();
     this.galaxy = next;
@@ -82,6 +84,7 @@ export class Frontend {
     this.overrideMass = null;
     this.overrideFracX = null;
     this.overrideFracY = null;
+    this.overrideStellarHaloMass = null;
     const next = this.galaxy.seed_with_mode_seeded(
       additionalMass,
       mode as unknown as wasm.Scenario,
@@ -96,6 +99,7 @@ export class Frontend {
     this.overrideFracX = null;
     this.overrideFracY = null;
     this.overrideStars = null;
+    this.overrideStellarHaloMass = null;
     const next = this.galaxy.tick(timeModifier);
     this.galaxy.free();
     this.galaxy = next;
@@ -111,6 +115,7 @@ export class Frontend {
       this.overrideMass = null;
       this.overrideFracX = null;
       this.overrideFracY = null;
+      this.overrideStellarHaloMass = null;
       const mass = this.galaxy.mass();
       const { acc_x, acc_y } = await this.gpuBackend.computeAccelerations(mass, this.galaxySize);
       const next = this.galaxy.tick_with_accel(timeModifier, acc_x, acc_y);
@@ -138,11 +143,11 @@ export class Frontend {
   }
 
   public starCount(): number {
-    if (this.overrideStars) return this.overrideStars.length / 4;
+    if (this.overrideStars) return this.overrideStars.length / 5;
     return this.galaxy.star_count();
   }
 
-  /** Renderer packing: [x, y, luminosity, colorIndex] per star. */
+  /** Renderer packing: [x, y, luminosity, colorIndex, stage] per star. */
   public starRenderArray(): Float32Array {
     return this.overrideStars ?? this.galaxy.star_render_data();
   }
@@ -173,6 +178,22 @@ export class Frontend {
     return Number(this.galaxy.events_executed(5));
   }
 
+  public neutronStarCount(): number {
+    return this.galaxy.neutron_star_count();
+  }
+
+  public grbCount(): number {
+    return Number(this.galaxy.events_executed(7));
+  }
+
+  public phaseMixedCount(): number {
+    return Number(this.galaxy.phase_mixed_count());
+  }
+
+  public stellarHaloMass(): number {
+    return this.overrideStellarHaloMass ?? this.galaxy.stellar_halo_mass_value();
+  }
+
   public bhMass(): number {
     return this.galaxy.bh_mass_value();
   }
@@ -201,6 +222,10 @@ export class Frontend {
 
   public setOverrideLensScale(v: number): void {
     this.overrideLensScale = v;
+  }
+
+  public setOverrideStellarHaloMass(v: number): void {
+    this.overrideStellarHaloMass = v;
   }
 
   /** Debug/test spawn; production stars come from StarBirth events. */
@@ -260,6 +285,7 @@ export class Frontend {
     this.overrideFracX = null;
     this.overrideFracY = null;
     this.overrideStars = null;
+    this.overrideStellarHaloMass = null;
   }
 
   /** Point renderer at worker-produced mass buffer. Skips WASM round-trip. */
@@ -310,6 +336,10 @@ export class TickWorker {
     snCount: number,
     birthCount: number,
     captureCount: number,
+    neutronStarCount: number,
+    grbCount: number,
+    phaseMixedCount: number,
+    stellarHaloMass: number,
     bhMass: number,
     gasColdFraction: number,
     lensScale: number
@@ -329,6 +359,10 @@ export class TickWorker {
       snCount: number,
       birthCount: number,
       captureCount: number,
+      neutronStarCount: number,
+      grbCount: number,
+      phaseMixedCount: number,
+      stellarHaloMass: number,
       bhMass: number,
       gasColdFraction: number,
       lensScale: number
@@ -362,6 +396,10 @@ export class TickWorker {
         msg.snCount,
         msg.birthCount,
         msg.captureCount,
+        msg.neutronStarCount,
+        msg.grbCount,
+        msg.phaseMixedCount,
+        msg.stellarHaloMass,
         msg.bhMass,
         msg.gasColdFraction,
         msg.lensScale

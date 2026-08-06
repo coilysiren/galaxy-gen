@@ -18,9 +18,13 @@ pub enum EventKind {
     CloudDissipate = 4,
     /// A star crossed the central black hole's capture radius.
     BlackHoleCapture = 5,
+    /// A bound neutron-star pair reached its seeded merger delay.
+    NeutronStarMerger = 6,
+    /// The compact merger launched its brief relativistic jets.
+    GammaRayBurst = 7,
 }
 
-pub const EVENT_KIND_COUNT: usize = 6;
+pub const EVENT_KIND_COUNT: usize = 8;
 
 /// No-source / no-target / no-parent sentinels.
 pub const NO_REF: u32 = u32::MAX;
@@ -210,6 +214,8 @@ fn kind_from_u32(v: u32) -> EventKind {
         2 => EventKind::Supernova,
         3 => EventKind::ShockWave,
         5 => EventKind::BlackHoleCapture,
+        6 => EventKind::NeutronStarMerger,
+        7 => EventKind::GammaRayBurst,
         _ => EventKind::CloudDissipate,
     }
 }
@@ -264,16 +270,18 @@ mod tests_event_queue {
         let mut q = EventQueue::new();
         q.emit(9, EventKind::Supernova, 5, NO_REF, 1.25, NO_PARENT);
         q.emit(9, EventKind::ShockWave, 5, 77, -3.5, 1);
+        q.emit(9, EventKind::GammaRayBurst, 9, 42, 18.0, 2);
         let flat = q.to_flat();
         let mut back = EventQueue::from_flat(&flat);
         let due = back.take_due(10);
-        assert_eq!(due.len(), 2);
+        assert_eq!(due.len(), 3);
         assert_eq!(due[0].kind, EventKind::Supernova);
         assert_eq!(due[1].payload, -3.5);
         assert_eq!(due[1].parent, 1);
+        assert_eq!(due[2].kind, EventKind::GammaRayBurst);
         // Emission after restore continues the id sequence.
         let id = back.emit(10, EventKind::CloudCollapse, 0, NO_REF, 0.0, NO_PARENT);
-        assert_eq!(id, 3);
+        assert_eq!(id, 4);
     }
 
     #[test]

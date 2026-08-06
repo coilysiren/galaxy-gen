@@ -22,6 +22,7 @@ pub enum StateKey {
     EventQueue,
     BlackHole,
     HaloGas,
+    StellarHalo,
 }
 
 pub struct ProcessDescriptor {
@@ -115,8 +116,23 @@ static REGISTRY: &[ProcessDescriptor] = &[
         run: Galaxy::process_collapse_watch,
     },
     ProcessDescriptor {
-        // Lifecycle-scale cadence. Emits Supernova; light stars fade to
-        // remnants in place.
+        // Stars that remain beyond the luminous disk phase-mix into an
+        // unresolved stellar halo. Old dim remnants retire there too.
+        name: "stellar_halo",
+        reads: &[StateKey::StarKinematics, StateKey::StarLifecycle],
+        writes: &[
+            StateKey::StarKinematics,
+            StateKey::StarLifecycle,
+            StateKey::StellarHalo,
+        ],
+        requires_fresh: &[],
+        cadence: 8,
+        phase_offset: 4,
+        run: Galaxy::process_stellar_halo,
+    },
+    ProcessDescriptor {
+        // Lifecycle-scale cadence. Emits supernovae and compact mergers,
+        // and advances remnant retirement clocks.
         name: "stellar_aging",
         reads: &[StateKey::StarLifecycle],
         writes: &[StateKey::StarLifecycle, StateKey::EventQueue],
@@ -244,6 +260,7 @@ mod tests_graph {
                 "integrate_stars",
                 "radiation_field",
                 "collapse_watch",
+                "stellar_halo",
                 "stellar_aging",
                 "bh_accretion",
                 "bh_evaporation",

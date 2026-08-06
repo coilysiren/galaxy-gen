@@ -5,6 +5,7 @@
 
 use galaxy_gen_backend::galaxy::{Galaxy, Scenario};
 use galaxy_gen_backend::process;
+use galaxy_gen_backend::stars::STAR_FLOATS;
 
 struct Metrics {
     nonzero: usize,
@@ -80,7 +81,7 @@ fn metrics(g: &Galaxy, size: u16) -> Metrics {
     let star_flat = g.sim_state_stars();
     let (mut svt_num, mut svt_den) = (0f64, 0f64);
     let (mut s_central, mut s_total) = (0f64, 0f64);
-    for chunk in star_flat.chunks_exact(12) {
+    for chunk in star_flat.chunks_exact(STAR_FLOATS) {
         let x = chunk[0] as f64 - c;
         let y = chunk[1] as f64 - c;
         let r = (x * x + y * y).sqrt();
@@ -105,16 +106,32 @@ fn metrics(g: &Galaxy, size: u16) -> Metrics {
         nonzero,
         total,
         vt: if vt_den > 0.0 { vt_num / vt_den } else { 0.0 },
-        rot_support: if speed_num > 0.0 { vt_num / speed_num } else { 0.0 },
+        rot_support: if speed_num > 0.0 {
+            vt_num / speed_num
+        } else {
+            0.0
+        },
         r_peak_frac: (peak_bin as f64 + 0.5) / BINS as f64,
-        central_frac: if total > 0 { central / total as f64 } else { 0.0 },
+        central_frac: if total > 0 {
+            central / total as f64
+        } else {
+            0.0
+        },
         m2: if m2_den > 0.0 {
             (m2_re * m2_re + m2_im * m2_im).sqrt() / m2_den
         } else {
             0.0
         },
-        star_vt: if svt_den > 0.0 { svt_num / svt_den } else { 0.0 },
-        star_central: if s_total > 0.0 { s_central / s_total } else { 0.0 },
+        star_vt: if svt_den > 0.0 {
+            svt_num / svt_den
+        } else {
+            0.0
+        },
+        star_central: if s_total > 0.0 {
+            s_central / s_total
+        } else {
+            0.0
+        },
     }
 }
 
@@ -163,7 +180,7 @@ fn main() {
                 }
                 let m = metrics(&g, size);
                 println!(
-                    "t={cp:5}  nz={:5}  gas={:6}  vt={:+.3}  rot={:+.2}  r_pk={:.2}  ctr={:.2}  m2={:.2}  svt={:+.3}  sctr={:.2}  stars={:5}  ev(col/b/sn/sh/d/cap)={}/{}/{}/{}/{}/{}",
+                    "t={cp:5}  nz={:5}  gas={:6}  vt={:+.3}  rot={:+.2}  r_pk={:.2}  ctr={:.2}  m2={:.2}  svt={:+.3}  sctr={:.2}  stars={:5}  mixed={:5}  ev(col/b/sn/sh/d/cap/nsm/grb)={}/{}/{}/{}/{}/{}/{}/{}",
                     m.nonzero,
                     m.total,
                     m.vt,
@@ -174,12 +191,15 @@ fn main() {
                     m.star_vt,
                     m.star_central,
                     g.star_count(),
+                    g.phase_mixed_count(),
                     g.events_executed(0),
                     g.events_executed(1),
                     g.events_executed(2),
                     g.events_executed(3),
                     g.events_executed(4),
                     g.events_executed(5),
+                    g.events_executed(6),
+                    g.events_executed(7),
                 );
             }
         }

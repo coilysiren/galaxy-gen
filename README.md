@@ -3,8 +3,9 @@
 [![Galaxy Generator interface showing an irregular galaxy evolving into a spiral](docs/project-galaxy-gen.gif)](https://galaxy-gen.coilysiren.me)
 
 `{ rust → wasm → js }` living-galaxy simulation. Gravitational physics,
-star birth and death, black-hole evolution, and a cycling cold/hot gas
-reservoir are computed in Rust, compiled to WebAssembly via
+star birth and death, neutron-star mergers, stellar-halo phase mixing,
+black-hole evolution, and a cycling cold/hot gas reservoir are computed in
+Rust, compiled to WebAssembly via
 [wasm-pack](https://github.com/rustwasm/wasm-pack), and rendered on a browser
 canvas with React.
 
@@ -21,18 +22,17 @@ See [.ward/ward.yaml](.ward/ward.yaml) for the full command catalog and
 
 ## Architecture
 
-- `src/rust/galaxy.rs` — core simulation (`Galaxy` + `Cell` structs, cell
-  types Gas / Star / Planet / White Hole, gravity, seeding, `tick`). Unit
-  tests live in `mod tests_*` blocks at the bottom of the file.
-- `src/rust/lib.rs` — crate root; re-exports `galaxy`.
-- `pkg/` — `wasm-pack` output: `.wasm` + `.js` + `.d.ts`. Gitignored; linked
+- `src/rust/galaxy.rs` - core gas, stellar, black-hole, event, seeding, and
+  tick simulation. Unit tests live in `mod tests_*` blocks at the bottom.
+- `src/rust/lib.rs` - crate root that re-exports `galaxy`.
+- `pkg/` - `wasm-pack` output: `.wasm` + `.js` + `.d.ts`. Gitignored and linked
   into `node_modules/galaxy_gen_backend` by `npm install ./pkg`.
-- `src/js/lib/galaxy.ts` — `Frontend` class; the JS ↔ WASM boundary.
-- `src/js/lib/application.tsx` — React UI (inputs, buttons, `data-testid`s).
-- `src/js/lib/dataviz.tsx` — layered canvas renderer in `#dataviz`.
-- `src/js/lib/styles.css` — Tailwind v4 + custom palette.
-- `e2e/galaxy.spec.ts` — Playwright end-to-end tests.
-- `dist/` — production webpack build output (gitignored).
+- `src/js/lib/galaxy.ts` - `Frontend` class and the JS/WASM boundary.
+- `src/js/lib/application.tsx` - React UI (inputs, buttons, `data-testid`s).
+- `src/js/lib/dataviz.tsx` - layered canvas renderer in `#dataviz`.
+- `src/js/lib/styles.css` - Tailwind v4 + custom palette.
+- `e2e/galaxy.spec.ts` - Playwright end-to-end tests.
+- `dist/` - production webpack build output (gitignored).
 
 ## Tooling
 

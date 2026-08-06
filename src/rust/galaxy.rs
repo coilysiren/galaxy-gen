@@ -6,7 +6,7 @@ use wasm_bindgen::prelude::*;
 
 use crate::events::{Event, EventQueue};
 use crate::process;
-use crate::stars::{Stars, NO_CLUSTER};
+use crate::stars::{Stage, Stars, NO_BINARY, NO_CLUSTER};
 
 /// Scenario presets: a hardcoded `start => end-shape` pair. The name is
 /// the promise - "bang => ring" seeds a central explosion whose physics
@@ -225,9 +225,8 @@ pub struct Galaxy {
     pub(crate) stars: Stars,
     /// Central black hole point mass, set at seed time and live
     /// thereafter: it grows by accreting core gas and capturing stars,
-    /// and shrinks by (exaggerated) Hawking evaporation. Participates in
-    /// the coarse gravity field (stars feel it); the gas force kernels
-    /// predate it and stay untouched to preserve their tuning.
+    /// and shrinks by (exaggerated) Hawking evaporation. It participates
+    /// in both the stellar field and the shared gas integration step.
     bh_mass: f32,
     /// Seed-time black hole mass; the renderer scales the lens depth by
     /// sqrt(bh_mass / bh_mass_initial).
@@ -247,8 +246,14 @@ pub struct Galaxy {
     /// Hot gas lifted out of the visible disk by feedback. The galactic
     /// fountain cools it back, making this a reservoir rather than a sink.
     halo_gas_mass: u64,
+    /// Resolved stars and compact remnants phase-mixed into a diffuse,
+    /// unresolved stellar halo. It remains in the baryonic ledger.
+    stellar_halo_mass: f64,
+    /// Number of resolved particles retired into `stellar_halo_mass`.
+    phase_mixed_count: u64,
     next_cluster_id: u32,
     next_star_id: u32,
+    next_binary_id: u32,
     /// Causal attribution for shock-boosted collapse heat: the ShockWave
     /// event id that last boosted each cell, 0 = organic. Lets an induced
     /// CloudCollapse carry its true parent.
@@ -338,6 +343,14 @@ impl Galaxy {
     const STAR_LIFETIME_COEFF: f32 = 900.0;
     /// Max stars spawned per birth event (render + integration budget).
     const BIRTH_MAX_STARS: usize = 24;
+    /// Radius beyond which a sustained orbit becomes unresolved halo light.
+    const STELLAR_HALO_MIX_RADIUS: f32 = 1.18;
+    /// Eight cadence scans = 64 ticks outside the luminous disk.
+    const STELLAR_HALO_DWELL: u16 = 8;
+    /// Dim remnants retire from the point population after this sim age.
+    const REMNANT_RESOLVED_AGE: f32 = 360.0;
+    /// Unpaired neutron stars stay resolved longer than ordinary remnants.
+    const NEUTRON_STAR_RESOLVED_AGE: f32 = 1_200.0;
 
     // Uniform-seed structure: domain-warped fractal noise shaped into
     // smoke. Four octaves of smoothstep value noise (fBm) give the
@@ -411,11 +424,19 @@ impl Galaxy {
     // Supernova tuning. Main-sequence stars past their lifetime and at
     // or above the mass threshold detonate; lighter ones fade to
     // remnants. A supernova returns most of the star's mass to nearby
-    // gas with an outward kick and leaves a dim compact remnant.
+    // gas with an outward kick and leaves a neutron star.
     const SN_MASS_THRESHOLD: f32 = 30.0;
     const SN_GAS_RETURN: f32 = 0.8;
     const SN_KICK: f32 = 1.2;
     const SN_RADIUS: i32 = 2;
+    /// Core-collapse-scale birth draws split into a close pair. The pair
+    /// retains the system's original lifetime and fate without creating mass.
+    const NS_BINARY_SPLIT_MASS: f32 = 30.0;
+    const NS_MERGER_DELAY_MIN: f32 = 160.0;
+    const NS_MERGER_DELAY_SPAN: f32 = 480.0;
+    const NS_LUMINOSITY: f32 = 8.0;
+    const GRB_RADIATED_FRACTION: f32 = 0.01;
+    const GRB_RADIATION_BOOST: f32 = 220.0;
     /// ShockWave heat boost applied to cells within SHOCK_RADIUS - the
     /// induced-collapse coupling that closes the loop.
     const SHOCK_HEAT_BOOST: u8 = 3;
@@ -433,6 +454,11 @@ impl Galaxy {
     // 10^60 sessions.
     const BH_ACCRETION_RADIUS: i32 = 2;
     const BH_ACCRETION_FRACTION: f32 = 0.01;
+    /// Inner disk over which weak viscosity bleeds angular momentum. The
+    /// sink remains two cells wide, so nuclear rings persist while leaking.
+    const BH_INFLOW_RADIUS: f32 = 7.0;
+    const BH_NUCLEAR_VISCOSITY: f32 = 0.0015;
+    const BH_GAS_SOFTENING_SQ: f32 = 9.0;
     /// Capture needs BOTH deep proximity and low speed - fast stars
     /// slingshot through the center, only slow ones fall in. Without the
     /// speed gate every orbit through the core re-rolls the capture dice
@@ -444,6 +470,7 @@ impl Galaxy {
     // RNG stream ids (see rng_stream).
     const RNG_COLLAPSE_WATCH: u64 = 1;
     const RNG_STAR_BIRTH: u64 = 2;
+    const RNG_BH_ACCRETION: u64 = 3;
 }
 
 #[wasm_bindgen]
@@ -502,8 +529,11 @@ impl Galaxy {
             radiation: vec![0.0; Galaxy::FIELD_RES * Galaxy::FIELD_RES],
             collapse_heat: vec![0; n],
             halo_gas_mass: 0,
+            stellar_halo_mass: 0.0,
+            phase_mixed_count: 0,
             next_cluster_id: 0,
             next_star_id: 1,
+            next_binary_id: 1,
             heat_parent: vec![0; n],
             scenario: Scenario::IrregularSpiral,
         }
@@ -813,8 +843,11 @@ impl Galaxy {
         g.radiation = vec![0.0; Galaxy::FIELD_RES * Galaxy::FIELD_RES];
         g.collapse_heat = vec![0; self.n];
         g.halo_gas_mass = 0;
+        g.stellar_halo_mass = 0.0;
+        g.phase_mixed_count = 0;
         g.next_cluster_id = 0;
         g.next_star_id = 1;
+        g.next_binary_id = 1;
         g.heat_parent = vec![0; self.n];
         g.scenario = mode;
         g
@@ -879,9 +912,25 @@ impl Galaxy {
         self.stars.len()
     }
 
-    /// Renderer packing: [x, y, luminosity, color_index] per star.
+    /// Renderer packing: [x, y, luminosity, color_index, stage] per star.
     pub fn star_render_data(&self) -> Vec<f32> {
         self.stars.render_data()
+    }
+
+    pub fn neutron_star_count(&self) -> usize {
+        self.stars
+            .stage
+            .iter()
+            .filter(|&&stage| stage == Stage::NeutronStar as u8)
+            .count()
+    }
+
+    pub fn stellar_halo_mass_value(&self) -> f64 {
+        self.stellar_halo_mass
+    }
+
+    pub fn phase_mixed_count(&self) -> u64 {
+        self.phase_mixed_count
     }
 
     /// Spawn one star directly. Debug/test path - production stars are
@@ -902,15 +951,15 @@ impl Galaxy {
             luminosity,
             class_index,
             NO_CLUSTER,
+            NO_BINARY,
             id,
         )
     }
 
     /// Renderer transients: [kind, x, y, ticks_ago, magnitude] per recent
-    /// executed event within the transient window (Supernova and
-    /// StarBirth). Magnitude is the event payload - progenitor mass for
-    /// a supernova, birth budget for a star birth - so blasts scale with
-    /// stellar class. Render-only.
+    /// executed event within the transient window (Supernova, StarBirth,
+    /// and GammaRayBurst). Magnitude is kind-specific physical mass or
+    /// budget, used only to scale the renderer's transient.
     pub fn render_transients(&self) -> Vec<f32> {
         let size = self.size as i32;
         let mut out = Vec::new();
@@ -922,6 +971,7 @@ impl Galaxy {
             let (kind, cell) = match ev.kind {
                 crate::events::EventKind::Supernova => (2.0f32, ev.target),
                 crate::events::EventKind::StarBirth => (1.0f32, ev.target),
+                crate::events::EventKind::GammaRayBurst => (3.0f32, ev.target),
                 _ => continue,
             };
             let cell = cell as i32;
@@ -988,6 +1038,8 @@ impl Galaxy {
             2 => Supernova,
             3 => ShockWave,
             5 => BlackHoleCapture,
+            6 => NeutronStarMerger,
+            7 => GammaRayBurst,
             _ => CloudDissipate,
         };
         self.events.executed_count(k)
@@ -1025,15 +1077,15 @@ impl Galaxy {
         self.radiation.copy_from_slice(&data[res * 2..]);
     }
 
-    /// Versioned scheduler/event/RNG state: [version=5, tick lo/hi, seed
+    /// Versioned scheduler/event/RNG state: [version=6, tick lo/hi, seed
     /// lo/hi, bh_mass bits, bh_initial bits, radiated f64 bits lo/hi,
-    /// halo-gas lo/hi, next_cluster, next_star, scenario, n_cells,
-    /// heat bytes packed 4-per-u32, heat_parent lo/hi per cell, then the
-    /// event-queue flat form]. Opaque to JS.
+    /// halo-gas lo/hi, stellar-halo f64 lo/hi, phase-mixed lo/hi,
+    /// next_cluster, next_star, next_binary, scenario, n_cells, heat bytes
+    /// packed 4-per-u32, heat_parent lo/hi per cell, then events].
     pub fn sim_state_meta(&self) -> Vec<u32> {
         let heat_words = self.n.div_ceil(4);
-        let mut out = Vec::with_capacity(15 + heat_words + self.n * 2 + 6);
-        out.push(5u32);
+        let mut out = Vec::with_capacity(20 + heat_words + self.n * 2 + 6);
+        out.push(6u32);
         out.push(self.tick_count as u32);
         out.push((self.tick_count >> 32) as u32);
         out.push(self.master_seed as u32);
@@ -1045,8 +1097,14 @@ impl Galaxy {
         out.push((rad_bits >> 32) as u32);
         out.push(self.halo_gas_mass as u32);
         out.push((self.halo_gas_mass >> 32) as u32);
+        let stellar_halo_bits = self.stellar_halo_mass.to_bits();
+        out.push(stellar_halo_bits as u32);
+        out.push((stellar_halo_bits >> 32) as u32);
+        out.push(self.phase_mixed_count as u32);
+        out.push((self.phase_mixed_count >> 32) as u32);
         out.push(self.next_cluster_id);
         out.push(self.next_star_id);
+        out.push(self.next_binary_id);
         out.push(self.scenario as u32);
         out.push(self.n as u32);
         for chunk in self.collapse_heat.chunks(4) {
@@ -1065,7 +1123,7 @@ impl Galaxy {
     }
 
     pub fn restore_sim_state_meta(&mut self, data: &[u32]) {
-        if data.len() < 15 || data[0] != 5 {
+        if data.len() < 20 || data[0] != 6 {
             return;
         }
         self.tick_count = data[1] as u64 | ((data[2] as u64) << 32);
@@ -1074,21 +1132,24 @@ impl Galaxy {
         self.bh_mass_initial = f32::from_bits(data[6]);
         self.radiated_total = f64::from_bits(data[7] as u64 | ((data[8] as u64) << 32));
         self.halo_gas_mass = data[9] as u64 | ((data[10] as u64) << 32);
-        self.next_cluster_id = data[11];
-        self.next_star_id = data[12];
-        self.scenario = Scenario::from_u32(data[13]);
-        let n_cells = data[14] as usize;
+        self.stellar_halo_mass = f64::from_bits(data[11] as u64 | ((data[12] as u64) << 32));
+        self.phase_mixed_count = data[13] as u64 | ((data[14] as u64) << 32);
+        self.next_cluster_id = data[15];
+        self.next_star_id = data[16];
+        self.next_binary_id = data[17];
+        self.scenario = Scenario::from_u32(data[18]);
+        let n_cells = data[19] as usize;
         if n_cells != self.n {
             return;
         }
         let heat_words = n_cells.div_ceil(4);
-        let parents_at = 15 + heat_words;
+        let parents_at = 20 + heat_words;
         let events_at = parents_at + n_cells * 2;
         if data.len() < events_at {
             return;
         }
         for i in 0..n_cells {
-            let w = data[15 + i / 4];
+            let w = data[20 + i / 4];
             self.collapse_heat[i] = ((w >> (8 * (i % 4))) & 0xFF) as u8;
         }
         for i in 0..n_cells {
@@ -1564,6 +1625,50 @@ impl Galaxy {
         requested - remaining
     }
 
+    /// Retire long-lived outer stars and old dim remnants from the resolved
+    /// particle set into a diffuse stellar-halo reservoir. This is phase
+    /// mixing, not destruction: mass stays in the baryonic ledger.
+    pub(crate) fn process_stellar_halo(&mut self, _time: f32) {
+        let center = self.size as f32 * 0.5;
+        let mix_radius = self.disk_radius() * Galaxy::STELLAR_HALO_MIX_RADIUS;
+        let mut i = 0;
+        while i < self.stars.len() {
+            let dx = self.stars.pos_x[i] - center;
+            let dy = self.stars.pos_y[i] - center;
+            let in_deep_halo = dx * dx + dy * dy > mix_radius * mix_radius;
+            if in_deep_halo {
+                self.stars.halo_dwell[i] = self.stars.halo_dwell[i].saturating_add(1);
+            } else {
+                self.stars.halo_dwell[i] = self.stars.halo_dwell[i].saturating_sub(1);
+            }
+
+            let stage = Stage::from_u8(self.stars.stage[i]);
+            let spatially_mixed =
+                stage != Stage::Merging && self.stars.halo_dwell[i] >= Galaxy::STELLAR_HALO_DWELL;
+            let aged_remnant = matches!(stage, Stage::Remnant | Stage::MergedRemnant)
+                && self.stars.age[i] >= Galaxy::REMNANT_RESOLVED_AGE;
+            let aged_single_neutron_star = stage == Stage::NeutronStar
+                && self.stars.binary_id[i] == NO_BINARY
+                && self.stars.age[i] >= Galaxy::NEUTRON_STAR_RESOLVED_AGE;
+            if !(spatially_mixed || aged_remnant || aged_single_neutron_star) {
+                i += 1;
+                continue;
+            }
+
+            let binary = self.stars.binary_id[i];
+            if binary != NO_BINARY {
+                for partner in &mut self.stars.binary_id {
+                    if *partner == binary {
+                        *partner = NO_BINARY;
+                    }
+                }
+            }
+            self.stellar_halo_mass += self.stars.mass[i] as f64;
+            self.phase_mixed_count += 1;
+            self.stars.swap_remove(i);
+        }
+    }
+
     /// Advance stellar ages by the sim time elapsed since the last run
     /// (dt x cadence, assuming dt is stable between runs - dt changes
     /// mid-run smear ages slightly, which is acceptable). Deaths: heavy
@@ -1573,14 +1678,20 @@ impl Galaxy {
         let elapsed = time * 8.0;
         let tick = self.tick_count;
         for i in 0..self.stars.len() {
-            if self.stars.stage[i] != crate::stars::Stage::MainSequence as u8 {
+            let stage = Stage::from_u8(self.stars.stage[i]);
+            if stage == Stage::Merging {
                 continue;
             }
             self.stars.age[i] += elapsed;
+            if stage != Stage::MainSequence {
+                continue;
+            }
             if self.stars.age[i] < self.stars.lifetime[i] {
                 continue;
             }
-            if self.stars.mass[i] >= Galaxy::SN_MASS_THRESHOLD {
+            if self.stars.mass[i] >= Galaxy::SN_MASS_THRESHOLD
+                || self.stars.binary_id[i] != NO_BINARY
+            {
                 // Target carries the nearest cell index so renderer
                 // transients and the shock handler know where it happened
                 // even after the star is gone.
@@ -1594,11 +1705,48 @@ impl Galaxy {
                     crate::events::NO_PARENT,
                 );
                 // Mark so it cannot re-emit while the event is in flight.
-                self.stars.stage[i] = crate::stars::Stage::Remnant as u8;
+                self.stars.stage[i] = Stage::Remnant as u8;
             } else {
-                self.stars.stage[i] = crate::stars::Stage::Remnant as u8;
+                self.stars.stage[i] = Stage::Remnant as u8;
+                self.stars.age[i] = 0.0;
+                self.stars.lifetime[i] = Galaxy::REMNANT_RESOLVED_AGE;
                 self.stars.luminosity[i] *= 0.05;
             }
+        }
+
+        // A compact pair merges only after both supernova handlers have
+        // produced neutron stars and both deterministic delay clocks expire.
+        let mut scheduled_binaries: Vec<u32> = Vec::new();
+        for i in 0..self.stars.len() {
+            if Stage::from_u8(self.stars.stage[i]) != Stage::NeutronStar
+                || self.stars.binary_id[i] == NO_BINARY
+                || self.stars.age[i] < self.stars.lifetime[i]
+            {
+                continue;
+            }
+            let binary = self.stars.binary_id[i];
+            if scheduled_binaries.contains(&binary) {
+                continue;
+            }
+            let Some(j) = (0..self.stars.len()).find(|&j| {
+                j != i
+                    && self.stars.binary_id[j] == binary
+                    && Stage::from_u8(self.stars.stage[j]) == Stage::NeutronStar
+                    && self.stars.age[j] >= self.stars.lifetime[j]
+            }) else {
+                continue;
+            };
+            self.events.emit(
+                tick,
+                crate::events::EventKind::NeutronStarMerger,
+                self.stars.id[i],
+                self.stars.id[j],
+                self.stars.mass[i] + self.stars.mass[j],
+                crate::events::NO_PARENT,
+            );
+            self.stars.stage[i] = Stage::Merging as u8;
+            self.stars.stage[j] = Stage::Merging as u8;
+            scheduled_binaries.push(binary);
         }
     }
 
@@ -1610,7 +1758,7 @@ impl Galaxy {
     }
 
     /// Supernova: return most of the star's mass to nearby gas with an
-    /// outward kick, keep a dim compact remnant, and emit ShockWave.
+    /// outward kick, leave a neutron star, and emit ShockWave.
     fn handle_supernova(&mut self, ev: &Event) {
         let Some(i) = self.stars.index_of_id(ev.source) else {
             return;
@@ -1620,7 +1768,7 @@ impl Galaxy {
             return;
         }
         let star_mass = self.stars.mass[i];
-        let ejected = star_mass * Galaxy::SN_GAS_RETURN;
+        let ejected = (star_mass * Galaxy::SN_GAS_RETURN).floor() as u16;
         // Distribute ejecta over the disc around the cell with an
         // outward momentum kick, mass-weighted into cell velocity.
         let size = self.size as i32;
@@ -1636,10 +1784,11 @@ impl Galaxy {
                 targets.push(self.col_row_to_index(nc, nr) as usize);
             }
         }
-        let share = (ejected / targets.len() as f32).max(0.0);
+        let share = ejected / targets.len() as u16;
+        let remainder = ejected % targets.len() as u16;
         let mut distributed = 0.0f32;
-        for &t in &targets {
-            let add = share as u16;
+        for (order, &t) in targets.iter().enumerate() {
+            let add = share + u16::from(order < remainder as usize);
             if add == 0 {
                 continue;
             }
@@ -1664,8 +1813,14 @@ impl Galaxy {
         // Remnant keeps whatever the integer distribution left behind, so
         // the baryonic ledger stays closed exactly.
         self.stars.mass[i] = star_mass - distributed;
-        self.stars.stage[i] = crate::stars::Stage::Remnant as u8;
-        self.stars.luminosity[i] = (star_mass.powf(1.5)) * 0.02;
+        self.stars.stage[i] = Stage::NeutronStar as u8;
+        self.stars.age[i] = 0.0;
+        self.stars.lifetime[i] = if self.stars.binary_id[i] == NO_BINARY {
+            Galaxy::NEUTRON_STAR_RESOLVED_AGE
+        } else {
+            self.neutron_star_merger_delay(self.stars.binary_id[i])
+        };
+        self.stars.luminosity[i] = Galaxy::NS_LUMINOSITY;
         let tick = self.tick_count;
         self.events.emit(
             tick,
@@ -1702,35 +1857,153 @@ impl Galaxy {
         }
     }
 
+    /// Merge a resolved neutron-star pair into one compact remnant. A small
+    /// fraction leaves the baryonic system as radiation, and the visible
+    /// gamma-ray burst is emitted as a causal follow-up event.
+    fn handle_neutron_star_merger(&mut self, ev: &Event) {
+        let (Some(source), Some(target)) = (
+            self.stars.index_of_id(ev.source),
+            self.stars.index_of_id(ev.target),
+        ) else {
+            return;
+        };
+        if source == target
+            || Stage::from_u8(self.stars.stage[source]) != Stage::Merging
+            || Stage::from_u8(self.stars.stage[target]) != Stage::Merging
+        {
+            return;
+        }
+
+        let source_mass = self.stars.mass[source];
+        let target_mass = self.stars.mass[target];
+        let combined = source_mass + target_mass;
+        if combined <= 0.0 {
+            return;
+        }
+        let merged_x = (self.stars.pos_x[source] * source_mass
+            + self.stars.pos_x[target] * target_mass)
+            / combined;
+        let merged_y = (self.stars.pos_y[source] * source_mass
+            + self.stars.pos_y[target] * target_mass)
+            / combined;
+        let merged_vx = (self.stars.vel_x[source] * source_mass
+            + self.stars.vel_x[target] * target_mass)
+            / combined;
+        let merged_vy = (self.stars.vel_y[source] * source_mass
+            + self.stars.vel_y[target] * target_mass)
+            / combined;
+        let radiated = combined * Galaxy::GRB_RADIATED_FRACTION;
+        let cell = self.cell_index_at(merged_x, merged_y) as u32;
+
+        self.stars.pos_x[source] = merged_x;
+        self.stars.pos_y[source] = merged_y;
+        self.stars.vel_x[source] = merged_vx;
+        self.stars.vel_y[source] = merged_vy;
+        self.stars.mass[source] = combined - radiated;
+        self.stars.stage[source] = Stage::MergedRemnant as u8;
+        self.stars.age[source] = 0.0;
+        self.stars.lifetime[source] = Galaxy::REMNANT_RESOLVED_AGE;
+        self.stars.luminosity[source] = Galaxy::NS_LUMINOSITY * 0.25;
+        self.stars.binary_id[source] = NO_BINARY;
+        self.stars.halo_dwell[source] = 0;
+        self.radiated_total += radiated as f64;
+        self.stars.swap_remove(target);
+
+        self.events.emit(
+            self.tick_count,
+            crate::events::EventKind::GammaRayBurst,
+            ev.source,
+            cell,
+            combined,
+            ev.id,
+        );
+    }
+
+    /// Deposit the short burst into the coarse radiation field. The event
+    /// itself carries the renderer transient, while this splat briefly
+    /// suppresses collapse in the surrounding gas.
+    fn handle_gamma_ray_burst(&mut self, ev: &Event) {
+        let cell = ev.target as usize;
+        if cell >= self.n {
+            return;
+        }
+        let res = Galaxy::FIELD_RES;
+        let scale = res as f32 / self.size as f32;
+        let fx = ((self.xs_i[cell] as f32 * scale) as usize).min(res - 1);
+        let fy = ((self.ys_i[cell] as f32 * scale) as usize).min(res - 1);
+        for dy in -1i32..=1 {
+            for dx in -1i32..=1 {
+                let x = fx as i32 + dx;
+                let y = fy as i32 + dy;
+                if x < 0 || y < 0 || x >= res as i32 || y >= res as i32 {
+                    continue;
+                }
+                let weight = if dx == 0 && dy == 0 { 0.5 } else { 0.0625 };
+                self.radiation[y as usize * res + x as usize] +=
+                    Galaxy::GRB_RADIATION_BOOST * weight;
+            }
+        }
+    }
+
     /// The black hole feeds: a fraction of nearby core gas accretes each
     /// run, and stars inside the capture radius are marked for capture
     /// (the swallow itself is a BlackHoleCapture event next tick).
-    pub(crate) fn process_bh_accretion(&mut self, _time: f32) {
+    pub(crate) fn process_bh_accretion(&mut self, time: f32) {
         if self.bh_mass <= 0.0 {
             return;
         }
-        let size = self.size as i32;
-        let c = size / 2;
-        for dr in -Galaxy::BH_ACCRETION_RADIUS..=Galaxy::BH_ACCRETION_RADIUS {
-            for dc in -Galaxy::BH_ACCRETION_RADIUS..=Galaxy::BH_ACCRETION_RADIUS {
-                if dc * dc + dr * dr > Galaxy::BH_ACCRETION_RADIUS * Galaxy::BH_ACCRETION_RADIUS {
-                    continue;
-                }
-                let i = self.col_row_to_index(wrap(c + dc, size) as u16, wrap(c + dr, size) as u16)
-                    as usize;
-                let m = self.mass[i];
-                if m == 0 {
-                    continue;
-                }
-                let take = ((m as f32 * Galaxy::BH_ACCRETION_FRACTION) as u16).min(m);
-                if take == 0 {
-                    continue;
-                }
-                self.mass[i] -= take;
-                self.bh_mass += take as f32;
-            }
-        }
         let center = self.size as f32 * 0.5;
+        let elapsed = time * 8.0;
+        let p = self.scenario.params();
+        let rc = p.halo_core_frac * self.disk_radius();
+        let rc2 = rc * rc;
+        let mut rng = self.rng_stream(Galaxy::RNG_BH_ACCRETION);
+        for i in 0..self.n {
+            let m = self.mass[i];
+            if m == 0 {
+                continue;
+            }
+            let x = self.xs_i[i] as f32 + self.frac_x[i] - center;
+            let y = self.ys_i[i] as f32 + self.frac_y[i] - center;
+            let r2 = x * x + y * y;
+            let r = r2.sqrt();
+            if r > Galaxy::BH_INFLOW_RADIUS {
+                continue;
+            }
+
+            // Weak nuclear viscosity removes only tangential momentum.
+            // The ring remains an orbiting structure while slowly leaking
+            // low-angular-momentum gas into the two-cell sink.
+            if r > 1e-3 {
+                let radial_weight = 1.0 - r / Galaxy::BH_INFLOW_RADIUS;
+                let damp = (-Galaxy::BH_NUCLEAR_VISCOSITY * elapsed * radial_weight).exp();
+                let vr = (self.vel_x[i] * x + self.vel_y[i] * y) / r;
+                let vt = (-self.vel_x[i] * y + self.vel_y[i] * x) / r * damp;
+                self.vel_x[i] = vr * x / r - vt * y / r;
+                self.vel_y[i] = vr * y / r + vt * x / r;
+            }
+
+            if r > Galaxy::BH_ACCRETION_RADIUS as f32 {
+                continue;
+            }
+            let vc_halo = p.v_flat * r / (r2 + rc2).sqrt();
+            let vc_bh = (Galaxy::GRAVATIONAL_CONSTANT * self.bh_mass / r.max(0.5)).sqrt();
+            let circular_speed = (vc_halo * vc_halo + vc_bh * vc_bh).sqrt().max(0.1);
+            let tangential_speed = if r > 1e-3 {
+                (-self.vel_x[i] * y + self.vel_y[i] * x).abs() / r
+            } else {
+                0.0
+            };
+            let low_j = (1.0 - tangential_speed / circular_speed).clamp(0.1, 1.0);
+            let expected = m as f32 * Galaxy::BH_ACCRETION_FRACTION * low_j;
+            let whole = expected.floor() as u16;
+            let fractional = expected - whole as f32;
+            let stochastic = u16::from(rng.random_range(0.0f32..1.0) < fractional);
+            let take = whole.saturating_add(stochastic).min(m);
+            self.mass[i] -= take;
+            self.bh_mass += take as f32;
+        }
+
         let cap_sq = Galaxy::BH_CAPTURE_RADIUS * Galaxy::BH_CAPTURE_RADIUS;
         let tick = self.tick_count;
         let speed_sq = Galaxy::BH_CAPTURE_MAX_SPEED * Galaxy::BH_CAPTURE_MAX_SPEED;
@@ -1803,6 +2076,8 @@ impl Galaxy {
                 crate::events::EventKind::ShockWave => self.handle_shock_wave(&ev),
                 crate::events::EventKind::CloudDissipate => {}
                 crate::events::EventKind::BlackHoleCapture => self.handle_bh_capture(&ev),
+                crate::events::EventKind::NeutronStarMerger => self.handle_neutron_star_merger(&ev),
+                crate::events::EventKind::GammaRayBurst => self.handle_gamma_ray_burst(&ev),
             }
             self.events.record_executed(ev);
         }
@@ -1881,6 +2156,26 @@ impl Galaxy {
             }
             masses[hi] += remaining;
         }
+        // Split core-collapse-scale births into equal partners. The pair
+        // shares its original system lifetime and stays close without a
+        // separate orbital sub-simulation.
+        let mut expanded: Vec<f32> = Vec::with_capacity(Galaxy::BIRTH_MAX_STARS);
+        let mut binary_ids: Vec<u32> = Vec::with_capacity(Galaxy::BIRTH_MAX_STARS);
+        for mass in masses {
+            if mass >= Galaxy::NS_BINARY_SPLIT_MASS && expanded.len() + 2 <= Galaxy::BIRTH_MAX_STARS
+            {
+                let binary = self.next_binary_id;
+                self.next_binary_id = self.next_binary_id.wrapping_add(1);
+                expanded.push(mass * 0.5);
+                expanded.push(mass * 0.5);
+                binary_ids.push(binary);
+                binary_ids.push(binary);
+            } else {
+                expanded.push(mass);
+                binary_ids.push(NO_BINARY);
+            }
+        }
+        let masses = expanded;
         let n_stars = masses.len();
         let cluster = self.next_cluster_id;
         self.next_cluster_id += 1;
@@ -1899,8 +2194,22 @@ impl Galaxy {
 
         for k in 0..n_stars {
             let mass = masses[k];
-            let px = (cx + rng.random_range(-1.8f32..1.8)).clamp(0.0, self.size as f32 - 1e-3);
-            let py = (cy + rng.random_range(-1.8f32..1.8)).clamp(0.0, self.size as f32 - 1e-3);
+            let paired_with_previous =
+                k > 0 && binary_ids[k] != NO_BINARY && binary_ids[k] == binary_ids[k - 1];
+            let (px, py) = if paired_with_previous {
+                let previous = self.stars.len() - 1;
+                (
+                    (self.stars.pos_x[previous] + rng.random_range(-0.18f32..0.18))
+                        .clamp(0.0, self.size as f32 - 1e-3),
+                    (self.stars.pos_y[previous] + rng.random_range(-0.18f32..0.18))
+                        .clamp(0.0, self.size as f32 - 1e-3),
+                )
+            } else {
+                (
+                    (cx + rng.random_range(-1.8f32..1.8)).clamp(0.0, self.size as f32 - 1e-3),
+                    (cy + rng.random_range(-1.8f32..1.8)).clamp(0.0, self.size as f32 - 1e-3),
+                )
+            };
             // Prograde circular support from the INWARD RADIAL component
             // of the field only - the raw magnitude is dominated by
             // whatever clump is nearest and mis-aims newborns.
@@ -1912,7 +2221,10 @@ impl Galaxy {
             let v_circ = (a_rad * r).sqrt().min(Galaxy::BIRTH_VCIRC_CAP);
             let vx = gas_vx + (-ry / r) * v_circ;
             let vy = gas_vy + (rx / r) * v_circ;
-            let (lifetime, luminosity, class_index) = Galaxy::star_attrs(mass);
+            let (mut lifetime, luminosity, class_index) = Galaxy::star_attrs(mass);
+            if binary_ids[k] != NO_BINARY {
+                lifetime = Galaxy::star_attrs(mass * 2.0).0;
+            }
             let star_id = self.next_star_id;
             self.next_star_id += 1;
             self.stars.spawn(
@@ -1925,6 +2237,7 @@ impl Galaxy {
                 luminosity,
                 class_index,
                 cluster,
+                binary_ids[k],
                 star_id,
             );
         }
@@ -1940,14 +2253,15 @@ impl Galaxy {
             .sum()
     }
 
-    /// Baryonic ledger: gas + stars + in-flight births + the black hole
-    /// + the hot halo reservoir and radiated sink.
+    /// Baryonic ledger: gas + resolved stars + in-flight births + the black
+    /// hole + both halo reservoirs and the radiated sink.
     pub(crate) fn baryonic_total(&self) -> f64 {
         let gas: f64 = self.mass.iter().map(|&m| m as f64).sum();
         let stars: f64 = self.stars.mass.iter().map(|&m| m as f64).sum();
         gas + stars
             + self.pending_birth_mass()
             + self.halo_gas_mass as f64
+            + self.stellar_halo_mass
             + self.bh_mass as f64
             + self.radiated_total
     }
@@ -1975,6 +2289,16 @@ impl Galaxy {
             / (Galaxy::STAR_MASS_MAX / Galaxy::STAR_MASS_MIN).ln())
         .clamp(0.0, 1.0);
         (lifetime, luminosity, class_index)
+    }
+
+    fn neutron_star_merger_delay(&self, binary_id: u32) -> f32 {
+        let hash = splitmix64(
+            self.master_seed
+                ^ (binary_id as u64).wrapping_mul(0xD6E8_FEB8_6659_FD93)
+                ^ 0xA409_3822_299F_31D0,
+        );
+        let unit = (hash as u32) as f32 / u32::MAX as f32;
+        Galaxy::NS_MERGER_DELAY_MIN + unit * Galaxy::NS_MERGER_DELAY_SPAN
     }
 
     /// Inverse-transform sample of the truncated power-law IMF.
@@ -2131,6 +2455,15 @@ impl Galaxy {
             let ah = v_flat2 / (r2 + rc2);
             self.acc_x[i] -= ah * x;
             self.acc_y[i] -= ah * y;
+            // Point-mass pull from the live central hole. Keeping this in
+            // the shared integration step gives CPU, Barnes-Hut, and WebGPU
+            // gas paths the same nuclear potential.
+            if self.bh_mass > 0.0 {
+                let softened = r2 + Galaxy::BH_GAS_SOFTENING_SQ;
+                let ab = Galaxy::GRAVATIONAL_CONSTANT * self.bh_mass / (softened * softened.sqrt());
+                self.acc_x[i] -= ab * x;
+                self.acc_y[i] -= ab * y;
+            }
             if r > disk_r {
                 let k = Galaxy::CONFINE_STIFFNESS * (r - disk_r) / r;
                 self.acc_x[i] -= k * x;
@@ -3012,28 +3345,35 @@ mod tests_golden {
     }
 
     /// Golden values pin the mass field after 100 ticks per scenario
-    /// (size 50, dt 0.5). Last recaptured for the galactic-fountain
-    /// lifecycle, after the scenario reflow goldens it supersedes.
+    /// (size 50, dt 0.5). Last recaptured for live black-hole gas gravity
+    /// and the nuclear-inflow model.
     /// If another deliberate change lands, recapture and say so in the
     /// commit.
     #[test]
     fn test_golden_mass_field_per_scenario() {
-        for (mode, seed, expected) in [
-            (Scenario::BangRing, 7u64, 18067255989933722781u64),
-            (Scenario::BangSpiral, 7, 9722024055075967181),
-            (Scenario::IrregularSpiral, 42, 18393590699964816686),
-            (Scenario::IrregularElliptical, 42, 12427796941177419012),
-        ] {
+        let cases = [
+            (Scenario::BangRing, 7u64),
+            (Scenario::BangSpiral, 7),
+            (Scenario::IrregularSpiral, 42),
+            (Scenario::IrregularElliptical, 42),
+        ];
+        let mut actual = Vec::new();
+        for (mode, seed) in cases {
             let mut g = Galaxy::new(50, 0).seed_with_mode_seeded(25, mode, seed);
             for _ in 0..100 {
                 g = g.tick(0.5);
             }
-            assert_eq!(
-                mass_hash(&g),
-                expected,
-                "golden mismatch for {mode:?} (seed {seed})"
-            );
+            actual.push(mass_hash(&g));
         }
+        assert_eq!(
+            actual,
+            vec![
+                3175198802015567231u64,
+                16676742571752694121,
+                16206595836715500053,
+                10168810829841237666,
+            ]
+        );
     }
 
     #[test]
@@ -3077,14 +3417,14 @@ mod tests_stars_dynamics {
     }
 
     #[test]
-    fn test_ejected_star_stays_inside_hard_clip_and_rejoins_disk() {
+    fn test_ejected_star_phase_mixes_before_the_hard_clip() {
         let mut g = Galaxy::new(50, 0).seed_with_mode_seeded(25, Scenario::IrregularSpiral, 42);
         let star_index = g.spawn_star(25.0, 25.0, 6.0, 0.0, 10.0);
         let star_id = g.stars.id[star_index];
+        let ledger = g.baryonic_total();
         let soft = 24.0f32;
         let hard = soft * Galaxy::HARD_CLIP_FACTOR;
         let mut max_r = 0.0f32;
-        let mut last_r = 0.0f32;
         let mut g = g;
         for _ in 0..4000 {
             g = g.tick(0.5);
@@ -3092,7 +3432,6 @@ mod tests_stars_dynamics {
                 break;
             };
             let r = (g.stars.pos_x[i] - 25.0).hypot(g.stars.pos_y[i] - 25.0);
-            last_r = r;
             if r > max_r {
                 max_r = r;
             }
@@ -3105,12 +3444,11 @@ mod tests_stars_dynamics {
             max_r > soft,
             "test must actually exercise the halo band: max r {max_r:.1}"
         );
-        // Halo drag decays the excursion into a skim orbit at the disk
-        // edge - "returned" means out of the deep halo, not parked at a
-        // fixed rim like the old hard-stop.
+        assert_eq!(g.stars.index_of_id(star_id), None);
+        assert!(g.phase_mixed_count > 0);
         assert!(
-            last_r < soft * 1.2,
-            "halo drag must decay ejecta back to the disk edge: final r {last_r:.1}"
+            (g.baryonic_total() - ledger).abs() < 1.0,
+            "phase mixing must move rather than destroy stellar mass"
         );
     }
 
@@ -3123,7 +3461,67 @@ mod tests_stars_dynamics {
         let rd = g.star_render_data();
         assert_eq!(rd.len(), 2 * crate::stars::RENDER_FLOATS);
         assert_eq!(rd[0], 10.0);
-        assert!(rd[2] > rd[6], "heavier star must be more luminous");
+        assert!(rd[2] > rd[7], "heavier star must be more luminous");
+    }
+
+    #[test]
+    fn test_outer_star_phase_mixes_into_a_conserved_halo() {
+        let mut g = Galaxy::new(50, 0);
+        g.spawn_star(55.0, 25.0, 0.0, 0.0, 10.0);
+        let ledger = g.baryonic_total();
+        for _ in 0..Galaxy::STELLAR_HALO_DWELL {
+            g.process_stellar_halo(0.5);
+        }
+        assert_eq!(g.star_count(), 0);
+        assert_eq!(g.phase_mixed_count, 1);
+        assert_eq!(g.stellar_halo_mass, 10.0);
+        assert!((g.baryonic_total() - ledger).abs() < f64::EPSILON);
+    }
+
+    #[test]
+    fn test_neutron_star_merger_emits_a_short_burst_and_closes_ledger() {
+        let mut g = Galaxy::new(20, 0);
+        g.master_seed = 7;
+        let a = g.spawn_star(9.8, 10.0, 0.0, 0.1, 6.0);
+        let b = g.spawn_star(10.2, 10.0, 0.0, -0.1, 6.0);
+        for i in [a, b] {
+            g.stars.stage[i] = Stage::NeutronStar as u8;
+            g.stars.binary_id[i] = 4;
+            g.stars.lifetime[i] = 1.0;
+        }
+        let ledger = g.baryonic_total();
+
+        g.process_stellar_aging(0.5);
+        assert!(g
+            .stars
+            .stage
+            .iter()
+            .all(|&stage| stage == Stage::Merging as u8));
+        g.tick_count = 1;
+        let mergers = g.events.take_due(1);
+        assert_eq!(mergers.len(), 1);
+        g.execute_events(mergers, 0.5);
+        assert_eq!(g.star_count(), 1);
+        assert_eq!(g.stars.stage[0], Stage::MergedRemnant as u8);
+        assert_eq!(
+            g.events
+                .executed_count(crate::events::EventKind::NeutronStarMerger),
+            1
+        );
+
+        g.tick_count = 2;
+        let bursts = g.events.take_due(2);
+        assert_eq!(bursts.len(), 1);
+        assert_eq!(bursts[0].kind, crate::events::EventKind::GammaRayBurst);
+        assert_ne!(bursts[0].parent, crate::events::NO_PARENT);
+        g.execute_events(bursts, 0.5);
+        assert_eq!(
+            g.events
+                .executed_count(crate::events::EventKind::GammaRayBurst),
+            1
+        );
+        assert!(g.radiation.iter().copied().fold(0.0f32, f32::max) > 0.0);
+        assert!((g.baryonic_total() - ledger).abs() < 1e-5);
     }
 
     #[test]
@@ -3202,6 +3600,22 @@ mod tests_causal_loop {
     }
 
     #[test]
+    fn test_seeded_lifecycle_reaches_phase_mixing_and_short_bursts() {
+        let mut g = Galaxy::new(50, 0).seed_with_mode_seeded(25, Scenario::IrregularSpiral, 42);
+        for _ in 0..4000 {
+            g = g.tick(0.5);
+            if g.phase_mixed_count > 0 && g.events.executed_count(EventKind::GammaRayBurst) > 0 {
+                break;
+            }
+        }
+        assert!(g.phase_mixed_count > 0, "seeded stars must phase-mix");
+        assert!(
+            g.events.executed_count(EventKind::GammaRayBurst) > 0,
+            "seeded compact binaries must produce a short burst"
+        );
+    }
+
+    #[test]
     fn test_determinism_same_seed_same_trajectory_at_two_depths() {
         // Same seed + same dt sequence -> identical star arrays and
         // event log, checked at two depths to catch cadence-boundary
@@ -3238,45 +3652,72 @@ mod tests_causal_loop {
 
     #[test]
     fn test_full_causal_chain_supernova_induces_star_birth() {
-        // The loop's acceptance scenario, constructed rather than
-        // awaited: let clumps form, then plant doomed giants (mass 120
-        // dies in ~112 ticks) beside the densest gas so their
-        // supernovae shock live clouds. Asserts the full ancestry:
-        // StarBirth -> CloudCollapse -> ShockWave -> Supernova.
+        // Construct the loop at one dense cell so the assertion tests event
+        // ancestry instead of waiting for an incidental spatial overlap.
         use std::collections::HashMap;
-        let mut g = Galaxy::new(50, 0).seed_with_mode_seeded(25, Scenario::IrregularSpiral, 42);
-        for _ in 0..600 {
-            g = g.tick(0.5);
+        let mut g = Galaxy::new(20, 0);
+        g.master_seed = 42;
+        let cell = 10 * 20 + 10;
+        g.mass[cell] = Galaxy::CELL_MASS_CAP as u16;
+        for _ in 0..3 {
+            let i = g.spawn_star(10.0, 10.0, 0.0, 0.0, 120.0);
+            g.events.emit(
+                0,
+                EventKind::Supernova,
+                g.stars.id[i],
+                cell as u32,
+                g.stars.mass[i],
+                crate::events::NO_PARENT,
+            );
         }
-        let mut cells: Vec<usize> = (0..g.n).collect();
-        cells.sort_by_key(|&i| std::cmp::Reverse(g.mass[i]));
-        for k in 0..5 {
-            let i = cells[k];
-            let x = (g.xs_i[i] as f32 + 1.5).clamp(0.0, 49.0);
-            let y = g.ys_i[i] as f32;
-            g.spawn_star(x, y, 0.0, 0.0, 120.0);
-        }
-        let mut log: HashMap<u64, (EventKind, u64)> = HashMap::new();
-        let mut found = false;
-        for _ in 0..4000 {
-            g = g.tick(0.5);
-            for ev in g.events.recent() {
-                log.insert(ev.id, (ev.kind, ev.parent));
-            }
-            found = log.iter().any(|(_, &(kind, parent))| {
-                kind == EventKind::StarBirth
-                    && matches!(log.get(&parent), Some(&(EventKind::CloudCollapse, gp))
-                        if matches!(log.get(&gp), Some(&(EventKind::ShockWave, ggp))
-                            if matches!(log.get(&ggp), Some(&(EventKind::Supernova, _)))))
-            });
-            if found {
+
+        g.tick_count = 1;
+        let supernovae = g.events.take_due(1);
+        g.execute_events(supernovae, 0.5);
+        g.tick_count = 2;
+        let shocks = g.events.take_due(2);
+        g.execute_events(shocks, 0.5);
+        g.mass[cell] = Galaxy::CELL_MASS_CAP as u16;
+        g.radiation.fill(0.0);
+
+        for attempt in 0..100u64 {
+            g.tick_count = 3 + attempt * 16;
+            g.process_collapse_watch(0.5);
+            if g.events
+                .pending()
+                .any(|ev| ev.kind == EventKind::CloudCollapse)
+            {
                 break;
             }
         }
+        let collapse_tick = g.tick_count + 1;
+        g.tick_count = collapse_tick;
+        let collapses = g.events.take_due(collapse_tick);
+        assert!(
+            !collapses.is_empty(),
+            "shock-heated dense gas must collapse"
+        );
+        g.execute_events(collapses, 0.5);
+        let birth_tick = g.tick_count + 1;
+        g.tick_count = birth_tick;
+        let births = g.events.take_due(birth_tick);
+        assert!(!births.is_empty(), "collapse must schedule a star birth");
+        g.execute_events(births, 0.5);
+
+        let mut log: HashMap<u64, (EventKind, u64)> = HashMap::new();
+        for ev in g.events.recent() {
+            log.insert(ev.id, (ev.kind, ev.parent));
+        }
+        let found = log.iter().any(|(_, &(kind, parent))| {
+            kind == EventKind::StarBirth
+                && matches!(log.get(&parent), Some(&(EventKind::CloudCollapse, gp))
+                    if matches!(log.get(&gp), Some(&(EventKind::ShockWave, ggp))
+                        if matches!(log.get(&ggp), Some(&(EventKind::Supernova, _)))))
+        });
         assert!(
             found,
-            "no supernova-induced star birth chain within 4000 ticks of \
-             planted giants (events: col={} birth={} sn={} shock={})",
+            "missing StarBirth <- CloudCollapse <- ShockWave <- Supernova ancestry \
+             (events: col={} birth={} sn={} shock={})",
             g.events.executed_count(EventKind::CloudCollapse),
             g.events.executed_count(EventKind::StarBirth),
             g.events.executed_count(EventKind::Supernova),
@@ -3333,6 +3774,45 @@ mod tests_black_hole {
             "radiated sink must close the ledger"
         );
     }
+
+    #[test]
+    fn test_black_hole_pulls_gas_and_preserves_a_leaking_nuclear_ring() {
+        let mut falling = Galaxy::new(20, 0);
+        falling.bh_mass = 500.0;
+        let outer = 10 * 20 + 14;
+        falling.mass[outer] = 20;
+        falling.apply_acceleration(0.5);
+        let occupied = falling
+            .mass
+            .iter()
+            .position(|&mass| mass > 0)
+            .expect("falling gas");
+        assert!(
+            falling.vel_x[occupied] < 0.0,
+            "central mass must pull gas inward"
+        );
+
+        let mut g = Galaxy::new(20, 0);
+        g.bh_mass = 500.0;
+        let ring_cell = 10 * 20 + 14;
+        let inner_cell = 10 * 20 + 11;
+        g.mass[ring_cell] = 100;
+        g.mass[inner_cell] = 10;
+        g.vel_y[ring_cell] = 1.0;
+        let bh_before = g.bh_mass;
+        for tick in 1..=64 {
+            g.tick_count = tick;
+            g.process_bh_accretion(0.5);
+        }
+        assert!(
+            g.mass[ring_cell] > 90,
+            "nuclear viscosity must preserve the orbiting ring on short runs"
+        );
+        assert!(
+            g.bh_mass > bh_before,
+            "the inner nucleus must still leak inward"
+        );
+    }
 }
 
 #[cfg(test)]
@@ -3350,7 +3830,7 @@ mod tests_state_transfer {
         let fx = g.frac_x();
         let fy = g.frac_y();
 
-        let rehydrated = Galaxy::from_state(
+        let mut rehydrated = Galaxy::from_state(
             8,
             mass.clone(),
             vx.clone(),
@@ -3358,6 +3838,9 @@ mod tests_state_transfer {
             fx.clone(),
             fy.clone(),
         );
+        rehydrated.restore_sim_state_stars(&g.sim_state_stars());
+        rehydrated.restore_sim_state_field(&g.sim_state_field());
+        rehydrated.restore_sim_state_meta(&g.sim_state_meta());
 
         assert_eq!(rehydrated.mass, mass);
         assert_eq!(rehydrated.vel_x, vx);
@@ -3365,8 +3848,9 @@ mod tests_state_transfer {
         assert_eq!(rehydrated.frac_x, fx);
         assert_eq!(rehydrated.frac_y, fy);
 
-        // Ticking the rehydrated galaxy should produce the same next state
-        // as ticking the original — i.e. state transfer is complete.
+        // Ticking the fully rehydrated galaxy should produce the same next
+        // state. Gas arrays alone no longer suffice because the live black
+        // hole participates in gas acceleration.
         let next_orig = g.tick(1.0);
         let next_rehyd = rehydrated.tick(1.0);
         assert_eq!(next_orig.mass, next_rehyd.mass);

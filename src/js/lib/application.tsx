@@ -157,6 +157,9 @@ export function Interface() {
   const [snCount, setSnCount] = React.useState(0);
   const [birthCount, setBirthCount] = React.useState(0);
   const [captureCount, setCaptureCount] = React.useState(0);
+  const [neutronStarCount, setNeutronStarCount] = React.useState(0);
+  const [grbCount, setGrbCount] = React.useState(0);
+  const [phaseMixedCount, setPhaseMixedCount] = React.useState(0);
   const [bhFactor, setBhFactor] = React.useState(1);
   const [gasPct, setGasPct] = React.useState(100);
   // Seed-time baselines for the popsci ratios.
@@ -182,6 +185,10 @@ export function Interface() {
     snCount: number;
     birthCount: number;
     captureCount: number;
+    neutronStarCount: number;
+    grbCount: number;
+    phaseMixedCount: number;
+    stellarHaloMass: number;
     bhMass: number;
     gasColdFraction: number;
     lensScale: number;
@@ -315,6 +322,9 @@ export function Interface() {
     setSnCount(0);
     setBirthCount(0);
     setCaptureCount(0);
+    setNeutronStarCount(0);
+    setGrbCount(0);
+    setPhaseMixedCount(0);
     setBhFactor(1);
     setGasPct(100);
     initialBhRef.current = Math.max(1, next.bhMass());
@@ -354,6 +364,9 @@ export function Interface() {
     setSnCount(fe.supernovaCount());
     setBirthCount(fe.birthCount());
     setCaptureCount(fe.captureCount());
+    setNeutronStarCount(fe.neutronStarCount());
+    setGrbCount(fe.grbCount());
+    setPhaseMixedCount(fe.phaseMixedCount());
     setBhFactor(fe.bhMass() / initialBhRef.current);
     setGasPct(100 * fe.gasColdFraction());
   };
@@ -391,11 +404,15 @@ export function Interface() {
       galaxyFrontendRef.current.setOverrideTransients(snap.transients);
       galaxyFrontendRef.current.setOverrideRadiation(snap.radiation);
       galaxyFrontendRef.current.setOverrideLensScale(snap.lensScale);
+      galaxyFrontendRef.current.setOverrideStellarHaloMass(snap.stellarHaloMass);
       dataviz.updateData(galaxyFrontendRef.current, snap.tickId);
-      setStarCount(snap.stars.length / 4);
+      setStarCount(snap.stars.length / 5);
       setSnCount(snap.snCount);
       setBirthCount(snap.birthCount);
       setCaptureCount(snap.captureCount);
+      setNeutronStarCount(snap.neutronStarCount);
+      setGrbCount(snap.grbCount);
+      setPhaseMixedCount(snap.phaseMixedCount);
       setBhFactor(snap.bhMass / initialBhRef.current);
       setGasPct(100 * snap.gasColdFraction);
 
@@ -440,6 +457,10 @@ export function Interface() {
           snCount,
           birthCount,
           captureCount,
+          neutronStarCount,
+          grbCount,
+          phaseMixedCount,
+          stellarHaloMass,
           bhMass,
           gasColdFraction,
           lensScale
@@ -456,6 +477,10 @@ export function Interface() {
             snCount,
             birthCount,
             captureCount,
+            neutronStarCount,
+            grbCount,
+            phaseMixedCount,
+            stellarHaloMass,
             bhMass,
             gasColdFraction,
             lensScale,
@@ -568,15 +593,33 @@ export function Interface() {
                   </td>
                 </tr>
                 <tr>
-                  <td>stars</td>
+                  <td>resolved stars</td>
                   <td className="text-right" data-testid="stat-stars">
                     {starCount.toLocaleString()}
+                  </td>
+                </tr>
+                <tr>
+                  <td>neutron stars</td>
+                  <td className="text-right" data-testid="stat-neutron-stars">
+                    {neutronStarCount.toLocaleString()}
                   </td>
                 </tr>
                 <tr>
                   <td>supernovae</td>
                   <td className="text-right" data-testid="stat-sn">
                     {snCount.toLocaleString()}
+                  </td>
+                </tr>
+                <tr>
+                  <td>short gamma-ray bursts</td>
+                  <td className="text-right" data-testid="stat-grb">
+                    {grbCount.toLocaleString()}
+                  </td>
+                </tr>
+                <tr>
+                  <td>phase-mixed stars</td>
+                  <td className="text-right" data-testid="stat-phase-mixed">
+                    {phaseMixedCount.toLocaleString()}
                   </td>
                 </tr>
                 <tr>

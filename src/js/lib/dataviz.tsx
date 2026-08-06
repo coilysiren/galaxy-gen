@@ -5,16 +5,15 @@ import * as galaxy from "./galaxy";
 const MIN_ZOOM = 1;
 const MAX_ZOOM = 50;
 
-// Radial render fade: full brightness inside the soft clip (the disk
-// radius), fading to invisible by FADE_END x soft. Matter deeper in the
-// halo band exists in the sim but does not render - the sim's hard clip
-// sits at 3x soft, far past visibility.
-const FADE_END = 1.35;
+// Radial render fade starts inside the nominal disk and reaches black well
+// before the canvas. This turns the finite simulation domain into a broad
+// stellar-halo transition instead of revealing a crisp circular boundary.
+const FADE_START = 0.88;
+const FADE_END = 1.32;
 
 // The canvas views a world span wider than the grid, centered on the
-// disk. 1.1 x size lets the disk own the frame; the near-halo spills
-// past the canvas edge and the radial fade handles the rest.
-const VIEW_SPAN = 1.1;
+// disk. The extra margin leaves actual black sky beyond the completed fade.
+const VIEW_SPAN = 1.42;
 
 // Gravitational lens around the central black hole. Screen-space
 // point-mass deflection r_src = r - thetaE^2 / r: sources appear pushed
@@ -91,8 +90,9 @@ function cellJitter(i: number, salt: number): number {
 }
 
 function radialFade(radius: number, softRadius: number): number {
-  if (radius <= softRadius) return 1;
-  const u = Math.min(1, (radius / softRadius - 1) / (FADE_END - 1));
+  const ratio = radius / softRadius;
+  if (ratio <= FADE_START) return 1;
+  const u = Math.min(1, (ratio - FADE_START) / (FADE_END - FADE_START));
   const smooth = u * u * (3 - 2 * u);
   return 1 - smooth;
 }
@@ -171,6 +171,7 @@ interface State {
   lastTransients: Float32Array | null;
   lastRadiation: Float32Array | null;
   lastLensScale: number;
+  lastStellarHaloMass: number;
   cleanup: () => void;
 }
 
@@ -388,6 +389,7 @@ export function initViz(galaxyFrontend: galaxy.Frontend) {
     lastTransients: null,
     lastRadiation: null,
     lastLensScale: 1,
+    lastStellarHaloMass: 0,
     cleanup,
   };
   publishCamera(state);
@@ -410,6 +412,7 @@ export function updateData(galaxyFrontend: galaxy.Frontend, simTick?: number) {
   state.lastTransients = galaxyFrontend.transientsArray().slice();
   state.lastRadiation = galaxyFrontend.radiationArray().slice();
   state.lastLensScale = galaxyFrontend.lensScale();
+  state.lastStellarHaloMass = galaxyFrontend.stellarHaloMass();
   drawFrame(state, state.lastMass);
 }
 
@@ -442,6 +445,25 @@ function drawFrame(s: State, mass: Uint16Array) {
 
   // Gas: soft nebular sprites, alpha-accumulating where dense.
   const softR = size / 2 - 1;
+  if (s.lastStellarHaloMass > 0) {
+    const haloR = softR * FADE_END * scale;
+    const haloAlpha = Math.min(0.085, Math.log1p(s.lastStellarHaloMass) * 0.008);
+    const halo = ctx.createRadialGradient(
+      s.cw / 2,
+      s.ch / 2,
+      softR * 0.62 * scale,
+      s.cw / 2,
+      s.ch / 2,
+      haloR
+    );
+    halo.addColorStop(0, "rgba(126,142,184,0)");
+    halo.addColorStop(0.58, `rgba(126,142,184,${haloAlpha.toFixed(3)})`);
+    halo.addColorStop(1, "rgba(80,94,128,0)");
+    ctx.fillStyle = halo;
+    ctx.beginPath();
+    ctx.arc(s.cw / 2, s.ch / 2, haloR, 0, Math.PI * 2);
+    ctx.fill();
+  }
   const fadeEndSq = softR * FADE_END * (softR * FADE_END);
   const softSq = softR * softR;
   const buckets = GAS_TIERS[0].length;
@@ -835,6 +857,40 @@ function drawTransients(s: State, toCx: (x: number) => number, toCy: (y: number)
       ctx.beginPath();
       ctx.arc(px, py, r, 0, Math.PI * 2);
       ctx.fill();
+    } else if (kind === 3 && age < 16) {
+      // Short gamma-ray burst: opposed relativistic jets. Their orientation
+      // is a stable position hash because the compact binary has no resolved
+      // spin axis in the simulation state.
+      const life = 1 - age / 16;
+      const phase = (t[i + 1] * 0.754877666 + t[i + 2] * 0.56984029) % 1;
+      const angle = phase * Math.PI;
+      const dx = Math.cos(angle);
+      const dy = Math.sin(angle);
+      const length = (5 + age * 1.5 + Math.min(mag / 12, 3)) * scale;
+      const jet = ctx.createLinearGradient(
+        px - dx * length,
+        py - dy * length,
+        px + dx * length,
+        py + dy * length
+      );
+      jet.addColorStop(0, "rgba(120,225,255,0)");
+      jet.addColorStop(0.42, `rgba(170,242,255,${(0.72 * life).toFixed(3)})`);
+      jet.addColorStop(0.5, `rgba(255,255,255,${(0.95 * life).toFixed(3)})`);
+      jet.addColorStop(0.58, `rgba(170,242,255,${(0.72 * life).toFixed(3)})`);
+      jet.addColorStop(1, "rgba(120,225,255,0)");
+      ctx.save();
+      ctx.strokeStyle = jet;
+      ctx.lineWidth = Math.max(0.8, 2.2 * life);
+      ctx.lineCap = "round";
+      ctx.beginPath();
+      ctx.moveTo(px - dx * length, py - dy * length);
+      ctx.lineTo(px + dx * length, py + dy * length);
+      ctx.stroke();
+      ctx.fillStyle = `rgba(225,252,255,${life.toFixed(3)})`;
+      ctx.beginPath();
+      ctx.arc(px, py, Math.max(0.8, scale * life), 0, Math.PI * 2);
+      ctx.fill();
+      ctx.restore();
     }
   }
 }
@@ -889,7 +945,7 @@ function drawStars(s: State, toCx: (x: number) => number, toCy: (y: number) => n
   // so a dense swarm (cluster core, elliptical spheroid) reads as a
   // glow rather than a sprinkle of isolated dots.
   ctx.globalCompositeOperation = "screen";
-  for (let i = 0; i < stars.length; i += 4) {
+  for (let i = 0; i < stars.length; i += 5) {
     // Radial fade into the halo; deep-halo stars do not render.
     const rad = Math.hypot(stars[i] - center, stars[i + 1] - center);
     const fade = radialFade(rad, softR);
@@ -898,9 +954,15 @@ function drawStars(s: State, toCx: (x: number) => number, toCy: (y: number) => n
     const py = toCy(stars[i + 1] - 0.5);
     // Fourth root compresses the huge mass-luminosity range into a
     // usable brightness scale.
-    const b = Math.pow(Math.min(stars[i + 2], maxLum) / maxLum, 0.25);
-    const [cr, cg, cb] = classColor(stars[i + 3]);
-    const core = 0.38 + 1.42 * b;
+    const stage = Math.round(stars[i + 4]);
+    const compact = stage >= 2;
+    const b = compact
+      ? stage === 3
+        ? 0.44
+        : 0.3
+      : Math.pow(Math.min(stars[i + 2], maxLum) / maxLum, 0.25);
+    const [cr, cg, cb] = compact ? [145, 232, 255] : classColor(stars[i + 3]);
+    const core = compact ? 0.7 + 0.24 * b : 0.38 + 1.42 * b;
     const alpha = (0.3 + 0.64 * b) * fade;
     if (b > 0.82) {
       // Giants: diffraction spikes plus a tight glow.
