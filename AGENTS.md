@@ -62,6 +62,23 @@ GitHub Actions (`.github/workflows/action.yml`) runs three jobs on PR to `main`:
 - `js` - `wasm-pack build` / `npm ci` / `npm run build`
 - `e2e` - `wasm-pack build` / `npm ci` / `playwright test` (uploads HTML report artifact on failure)
 
+## Workflow
+
+The resolved workflow for this repo is `direct-to-main`. Commit and push
+finished work straight to `main` on Forgejo, then close the issue. Do not park
+a finished change on a task branch waiting for a human to merge it, and do not
+open a pull request for the default case.
+
+Pushing to `main` publishes the image and rolls the public site, so the gate is
+the test suite rather than a review. Land only with `ward exec test-rust`,
+`ward exec check-js`, and `ward exec test-e2e` green, and never with
+`--no-verify`.
+
+Use a branch only when the work is genuinely unfinished, when a human has to
+choose between paths first, or when Kai asks for one. A branch is also the
+right home for a checkpoint an agent cannot carry to completion - push it
+rather than leaving the only copy local.
+
 ## Deploy
 
 Source CI owns the image build. A push to `main` first runs the Rust test job,
