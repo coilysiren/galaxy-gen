@@ -447,6 +447,25 @@ impl Galaxy {
     /// using the pre-doubled gas curve. Fast pink rivers of gas around
     /// a slow drifting star population is the intended look.
     const STAR_FIELD_SCALE: f32 = 0.25;
+    /// Fraction of the gas density-wave force that also acts on stars.
+    ///
+    /// The scenario shaping - spiral arms, the ring annulus - was applied
+    /// to gas only, so stars felt the arms exclusively through a
+    /// quarter-strength field sampled onto a 64 grid, which smears an
+    /// arm a few cells wide into the background. That is why stars never
+    /// traced the structure the sim works hard to carve.
+    ///
+    /// A fraction rather than the full force: stars should be pulled
+    /// toward the arms without being locked to the pattern, since real
+    /// arms are density waves that stars pass through rather than rails
+    /// they ride. See galaxy-gen#66.
+    const STAR_WAVE_COUPLING: f32 = 0.0;
+    /// Multiplier on the gas/star gravity term in the coarse star field,
+    /// applied before STAR_FIELD_SCALE. Raises how hard local gas
+    /// overdensities pull on stars without touching the smooth halo term,
+    /// so the orbital pace set by the halo stays put while clumps and
+    /// arms bite harder.
+    const STAR_GAS_FIELD_BOOST: f32 = 1.0;
     /// Softening for the coarse field build (separate from the gas
     /// kernel's SOFTENING_SQ). Large on purpose: the star field is a
     /// mean field. With point-scale softening, stars dive through steep
@@ -1638,6 +1657,82 @@ impl Galaxy {
         self.spiral_structure().0
     }
 
+    /// Do stars sit where the gas is? Mean gas density sampled at star
+    /// positions over mean gas density across all disk cells, computed
+    /// per radial bin and averaged.
+    ///
+    /// 1.0 means stars are spread like area - no arm tracing. Above 1.0
+    /// means stars prefer dense gas, which is what makes a spiral read as
+    /// a spiral: young stars sitting in the arms.
+    ///
+    /// Binned by radius on purpose. Both stars and gas concentrate toward
+    /// the centre, so a global ratio would score that radial concentration
+    /// as arm tracing. Normalizing within each radius isolates the
+    /// azimuthal question, which is the one that matters visually.
+    ///
+    /// This is the success metric for arm tracing. Note it is deliberately
+    /// blind to kinematics: a hot, thoroughly mixed population that still
+    /// clusters on the arms scores well here and badly on
+    /// `rotation_dispersion_ratio`, and for the look Kai is after that is
+    /// the right trade. See galaxy-gen#66.
+    pub fn stellar_arm_affinity(&self) -> f32 {
+        const BINS: usize = 6;
+        const MIN_BIN_STARS: u32 = 20;
+        let center = self.size as f32 * 0.5;
+        let disk_r = self.disk_radius();
+        let size = self.size as usize;
+        let mut cell_sum = [0.0f64; BINS];
+        let mut cell_count = [0u32; BINS];
+        for i in 0..self.n {
+            let (col, row) = self.index_to_col_row(i);
+            let x = col as f32 - center;
+            let y = row as f32 - center;
+            let r = (x * x + y * y).sqrt();
+            if r > disk_r {
+                continue;
+            }
+            let bin = (((r / disk_r) * BINS as f32) as usize).min(BINS - 1);
+            cell_sum[bin] += self.mass[i] as f64;
+            cell_count[bin] += 1;
+        }
+        let mut star_sum = [0.0f64; BINS];
+        let mut star_count = [0u32; BINS];
+        for s in 0..self.stars.len() {
+            let sx = self.stars.pos_x[s];
+            let sy = self.stars.pos_y[s];
+            let x = sx - center;
+            let y = sy - center;
+            let r = (x * x + y * y).sqrt();
+            if r > disk_r {
+                continue;
+            }
+            let col = sx.clamp(0.0, size as f32 - 1.0) as usize;
+            let row = sy.clamp(0.0, size as f32 - 1.0) as usize;
+            let bin = (((r / disk_r) * BINS as f32) as usize).min(BINS - 1);
+            star_sum[bin] += self.mass[row * size + col] as f64;
+            star_count[bin] += 1;
+        }
+        let mut total = 0.0f32;
+        let mut bins_used = 0u32;
+        for b in 0..BINS {
+            if star_count[b] < MIN_BIN_STARS || cell_count[b] == 0 {
+                continue;
+            }
+            let mean_cell = cell_sum[b] / cell_count[b] as f64;
+            if mean_cell <= 1e-6 {
+                continue;
+            }
+            let mean_star = star_sum[b] / star_count[b] as f64;
+            total += (mean_star / mean_cell) as f32;
+            bins_used += 1;
+        }
+        if bins_used == 0 {
+            0.0
+        } else {
+            total / bins_used as f32
+        }
+    }
+
     /// Rotational support of the resolved star population: mean streaming
     /// speed over velocity dispersion (`v_rot / sigma`), averaged across
     /// radial bins of the luminous disk.
@@ -2076,7 +2171,7 @@ impl Galaxy {
     /// Apply a rotating logarithmic density-wave potential to gas. The
     /// force is normal to the configured arm phase, so orbiting gas crosses
     /// the wave, compresses along it, and can collapse into stars there.
-    pub(crate) fn process_spiral_density_wave(&mut self, _time: f32) {
+    pub(crate) fn process_spiral_density_wave(&mut self, time: f32) {
         let p = self.scenario.params();
         if p.spiral_wave_strength <= 0.0 {
             return;
@@ -2115,12 +2210,47 @@ impl Galaxy {
             self.acc_x[i] += force * grad_x;
             self.acc_y[i] += force * grad_y;
         }
+
+        // Stars feel the same arms, at a fraction. Without this the wave
+        // that carves the spiral is applied to gas exclusively, and stars
+        // only ever sense a quarter-strength, 64-grid-smoothed echo of the
+        // result - which is why they never traced the arms. A spiral
+        // reads as a spiral because young stars sit in it.
+        if Galaxy::STAR_WAVE_COUPLING > 0.0 {
+            for s in 0..self.stars.len() {
+                let x = self.stars.pos_x[s] - center;
+                let y = self.stars.pos_y[s] - center;
+                let r2 = x * x + y * y;
+                let r = r2.sqrt();
+                if r <= inner || r >= outer {
+                    continue;
+                }
+                let inner_t = ((r - inner) / taper_width).clamp(0.0, 1.0);
+                let outer_t = ((outer - r) / taper_width).clamp(0.0, 1.0);
+                let taper = inner_t
+                    * inner_t
+                    * (3.0 - 2.0 * inner_t)
+                    * outer_t
+                    * outer_t
+                    * (3.0 - 2.0 * outer_t);
+                let phase = 2.0 * y.atan2(x) - Galaxy::SPIRAL_PITCH * r.ln() - pattern_phase;
+                let inv_r2 = 1.0 / r2;
+                let grad_x = (-2.0 * y - Galaxy::SPIRAL_PITCH * x) * inv_r2;
+                let grad_y = (2.0 * x - Galaxy::SPIRAL_PITCH * y) * inv_r2;
+                let force =
+                    -p.spiral_wave_strength * taper * phase.sin() * Galaxy::STAR_WAVE_COUPLING;
+                // Stars integrate outside the gas acceleration buffers, so
+                // this applies as a velocity increment over the step.
+                self.stars.vel_x[s] += force * grad_x * time;
+                self.stars.vel_y[s] += force * grad_y * time;
+            }
+        }
     }
 
     /// Apply an axisymmetric annular potential to gas. Ejecta cross and
     /// settle into the minimum while newborn collisionless stars retain
     /// the orbital velocity inherited from their natal gas.
-    pub(crate) fn process_ring_density_wave(&mut self, _time: f32) {
+    pub(crate) fn process_ring_density_wave(&mut self, time: f32) {
         let p = self.scenario.params();
         if p.ring_wave_strength <= 0.0 {
             return;
@@ -2142,6 +2272,25 @@ impl Galaxy {
             let radial_force = -p.ring_wave_strength * ((r - target) / scale).tanh();
             self.acc_x[i] += radial_force * x / r;
             self.acc_y[i] += radial_force * y / r;
+        }
+
+        // Stars feel the annulus too, at the same fraction as the spiral
+        // arms. A ring galaxy whose stars ignore the ring is a ring of
+        // gas with a uniform star haze laid over it.
+        if Galaxy::STAR_WAVE_COUPLING > 0.0 {
+            for s in 0..self.stars.len() {
+                let x = self.stars.pos_x[s] - center;
+                let y = self.stars.pos_y[s] - center;
+                let r = (x * x + y * y).sqrt();
+                if r <= disk_r * 0.06 || r >= disk_r * 0.96 {
+                    continue;
+                }
+                let radial_force = -p.ring_wave_strength
+                    * ((r - target) / scale).tanh()
+                    * Galaxy::STAR_WAVE_COUPLING;
+                self.stars.vel_x[s] += radial_force * x / r * time;
+                self.stars.vel_y[s] += radial_force * y / r * time;
+            }
         }
     }
 
@@ -2249,8 +2398,10 @@ impl Galaxy {
                 let hx = wx - center;
                 let hy = wy - center;
                 let ah = v_flat2 / (hx * hx + hy * hy + rc2);
-                self.field_ax[fy * res + fx] = (ax - ah * hx) * Galaxy::STAR_FIELD_SCALE;
-                self.field_ay[fy * res + fx] = (ay - ah * hy) * Galaxy::STAR_FIELD_SCALE;
+                self.field_ax[fy * res + fx] =
+                    (ax * Galaxy::STAR_GAS_FIELD_BOOST - ah * hx) * Galaxy::STAR_FIELD_SCALE;
+                self.field_ay[fy * res + fx] =
+                    (ay * Galaxy::STAR_GAS_FIELD_BOOST - ah * hy) * Galaxy::STAR_FIELD_SCALE;
             }
         }
     }
@@ -5232,6 +5383,80 @@ mod tests_dynamics {
     /// A cold rotating ring must score high; the same stars with their
     /// velocities randomized must score near zero. Without this, a metric
     /// that silently returns garbage still produces a plausible curve.
+    /// Calibration for `stellar_arm_affinity` against a gas pattern whose
+    /// answer is known by construction: an m=2 bar of dense cells with
+    /// empty gaps between. Stars placed inside the dense region must
+    /// score well above 1; stars spread over all angles must score near 1.
+    #[test]
+    fn test_stellar_arm_affinity_detects_stars_sitting_in_the_gas() {
+        let size = 80u16;
+        let center = size as f32 * 0.5;
+        let disk_r = (size as f32 * 0.5 - 1.0).max(1.0);
+        let sizef = size as usize;
+
+        // Gas: an m=2 pattern, dense within +-25 degrees of the x axis.
+        let lay_gas = |g: &mut Galaxy| {
+            for i in 0..g.n {
+                let (col, row) = g.index_to_col_row(i);
+                let x = col as f32 - center;
+                let y = row as f32 - center;
+                let r = (x * x + y * y).sqrt();
+                if r < disk_r * 0.2 || r > disk_r * 0.8 {
+                    continue;
+                }
+                let angle = y.atan2(x);
+                let in_arm = angle.cos().abs() > 0.9;
+                g.mass[i] = if in_arm { 900 } else { 30 };
+            }
+        };
+
+        let arm_angles = [0.0f32, std::f32::consts::PI];
+        let mut on_arm = Galaxy::new(size, 0);
+        lay_gas(&mut on_arm);
+        for k in 0..200 {
+            let angle = arm_angles[k % 2];
+            let r = disk_r * (0.3 + 0.4 * ((k % 9) as f32 / 9.0));
+            on_arm.spawn_star(
+                center + r * angle.cos(),
+                center + r * angle.sin(),
+                0.0,
+                0.0,
+                10.0,
+            );
+        }
+        let clustered = on_arm.stellar_arm_affinity();
+
+        // Same radii, spread over every angle: no arm preference.
+        let mut spread = Galaxy::new(size, 0);
+        lay_gas(&mut spread);
+        for k in 0..200 {
+            let angle = std::f32::consts::TAU * k as f32 / 200.0;
+            let r = disk_r * (0.3 + 0.4 * ((k % 9) as f32 / 9.0));
+            spread.spawn_star(
+                center + r * angle.cos(),
+                center + r * angle.sin(),
+                0.0,
+                0.0,
+                10.0,
+            );
+        }
+        let uniform = spread.stellar_arm_affinity();
+
+        assert!(
+            clustered > 1.8,
+            "stars sitting in the arms must score well above 1, got {clustered}"
+        );
+        assert!(
+            (0.6..1.4).contains(&uniform),
+            "stars spread over all angles must score near 1, got {uniform}"
+        );
+        assert!(
+            clustered > uniform * 1.8,
+            "the metric must separate the two: clustered {clustered} vs uniform {uniform}"
+        );
+        let _ = sizef;
+    }
+
     #[test]
     fn test_rotation_dispersion_ratio_separates_a_disk_from_a_mush() {
         let size = 100u16;
