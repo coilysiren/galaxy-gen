@@ -1,4 +1,5 @@
 import * as galaxy from "./galaxy";
+import { buildStarfield } from "./starfield";
 
 // Canvas, not SVG: 2500+ DOM attrs/frame hits hundreds of ms.
 
@@ -259,6 +260,11 @@ interface State {
   camera: Camera;
   frameAngularRate: number;
   simTick: number;
+  /// Seeded deep-space backdrop, rebuilt only when the seed or the
+  /// viewport changes. Null means "rebuild on the next frame".
+  background: HTMLCanvasElement | null;
+  /// Master sim seed, so the backdrop derives from the same `?seed=`.
+  seed: bigint | null;
   lastMass: Uint16Array | null;
   lastFracX: Float32Array | null;
   lastFracY: Float32Array | null;
@@ -381,7 +387,8 @@ function clampPan(cam: Camera, cw: number, ch: number): Camera {
 
 export function initViz(
   galaxyFrontend: galaxy.Frontend,
-  scenario: galaxy.Scenario = galaxy.Scenario.IrregularSpiral
+  scenario: galaxy.Scenario = galaxy.Scenario.IrregularSpiral,
+  seed: bigint | null = null
 ) {
   const host = document.getElementById("dataviz");
   if (!host) return;
@@ -519,6 +526,8 @@ export function initViz(
     state.ctx.scale(dpr, dpr);
     state.scale = Math.min(ncw, nch) / (state.size * VIEW_SPAN);
     state.rMax = state.scale * 0.5;
+    // The backdrop is sized to the viewport, so it has to be rebuilt.
+    state.background = null;
     state.camera = clampPan(state.camera, ncw, nch);
     publishView(state);
     redraw();
@@ -570,6 +579,8 @@ export function initViz(
       (FRAME_RATE_PRESENTATION_MULTIPLIER * FRAME_RATE_SCALE[scenario]) /
       Math.sqrt(Math.max(1, size)),
     simTick: 0,
+    background: null,
+    seed,
     lastMass: null,
     lastFracX: null,
     lastFracY: null,
@@ -838,6 +849,24 @@ function smoothstep(a: number, b: number, x: number): number {
   return u * u * (3 - 2 * u);
 }
 
+/// Build the seeded backdrop on demand and hold it until the seed or
+/// the viewport changes. Generation stamps hundreds of sprites, far too
+/// much to repeat per frame - and it has no reason to, since nothing in
+/// it moves.
+function ensureBackground(s: State): HTMLCanvasElement | null {
+  if (s.background) return s.background;
+  buildGasSprites();
+  buildStarColors();
+  s.background = buildStarfield({
+    width: s.cw,
+    height: s.ch,
+    dpr: s.dpr,
+    seed: s.seed,
+    assets: { gasSprites, dustSprite, starColors },
+  });
+  return s.background;
+}
+
 function drawFrame(s: State, mass: Uint16Array) {
   const { ctx, size, scale, camera } = s;
 
@@ -847,11 +876,21 @@ function drawFrame(s: State, mass: Uint16Array) {
   ctx.setTransform(1, 0, 0, 1, 0, 0);
   const dpr = Math.min(window.devicePixelRatio || 1, 2);
   ctx.scale(dpr, dpr);
-  // Opaque space-black base (matches the page background). Without it,
-  // multiply-composited dust degenerates to plain painting wherever the
-  // canvas is transparent and stamps visible grey squares.
-  ctx.fillStyle = "#05060a";
-  ctx.fillRect(0, 0, s.cw, s.ch);
+  // Opaque base. Without it, multiply-composited dust degenerates to
+  // plain painting wherever the canvas is transparent and stamps
+  // visible grey squares.
+  //
+  // The seeded backdrop bakes that space-black base in, so blitting it
+  // replaces the fill rather than adding a pass. It is laid down before
+  // the camera and frame rotation below, which is what keeps the sky
+  // fixed to the screen instead of spinning with the disk.
+  const backdrop = timed("background", () => ensureBackground(s));
+  if (backdrop) {
+    ctx.drawImage(backdrop, 0, 0, s.cw, s.ch);
+  } else {
+    ctx.fillStyle = "#05060a";
+    ctx.fillRect(0, 0, s.cw, s.ch);
+  }
 
   // Apply the camera, then rotate the world into the representative
   // stellar frame. Physics remains in the inertial simulation frame.

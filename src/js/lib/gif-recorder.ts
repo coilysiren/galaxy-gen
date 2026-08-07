@@ -17,9 +17,8 @@
 import { GIFEncoder, quantize, applyPalette } from "gifenc";
 
 export interface RecorderOptions {
-  /// Capture one frame per this many sim ticks. The sim advances far
-  /// faster than a watchable GIF, so frames are decimated rather than
-  /// taken one-per-draw.
+  /// Capture one frame per this many sim ticks - the sim advances far
+  /// faster than a watchable GIF, so frames are decimated.
   ticksPerFrame: number;
   /// Hard cap; recording auto-stops here so a forgotten session cannot
   /// grow without bound.
@@ -37,10 +36,8 @@ export const DEFAULT_OPTIONS: RecorderOptions = {
   frameRate: 12,
 };
 
-/// Beyond this many frames waiting to be quantized, `capture` encodes
-/// inline instead of queueing. That trades a visible hitch for a bound
-/// on memory, and it never silently drops a frame - a GIF missing
-/// arbitrary frames is worse than one that stuttered while recording.
+/// Past this many pending frames, `capture` encodes inline: bounded
+/// memory over a dropped frame. See docs/gif-recording.md.
 const QUEUE_LIMIT = 8;
 
 export interface RecorderStatus {
@@ -111,8 +108,7 @@ export function start(runLabel: string, overrides: Partial<RecorderOptions> = {}
 }
 
 /// Downsample the finished canvas and queue it. Called from the render
-/// funnel, so it stays cheap: one `drawImage` plus one `getImageData` at
-/// the reduced size. Quantization happens off this path.
+/// funnel, so it stays cheap - quantization happens off this path.
 export function capture(canvas: HTMLCanvasElement, simTick: number) {
   if (!recording || !scratch) return;
   if (lastCapturedTick != null && simTick - lastCapturedTick < options.ticksPerFrame) return;
@@ -149,8 +145,7 @@ function scheduleDrain() {
     draining = false;
     if (queue.length > 0) scheduleDrain();
   };
-  // Prefer idle time, but never wait longer than a frame or two - the
-  // queue has to clear faster than captures arrive.
+  // Prefer idle time, but never wait longer than a frame or two.
   const ric = (window as unknown as { requestIdleCallback?: (cb: () => void, o?: object) => void })
     .requestIdleCallback;
   if (typeof ric === "function") ric(drain, { timeout: 100 });
@@ -159,9 +154,8 @@ function scheduleDrain() {
 
 function encodeOne(frame: Pending) {
   if (!encoder) return;
-  // A per-frame palette costs bytes but holds up far better than one
-  // global palette: a run's color range shifts hard as gas drains and
-  // stars ignite, and a fixed palette bands the late frames.
+  // Per-frame palette: a run's color range shifts hard as gas drains
+  // and stars ignite, and a fixed palette bands the late frames.
   const palette = quantize(frame.data, 256, { format: "rgb444" });
   const indexed = applyPalette(frame.data, palette, "rgb444");
   encoder.writeFrame(indexed, frame.width, frame.height, {

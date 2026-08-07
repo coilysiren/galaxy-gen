@@ -347,7 +347,9 @@ export function Interface() {
       next.seed(SEED_MASS, scenario);
     }
     galaxyFrontendRef.current = next;
-    dataviz.initViz(next, scenario);
+    // Same seed as the physics, so the backdrop travels with the
+    // permalink instead of rerolling per page load.
+    dataviz.initViz(next, scenario, parsed);
     dataviz.initData(next);
     setInitialized(true);
     setTickCount(0);

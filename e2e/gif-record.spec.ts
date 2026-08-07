@@ -1,9 +1,8 @@
 import { test, expect, Page } from "@playwright/test";
 import { readFile } from "node:fs/promises";
 
-// A small grid keeps the recording cheap: the recorder samples the
-// render funnel, so what matters here is that frames are captured and
-// encoded, not that the physics is interesting.
+// Small grid: what matters is that frames are captured and encoded,
+// not that the physics is interesting.
 const RECORD_SIZE = 60;
 
 async function waitForWasm(page: Page) {
@@ -12,9 +11,8 @@ async function waitForWasm(page: Page) {
   });
 }
 
-/// GIF89a header, then the logical screen width/height as little-endian
-/// u16. Parsed rather than trusted so a truncated or empty blob cannot
-/// pass as a valid capture.
+/// GIF89a header plus logical screen size, parsed rather than trusted
+/// so a truncated or empty blob cannot pass as a valid capture.
 function parseGifHeader(bytes: Buffer): { signature: string; width: number; height: number } {
   return {
     signature: bytes.subarray(0, 6).toString("latin1"),
@@ -23,9 +21,8 @@ function parseGifHeader(bytes: Buffer): { signature: string; width: number; heig
   };
 }
 
-/// Count image descriptors (0x2C) at the top level of the GIF stream.
-/// Walking the block structure is the only honest frame count - 0x2C
-/// also occurs inside pixel data, so a naive byte scan overcounts.
+/// Walk the block structure counting image descriptors. 0x2C also
+/// occurs inside pixel data, so a naive byte scan overcounts.
 function countFrames(bytes: Buffer): number {
   let i = 13; // header + logical screen descriptor
   const flags = bytes[10];
