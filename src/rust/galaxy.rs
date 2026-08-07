@@ -1638,6 +1638,68 @@ impl Galaxy {
         self.spiral_structure().0
     }
 
+    /// Mean ratio of resolved-star tangential speed to the circular speed
+    /// of the field those stars actually read, over the luminous disk.
+    ///
+    /// This is the diagnostic for whether the stellar population is on
+    /// the orbits its own potential supports. 1.0 means a balanced disk.
+    /// Above 1.0 means stars carry more angular momentum than the field
+    /// holds, so they climb outward, phase-mix, and pool past the disk
+    /// edge. Below 1.0 means they fall inward. Either way the population
+    /// randomizes, which is what kills stellar rotation by t~2500.
+    ///
+    /// Weighted by nothing and sampled over disk stars only: halo stars
+    /// are already on plunging orbits by construction and would swamp
+    /// the signal we care about.
+    pub fn star_circular_ratio(&self) -> f32 {
+        let center = self.size as f32 * 0.5;
+        let disk_r = self.disk_radius();
+        let mut sum = 0.0f32;
+        let mut n = 0u32;
+        for i in 0..self.stars.len() {
+            let rx = self.stars.pos_x[i] - center;
+            let ry = self.stars.pos_y[i] - center;
+            let r = (rx * rx + ry * ry).sqrt();
+            // Skip the nucleus (circular speed is ill-conditioned) and
+            // anything already outside the disk.
+            if r < disk_r * 0.1 || r > disk_r {
+                continue;
+            }
+            let v_circ = self.association_circular_speed(r);
+            if v_circ < 1e-3 {
+                continue;
+            }
+            let (tx, ty) = (-ry / r, rx / r);
+            let v_tan = self.stars.vel_x[i] * tx + self.stars.vel_y[i] * ty;
+            sum += v_tan / v_circ;
+            n += 1;
+        }
+        if n == 0 {
+            0.0
+        } else {
+            sum / n as f32
+        }
+    }
+
+    /// Companion to `star_circular_ratio`: the same ratio a newborn star
+    /// would be given right now at a representative disk radius. Splits
+    /// "born wrong" from "drifted wrong" - if birth is already off 1.0,
+    /// the orbits never had a chance.
+    pub fn birth_circular_ratio(&self, radius_frac: f32) -> f32 {
+        let r = (self.disk_radius() * radius_frac).max(1e-3);
+        let v_circ = self.association_circular_speed(r);
+        if v_circ < 1e-3 {
+            return 0.0;
+        }
+        let stellar_support = v_circ * Galaxy::ASSOCIATION_ORBIT_SUPPORT;
+        let background_support = self.association_background_speed(r);
+        // Mirrors birth: gas tangential is capped at BIRTH_GAS_VEL_CAP,
+        // so the worst case a newborn can inherit is that cap.
+        let target = (Galaxy::BIRTH_GAS_VEL_CAP + stellar_support + background_support)
+            .min(Galaxy::ASSOCIATION_ORBIT_SPEED_CAP);
+        target / v_circ
+    }
+
     /// Fraction of radial disk bands that carry the same pitched arm phase.
     /// Sparse clumps can score well globally, so visible morphology requires
     /// both coherence and radial coverage.
@@ -3658,6 +3720,16 @@ impl Galaxy {
         // The smooth floor supplements the deliberately quarter-strength
         // live field. The cap keeps that compensation inside the old
         // gas-plus-circular-support birth envelope.
+        //
+        // Measured caveat, see galaxy-gen#66: ASSOCIATION_ORBIT_SPEED_CAP
+        // is an absolute speed and it binds on nearly every birth, which
+        // hands newborns 2.0-3.2x the local circular speed of the field
+        // they will orbit in (`bcirc` in debug-sim). That is past the
+        // ~1.41x escape ratio, so the disk launches most of the stars it
+        // forms. Clamping to a multiple of circular speed instead fixes
+        // that cleanly - and breaks the elliptical scenario, whose
+        // spheroid is currently produced by those over-fast births. Do
+        // not "fix" this in isolation; #66 has the numbers.
         let smooth_support = stellar_support + background_support;
         let target_tangential =
             (gas_tangential.max(0.0) + smooth_support).min(Galaxy::ASSOCIATION_ORBIT_SPEED_CAP);

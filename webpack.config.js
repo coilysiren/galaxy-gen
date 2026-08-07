@@ -52,8 +52,11 @@ module.exports = {
     hot: true,
     liveReload: true,
     // 8081, not 8080: a homebrew nginx login service holds 8080 on this
-    // host and grabs it back whenever the dev server restarts.
-    port: 8081,
+    // host and grabs it back whenever the dev server restarts. Override
+    // with GALAXY_DEV_PORT when another local project already owns 8081 -
+    // sibling repos in this workspace also default to it. docs/FEATURES
+    // has claimed this knob existed for a while; now it does.
+    port: Number(process.env.GALAXY_DEV_PORT) || 8081,
     host: "127.0.0.1",
     allowedHosts: "all",
     static: {
