@@ -1532,14 +1532,10 @@ impl Galaxy {
         self.mass.clone()
     }
     pub fn x(&self) -> Vec<u16> {
-        (0..self.n as u16)
-            .map(|i| self.index_to_col_row(i).0)
-            .collect()
+        (0..self.n).map(|i| self.index_to_col_row(i).0).collect()
     }
     pub fn y(&self) -> Vec<u16> {
-        (0..self.n as u16)
-            .map(|i| self.index_to_col_row(i).1)
-            .collect()
+        (0..self.n).map(|i| self.index_to_col_row(i).1).collect()
     }
 
     // State-transfer accessors for Worker round-trip via transferable buffers.
@@ -3870,14 +3866,18 @@ impl Galaxy {
     }
 
     // (col, row) — x is column, y is row. Matches the pre-rewrite convention.
+    // Indices are usize, not u16: the grid is size² cells, which passes
+    // 65_535 at size 256 and reaches 250_000 at the default 500. Columns
+    // and rows stay u16 because a coordinate is always below `size`.
     #[inline]
-    fn index_to_col_row(&self, index: u16) -> (u16, u16) {
-        (index % self.size, index / self.size)
+    fn index_to_col_row(&self, index: usize) -> (u16, u16) {
+        let size = self.size as usize;
+        ((index % size) as u16, (index / size) as u16)
     }
 
     #[inline]
-    fn col_row_to_index(&self, col: u16, row: u16) -> u16 {
-        row * self.size + col
+    fn col_row_to_index(&self, col: u16, row: u16) -> usize {
+        row as usize * self.size as usize + col as usize
     }
 
     /// Picks direct O(A squared) or Barnes-Hut O(N log N) by active count.
@@ -6635,6 +6635,39 @@ mod tests_indexing {
         let (x, y) = g.index_to_col_row(index);
         assert_eq!(g.col_row_to_index(x, y), index);
         assert_eq!((x, y), (0, 2));
+    }
+
+    /// Regression: at the default size the grid holds 250_000 cells, so a
+    /// u16 index space wraps past row 131 and every neighbor lookup in
+    /// gas pressure and gas transport lands on the wrong cell. Walk the
+    /// whole grid - the size-3 cases above all fit in u16 and so proved
+    /// nothing about the size the app actually ships.
+    #[test]
+    fn test_index_roundtrip_at_default_size() {
+        let size: usize = 500;
+        let g = Galaxy::new(size as u16, 0);
+        for index in 0..g.n {
+            let (col, row) = g.index_to_col_row(index);
+            assert_eq!(
+                (col as usize, row as usize),
+                (index % size, index / size),
+                "index {index} decoded to the wrong cell"
+            );
+            assert_eq!(
+                g.col_row_to_index(col, row),
+                index,
+                "index {index} did not survive the round trip"
+            );
+        }
+    }
+
+    /// The far corner is where a u16 index space overflows hardest, and
+    /// it is exactly the value the gas integrator writes into `want_ni`.
+    #[test]
+    fn test_last_cell_index_at_default_size() {
+        let g = Galaxy::new(500, 0);
+        assert_eq!(g.col_row_to_index(499, 499), 249_999);
+        assert_eq!(g.index_to_col_row(249_999), (499, 499));
     }
 }
 
