@@ -2,7 +2,7 @@ import React from "react";
 import "./styles.css";
 import * as dataviz from "./dataviz";
 import * as galaxy from "./galaxy";
-import * as recorder from "./gif-recorder";
+import * as recorder from "./recorder";
 
 const wasm = import("galaxy_gen_backend/galaxy_gen_backend");
 
@@ -206,6 +206,19 @@ export function Interface() {
   const [gasPct, setGasPct] = React.useState(100);
   const [quasarActivity, setQuasarActivity] = React.useState(0);
   const [recorderStatus, setRecorderStatus] = React.useState(recorder.getStatus());
+  const [recordFormat, setRecordFormat] = React.useState<recorder.RecorderFormat>("gif");
+  // Null until the WebCodecs probe answers. The mp4 pill stays disabled
+  // rather than absent, so its unavailability is legible.
+  const [mp4Available, setMp4Available] = React.useState<boolean | null>(null);
+  React.useEffect(() => {
+    let live = true;
+    void recorder.isMp4Available().then((ok) => {
+      if (live) setMp4Available(ok);
+    });
+    return () => {
+      live = false;
+    };
+  }, []);
   // Seed-time baselines for the popsci ratios.
   const initialBhRef = React.useRef(1);
 
@@ -569,7 +582,9 @@ export function Interface() {
     }
     if (!galaxyFrontendRef.current) return;
     // Name the file after the permalink that reproduces the run.
-    recorder.start(`galaxy-${seed}-${scenarioToSlug(scenario)}-${galaxySize}`);
+    recorder.start(`galaxy-${seed}-${scenarioToSlug(scenario)}-${galaxySize}`, {
+      format: recordFormat,
+    });
   };
 
   const handleRunToggle = async () => {
@@ -799,9 +814,38 @@ export function Interface() {
                 {recorderStatus.encoding
                   ? "encoding…"
                   : recorderStatus.recording
-                    ? `stop recording (${recorderStatus.frames}/${recorderStatus.maxFrames})`
-                    : "record gif"}
+                    ? `stop (${recorderStatus.frames}/${recorderStatus.maxFrames})`
+                    : `record ${recordFormat}`}
               </button>
+              {/* Two formats, so a segmented pair reads faster than a
+                  dropdown and shows both states at once. Locked during
+                  a capture: the container is fixed once encoding starts. */}
+              <div
+                className="format-pills col-span-2 sm:col-span-1"
+                role="group"
+                aria-label="recording format"
+              >
+                {(["gif", "mp4"] as recorder.RecorderFormat[]).map((fmt) => {
+                  const unavailable = fmt === "mp4" && mp4Available === false;
+                  return (
+                    <button
+                      key={fmt}
+                      type="button"
+                      className="format-pill"
+                      data-testid={`btn-format-${fmt}`}
+                      aria-pressed={recordFormat === fmt}
+                      data-active={recordFormat === fmt ? "true" : "false"}
+                      disabled={unavailable || recorderStatus.recording || recorderStatus.encoding}
+                      title={
+                        unavailable ? "mp4 needs WebCodecs, unavailable in this browser" : undefined
+                      }
+                      onClick={() => setRecordFormat(fmt)}
+                    >
+                      {fmt}
+                    </button>
+                  );
+                })}
+              </div>
             </div>
 
             {/* Instrumentation, not viewer-facing. The sim tick is the

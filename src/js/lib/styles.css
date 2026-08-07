@@ -126,6 +126,40 @@
     opacity: 0.85;
   }
 
+  /* Segmented format pair for the recorder. Subordinate to the record
+     button it modifies, so it is quieter than a .btn-plum. */
+  .format-pills {
+    display: flex;
+    gap: 0.25rem;
+  }
+  .format-pill {
+    flex: 1;
+    border-radius: 0.375rem;
+    padding: 0.3rem 0.5rem;
+    font-size: 0.7rem;
+    font-weight: 700;
+    letter-spacing: 0.15em;
+    text-transform: uppercase;
+    background: rgba(0, 0, 0, 0.35);
+    color: var(--color-plum-400);
+    border: 1px solid var(--color-plum-700);
+    cursor: pointer;
+    transition: all 150ms ease;
+  }
+  .format-pill[data-active="true"] {
+    background: var(--color-plum-700);
+    border-color: var(--color-plum-400);
+    color: #fff;
+  }
+  .format-pill:hover:not(:disabled):not([data-active="true"]) {
+    border-color: var(--color-plum-400);
+    color: var(--color-plum-50);
+  }
+  .format-pill:disabled {
+    opacity: 0.35;
+    cursor: not-allowed;
+  }
+
   /* The sim tick, the one viewer-facing number. Bottom-left of the
      canvas so it never collides with the control panel or the toggle. */
   .tick-caption {

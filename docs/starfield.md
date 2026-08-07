@@ -77,4 +77,4 @@ differ, it does not change across ticks, and generation is cached.
 
 ## See also
 
-[FEATURES.md](FEATURES.md), [gif-recording.md](gif-recording.md).
+[FEATURES.md](FEATURES.md), [recording.md](recording.md).

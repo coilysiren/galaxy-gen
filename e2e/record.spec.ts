@@ -52,7 +52,32 @@ function countFrames(bytes: Buffer): number {
   return frames;
 }
 
-test.describe("GIF recording", () => {
+/// Walk the ISO-BMFF box tree at the top level. An MP4 that plays has
+/// both an `ftyp` and a `moov`; a truncated or unfinalized capture is
+/// missing `moov`, which a naive size check would let through.
+function topLevelBoxes(bytes: Buffer): string[] {
+  const boxes: string[] = [];
+  let i = 0;
+  while (i + 8 <= bytes.length) {
+    let size = bytes.readUInt32BE(i);
+    const type = bytes.subarray(i + 4, i + 8).toString("latin1");
+    if (size === 1) {
+      // 64-bit extended size in the 8 bytes after the type.
+      if (i + 16 > bytes.length) break;
+      size = Number(bytes.readBigUInt64BE(i + 8));
+    } else if (size === 0) {
+      // Box runs to end of file.
+      boxes.push(type);
+      break;
+    }
+    if (size < 8) break;
+    boxes.push(type);
+    i += size;
+  }
+  return boxes;
+}
+
+test.describe("recording", () => {
   test.beforeEach(async ({ page }) => {
     // debug=1: capture is driven by the single-step button, which is a
     // debug affordance rather than a viewer control.
@@ -76,7 +101,7 @@ test.describe("GIF recording", () => {
   test("stepping while armed captures frames and downloads a real GIF", async ({ page }) => {
     const record = page.getByTestId("btn-record");
     await record.click();
-    await expect(record).toContainText("stop recording");
+    await expect(record).toContainText("stop (");
 
     // Default cadence is one frame per 10 sim ticks, so step past
     // several boundaries to bank more than one frame.
@@ -126,5 +151,52 @@ test.describe("GIF recording", () => {
     const bytes = await readFile((await download.path())!);
     expect(parseGifHeader(bytes).signature).toBe("GIF89a");
     expect(countFrames(bytes)).toBeGreaterThan(1);
+  });
+
+  test("the format pills switch the button label and the file extension", async ({ page }) => {
+    const record = page.getByTestId("btn-record");
+    await expect(record).toHaveText("record gif");
+    await expect(page.getByTestId("btn-format-gif")).toHaveAttribute("data-active", "true");
+
+    const mp4Pill = page.getByTestId("btn-format-mp4");
+    // Chromium ships WebCodecs, so the pill must be live in this suite.
+    // If it is disabled here the capability probe has regressed.
+    await expect(mp4Pill).toBeEnabled();
+    await mp4Pill.click();
+    await expect(mp4Pill).toHaveAttribute("data-active", "true");
+    await expect(page.getByTestId("btn-format-gif")).toHaveAttribute("data-active", "false");
+    await expect(record).toHaveText("record mp4");
+
+    // Format is locked for the duration of a capture.
+    await record.click();
+    await expect(mp4Pill).toBeDisabled();
+    await expect(page.getByTestId("btn-format-gif")).toBeDisabled();
+  });
+
+  test("recording as mp4 downloads a finalized, playable file", async ({ page }) => {
+    await page.getByTestId("btn-format-mp4").click();
+    const record = page.getByTestId("btn-record");
+    await record.click();
+    await expect(record).toContainText("stop (");
+
+    for (let i = 0; i < 45; i++) await page.getByTestId("btn-tick").click();
+    await expect(record).not.toContainText("(0/", { timeout: 15_000 });
+
+    const download = await Promise.all([page.waitForEvent("download"), record.click()]).then(
+      ([d]) => d
+    );
+    const bytes = await readFile((await download.path())!);
+
+    const boxes = topLevelBoxes(bytes);
+    // ftyp proves it is an MP4; moov proves finalize() ran and the file
+    // is not a truncated stream of samples with no index.
+    expect(boxes).toContain("ftyp");
+    expect(boxes).toContain("moov");
+    expect(bytes.length).toBeGreaterThan(1024);
+
+    expect(download.suggestedFilename()).toMatch(
+      new RegExp(`^galaxy-.+-irregular-spiral-${RECORD_SIZE}\\.mp4$`)
+    );
+    await expect(record).toHaveText("record mp4");
   });
 });

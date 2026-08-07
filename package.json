@@ -47,6 +47,7 @@
     "eslint-plugin-react-hooks": "^7.1.1",
     "galaxy_gen_backend": "file:pkg",
     "gifenc": "^1.0.3",
+    "mediabunny": "^1.52.3",
     "postcss": "^8.5.10",
     "postcss-loader": "^8.2.1",
     "prettier": "^3.8.3",
