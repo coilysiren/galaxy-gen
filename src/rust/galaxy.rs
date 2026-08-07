@@ -1638,8 +1638,98 @@ impl Galaxy {
         self.spiral_structure().0
     }
 
+    /// Rotational support of the resolved star population: mean streaming
+    /// speed over velocity dispersion (`v_rot / sigma`), averaged across
+    /// radial bins of the luminous disk.
+    ///
+    /// This is the metric that actually separates a disk from a mush,
+    /// because dispersion is what makes a mush a mush. Rotation-dominated
+    /// disks run above ~1.5; pressure-supported spheroids sit below ~0.7.
+    ///
+    /// Prefer this over `star_circular_ratio`, which cannot tell a
+    /// circular orbit from an eccentric one caught at pericenter and so
+    /// scores fast eccentric interlopers well - exactly the population
+    /// that looks like noise on screen. See galaxy-gen#66.
+    ///
+    /// Binned rather than global because a disk's streaming speed varies
+    /// with radius: pooling all radii would charge the radial gradient to
+    /// dispersion and understate rotation everywhere.
+    pub fn rotation_dispersion_ratio(&self) -> f32 {
+        const BINS: usize = 8;
+        /// Below this a bin's dispersion is noise, not a measurement.
+        const MIN_BIN_STARS: u32 = 20;
+        /// Smallest dispersion treated as real, so a perfectly ordered
+        /// bin yields a large finite ratio instead of a division blowup.
+        const SIGMA_FLOOR: f32 = 1e-3;
+        /// Ceiling on a single bin's contribution.
+        const RATIO_CAP: f32 = 20.0;
+        let center = self.size as f32 * 0.5;
+        let disk_r = self.disk_radius();
+        let mut count = [0u32; BINS];
+        let (mut sum_t, mut sum_r) = ([0.0f32; BINS], [0.0f32; BINS]);
+        let (mut sum_t2, mut sum_r2) = ([0.0f32; BINS], [0.0f32; BINS]);
+        for i in 0..self.stars.len() {
+            let rx = self.stars.pos_x[i] - center;
+            let ry = self.stars.pos_y[i] - center;
+            let r = (rx * rx + ry * ry).sqrt();
+            // Skip the nucleus, where the tangent is ill-conditioned, and
+            // anything already past the disk.
+            if r < disk_r * 0.1 || r > disk_r {
+                continue;
+            }
+            let bin = (((r / disk_r) * BINS as f32) as usize).min(BINS - 1);
+            let (unit_rx, unit_ry) = (rx / r, ry / r);
+            let (tan_x, tan_y) = (-unit_ry, unit_rx);
+            let vx = self.stars.vel_x[i];
+            let vy = self.stars.vel_y[i];
+            let vt = vx * tan_x + vy * tan_y;
+            let vr = vx * unit_rx + vy * unit_ry;
+            count[bin] += 1;
+            sum_t[bin] += vt;
+            sum_r[bin] += vr;
+            sum_t2[bin] += vt * vt;
+            sum_r2[bin] += vr * vr;
+        }
+        let mut total = 0.0f32;
+        let mut bins_used = 0u32;
+        for b in 0..BINS {
+            if count[b] < MIN_BIN_STARS {
+                continue;
+            }
+            let n = count[b] as f32;
+            let mean_t = sum_t[b] / n;
+            let mean_r = sum_r[b] / n;
+            // Dispersion about the bin's own streaming motion, both
+            // components: random motion is not purely radial.
+            let var_t = (sum_t2[b] / n - mean_t * mean_t).max(0.0);
+            let var_r = (sum_r2[b] / n - mean_r * mean_r).max(0.0);
+            let sigma = ((var_t + var_r) * 0.5).sqrt();
+            // A bin with near-zero dispersion is perfectly ordered, which
+            // is maximal rotational support - not missing data. Flooring
+            // sigma keeps the ratio finite and large; discarding the bin
+            // instead would report a cold disk as zero rotation, which is
+            // exactly backwards. RATIO_CAP bounds the result so one cold
+            // bin cannot dominate the average across bins.
+            total += (mean_t.abs() / sigma.max(SIGMA_FLOOR)).min(RATIO_CAP);
+            bins_used += 1;
+        }
+        if bins_used == 0 {
+            0.0
+        } else {
+            total / bins_used as f32
+        }
+    }
+
     /// Mean ratio of resolved-star tangential speed to the circular speed
     /// of the field those stars actually read, over the luminous disk.
+    ///
+    /// CAVEAT (galaxy-gen#66): this does not distinguish a circular disk
+    /// orbit from an eccentric orbit at pericenter, where tangential
+    /// speed is high by construction, so it scores fast eccentric
+    /// populations well. Do not tune against it. Use
+    /// `rotation_dispersion_ratio` to judge whether the disk is a disk;
+    /// this remains useful only for the narrower question of whether
+    /// stars carry roughly the angular momentum their potential holds.
     ///
     /// This is the diagnostic for whether the stellar population is on
     /// the orbits its own potential supports. 1.0 means a balanced disk.
@@ -5133,6 +5223,73 @@ mod tests_intial_generation {
 #[cfg(test)]
 mod tests_dynamics {
     use super::*;
+
+    /// Calibration for `rotation_dispersion_ratio` against two populations
+    /// whose answer is known by construction, because a metric nobody has
+    /// checked against a known answer is how galaxy-gen#66 went wrong the
+    /// first time.
+    ///
+    /// A cold rotating ring must score high; the same stars with their
+    /// velocities randomized must score near zero. Without this, a metric
+    /// that silently returns garbage still produces a plausible curve.
+    #[test]
+    fn test_rotation_dispersion_ratio_separates_a_disk_from_a_mush() {
+        let size = 100u16;
+        let center = size as f32 * 0.5;
+        let disk_r = (size as f32 * 0.5 - 1.0).max(1.0);
+
+        // Deterministic angle spread; no RNG so the calibration is stable.
+        let sample = |k: usize, n: usize| std::f32::consts::TAU * k as f32 / n as f32;
+        const N: usize = 400;
+
+        // 1. Cold disk: every star on a circular prograde orbit.
+        let mut disk = Galaxy::new(size, 0);
+        for k in 0..N {
+            let angle = sample(k, N);
+            let r = disk_r * (0.3 + 0.4 * ((k % 7) as f32 / 7.0));
+            let speed = 1.5;
+            disk.spawn_star(
+                center + r * angle.cos(),
+                center + r * angle.sin(),
+                -angle.sin() * speed,
+                angle.cos() * speed,
+                10.0,
+            );
+        }
+        let cold = disk.rotation_dispersion_ratio();
+
+        // 2. Same positions, velocities scrambled in direction: identical
+        //    speeds, no net streaming. This is the mush.
+        let mut mush = Galaxy::new(size, 0);
+        for k in 0..N {
+            let angle = sample(k, N);
+            let r = disk_r * (0.3 + 0.4 * ((k % 7) as f32 / 7.0));
+            // Decorrelate velocity direction from position angle.
+            let vdir = sample((k * 37) % N, N);
+            let speed = 1.5;
+            mush.spawn_star(
+                center + r * angle.cos(),
+                center + r * angle.sin(),
+                vdir.cos() * speed,
+                vdir.sin() * speed,
+                10.0,
+            );
+        }
+        let hot = mush.rotation_dispersion_ratio();
+
+        assert!(
+            cold > 1.5,
+            "a cold circular disk must read as rotation-supported, got {cold}"
+        );
+        assert!(
+            hot < 0.7,
+            "randomized velocities must read as dispersion-supported, got {hot}"
+        );
+        assert!(
+            cold > hot * 3.0,
+            "the metric must separate the two clearly: cold {cold} vs hot {hot}"
+        );
+    }
 
     #[test]
     fn test_disabled_spiral_wave_leaves_acceleration_untouched() {

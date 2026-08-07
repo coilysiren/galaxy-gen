@@ -45,6 +45,9 @@ struct Metrics {
     /// field they read. 1.0 is a balanced disk; above 1.0 the population
     /// carries more angular momentum than its potential holds.
     star_circ_ratio: f64,
+    /// v_rot / sigma over the disk - the metric that actually separates
+    /// a rotating disk (>1.5) from a pressure-supported mush (<0.7).
+    v_over_sigma: f64,
     /// The same ratio a newborn is handed at 0.5 disk_r. Separates
     /// "born wrong" from "drifted wrong".
     birth_circ_ratio: f64,
@@ -169,6 +172,7 @@ fn metrics(g: &Galaxy, size: u16) -> Metrics {
             0.0
         },
         star_circ_ratio: g.star_circular_ratio() as f64,
+        v_over_sigma: g.rotation_dispersion_ratio() as f64,
         birth_circ_ratio: g.birth_circular_ratio(0.5) as f64,
         spheroid_concentration: g.spheroid_concentration() as f64,
         spheroid_smoothness: g.spheroid_smoothness() as f64,
@@ -241,7 +245,7 @@ fn main() {
                 }
                 let m = metrics(&g, size);
                 println!(
-                    "t={cp:5}  nz={:5}  gas={:6}  vt={:+.3}  rot={:+.2}  r_pk={:.2}  ctr={:.2}  m2={:.2}  spi={:.2}  cov={:.2}  ring={:.2}  hollow={:.2}  rcov={:.2}  rw={:.2}  svt={:+.3}  sctr={:.2}  scirc={:.2}  bcirc={:.2}  econ={:.2}  esm={:.2}  axis={:.2}  ext={:.2}  erot={:.2}  bh={:.2}  q={:.2}  qep={}  qrate={:.5}  stars={:5}  mixed={:5}  ev(col/b/sn/sh/d/cap/nsm/grb/pn/ia/q)={}/{}/{}/{}/{}/{}/{}/{}/{}/{}/{}",
+                    "t={cp:5}  nz={:5}  gas={:6}  vt={:+.3}  rot={:+.2}  r_pk={:.2}  ctr={:.2}  m2={:.2}  spi={:.2}  cov={:.2}  ring={:.2}  hollow={:.2}  rcov={:.2}  rw={:.2}  svt={:+.3}  sctr={:.2}  vsig={:.2}  scirc={:.2}  bcirc={:.2}  econ={:.2}  esm={:.2}  axis={:.2}  ext={:.2}  erot={:.2}  bh={:.2}  q={:.2}  qep={}  qrate={:.5}  stars={:5}  mixed={:5}  ev(col/b/sn/sh/d/cap/nsm/grb/pn/ia/q)={}/{}/{}/{}/{}/{}/{}/{}/{}/{}/{}",
                     m.nonzero,
                     m.total,
                     m.vt,
@@ -257,6 +261,7 @@ fn main() {
                     m.ring_width,
                     m.star_vt,
                     m.star_central,
+                    m.v_over_sigma,
                     m.star_circ_ratio,
                     m.birth_circ_ratio,
                     m.spheroid_concentration,
