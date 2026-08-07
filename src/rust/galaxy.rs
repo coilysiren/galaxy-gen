@@ -403,6 +403,21 @@ impl Galaxy {
     /// the disk radius (size/2 - 1) cells feel a gentle inward pull
     /// proportional to overshoot. Gas is grid-bound anyway; stars use
     /// the two-tier halo confinement below instead.
+    ///
+    /// This makes the disk radius an equilibrium: a parcel drifting
+    /// outward parks there, so the densest gas ring in the sim sits
+    /// exactly on the domain boundary. That ridge is real, and it was
+    /// what made the boundary visible - the renderer drew it at 0.82
+    /// alpha. The renderer now fades gas to zero inside this radius
+    /// (GAS_FADE_START in dataviz.tsx), so the ridge is no longer drawn.
+    ///
+    /// Spreading the ridge itself, by ramping this pull across a band
+    /// inside the disk radius the way stars got with HARD_CLIP_FACTOR,
+    /// was tried and reverted: at a 0.18 band it perturbs the outer disk
+    /// enough to drop spiral coherence to 0.22, stop ring star
+    /// formation, and break elliptical relaxation. The ridge is load
+    /// bearing for scenario dynamics. Not drawing it is the cheap fix;
+    /// removing it needs the scenario force models retuned with it.
     const CONFINE_STIFFNESS: f32 = 0.02;
     /// Stars: hard-clip radius as a multiple of the soft (disk) radius.
     /// 3x leaves a wide halo band now that the renderer shows past the

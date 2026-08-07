@@ -25,8 +25,36 @@ const FRAME_RATE_PRESENTATION_MULTIPLIER = 16;
 // Radial render fade starts inside the nominal disk and reaches black well
 // before the canvas. This turns the finite simulation domain into a broad
 // stellar-halo transition instead of revealing a crisp circular boundary.
+//
+// Stars keep the wide fade. They have a genuine two-tier soft halo in the
+// physics - soft radius, divergent gradient, halo drag - reaching 3x the
+// disk radius, so there is real structure out here worth rendering.
 const FADE_START = 0.88;
 const FADE_END = 1.32;
+
+// Gas fades much earlier, and for a different reason. Gas is confined by a
+// spring at the disk radius, which makes that radius an equilibrium: any
+// parcel drifting outward parks there. That is a real density ridge in the
+// simulation, not a rendering artifact - and under the star fade above it
+// drew at 0.82 alpha, so the brightest ring in the frame sat exactly on the
+// domain boundary while the fade spent its range on the near-empty sky
+// outside it. That is the visible edge.
+//
+// The physics side of the fix spreads that ridge across a band (see
+// CONFINE_BAND_FRAC in galaxy.rs). This side makes sure the band is already
+// dark: gas reaches zero just inside the wall, so no amount of pile-up can
+// paint an edge. Seeded density already feathers from 0.55 of the disk
+// radius (EDGE_FEATHER_START), so the two tapers overlap rather than fight.
+const GAS_FADE_START = 0.58;
+const GAS_FADE_END = 0.94;
+
+// Screen-space vignette, a separate concern from the world-space fades
+// above: it keeps a wide or short viewport from ending the image on a
+// straight edge. Fraction of the corner distance where it begins, and
+// its opacity at the corner. Deliberately gentle - this is a frame, not
+// a mood filter, and the sky it fades to is the page background.
+const VIGNETTE_START = 0.55;
+const VIGNETTE_STRENGTH = 0.55;
 
 // The canvas views a world span wider than the grid, centered on the
 // disk. The extra margin leaves actual black sky beyond the completed fade.
@@ -130,12 +158,22 @@ function cellJitter(i: number, salt: number): number {
   return (h % 1024) / 1024;
 }
 
-function radialFade(radius: number, softRadius: number): number {
-  const ratio = radius / softRadius;
-  if (ratio <= FADE_START) return 1;
-  const u = Math.min(1, (ratio - FADE_START) / (FADE_END - FADE_START));
+function smoothFade(ratio: number, start: number, end: number): number {
+  if (ratio <= start) return 1;
+  const u = Math.min(1, (ratio - start) / (end - start));
   const smooth = u * u * (3 - 2 * u);
   return 1 - smooth;
+}
+
+/// Stars, remnants, association glow, and the diffuse halo.
+function radialFade(radius: number, softRadius: number): number {
+  return smoothFade(radius / softRadius, FADE_START, FADE_END);
+}
+
+/// Gas only. Completes inside the confinement radius so the boundary
+/// ridge is never rendered. See GAS_FADE_START.
+function gasFade(radius: number, softRadius: number): number {
+  return smoothFade(radius / softRadius, GAS_FADE_START, GAS_FADE_END);
 }
 
 function buildGasSprites() {
@@ -760,7 +798,9 @@ function buildGasBlocks(s: State, mass: Uint16Array): GasBlocks {
   // Pass 2: per-block presentation values plus the pass partitions.
   const center = size / 2;
   const softR = size / 2 - 1;
-  const fadeEndSq = softR * FADE_END * (softR * FADE_END);
+  // Gas cull matches the gas fade, not the star fade: past GAS_FADE_END
+  // a block contributes nothing, so compositing it is pure cost.
+  const fadeEndSq = softR * GAS_FADE_END * (softR * GAS_FADE_END);
   const rad = s.lastRadiation;
   const radRes = rad ? Math.round(Math.sqrt(rad.length)) : 0;
   const radScale = radRes / size;
@@ -829,7 +869,7 @@ function buildGasBlocks(s: State, mass: Uint16Array): GasBlocks {
     // Dust darkens by emitting less - absence of glow cannot leave
     // overlay artifacts the way a multiply stamp can.
     if (g.dusty[b]) brightness *= 1 - 0.6 * sumMetal[b];
-    g.alpha[b] = radialFade(Math.sqrt(radSq), softR) * brightness;
+    g.alpha[b] = gasFade(Math.sqrt(radSq), softR) * brightness;
 
     if (cellJitter(b, 4) < 0.7) g.background[bgCount++] = b;
     else g.foreground[fgCount++] = b;
@@ -1021,6 +1061,35 @@ function drawFrame(s: State, mass: Uint16Array) {
 
   timed("shimmer", () => applyShockShimmer(s));
   timed("lens", () => applyBlackHoleLens(s));
+  timed("vignette", () => applyEdgeVignette(s));
+}
+
+/// Screen-space falloff to sky black at the frame edge.
+///
+/// The radial fades above are world-space: they hide the simulation's
+/// circular boundary. This is a different job - it darkens the corners
+/// and edges of the viewport itself, so a wide or short window does not
+/// end the image on a straight line. It runs after the lens so the lens
+/// cannot warp bright material back into an edge already faded.
+function applyEdgeVignette(s: State) {
+  const { ctx, canvas } = s;
+  const dpr = Math.min(window.devicePixelRatio || 1, 2);
+  const w = canvas.width / dpr;
+  const h = canvas.height / dpr;
+  ctx.save();
+  ctx.setTransform(1, 0, 0, 1, 0, 0);
+  ctx.scale(dpr, dpr);
+  // Ellipse to the frame corners, so the falloff follows the viewport
+  // shape rather than assuming a square.
+  const cx = w / 2;
+  const cy = h / 2;
+  const outer = Math.hypot(cx, cy);
+  const grad = ctx.createRadialGradient(cx, cy, outer * VIGNETTE_START, cx, cy, outer);
+  grad.addColorStop(0, "rgba(5, 6, 10, 0)");
+  grad.addColorStop(1, `rgba(5, 6, 10, ${VIGNETTE_STRENGTH})`);
+  ctx.fillStyle = grad;
+  ctx.fillRect(0, 0, w, h);
+  ctx.restore();
 }
 
 // A brief active nucleus reads the same pulse and axis as the physical
