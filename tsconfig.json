@@ -19,6 +19,6 @@
     "sourceMap": true,
     "noEmit": true
   },
-  "include": ["src/**/*", "e2e/**/*"],
+  "include": ["src/**/*"],
   "exclude": ["node_modules", "dist", "pkg", "target"]
 }

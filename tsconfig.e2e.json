@@ -1,0 +1,10 @@
+// Playwright specs run in Node, not the browser. They get Node's globals
+// (fs, Buffer) here rather than in the base config, so browser code under
+// src/ still fails typecheck if it reaches for a Node API.
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "types": ["node"]
+  },
+  "include": ["e2e/**/*"]
+}

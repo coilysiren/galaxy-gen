@@ -2,6 +2,7 @@ import React from "react";
 import "./styles.css";
 import * as dataviz from "./dataviz";
 import * as galaxy from "./galaxy";
+import * as recorder from "./gif-recorder";
 
 const wasm = import("galaxy_gen_backend/galaxy_gen_backend");
 
@@ -171,8 +172,20 @@ export function Interface() {
   const [bhFactor, setBhFactor] = React.useState(1);
   const [gasPct, setGasPct] = React.useState(100);
   const [quasarActivity, setQuasarActivity] = React.useState(0);
+  const [recorderStatus, setRecorderStatus] = React.useState(recorder.getStatus());
   // Seed-time baselines for the popsci ratios.
   const initialBhRef = React.useRef(1);
+
+  // Feed every completed draw to the recorder. It ignores frames unless
+  // a recording is active, so this stays wired for the page's lifetime.
+  React.useEffect(() => {
+    dataviz.setFrameListener((canvas, simTick) => recorder.capture(canvas, simTick));
+    const unsubscribe = recorder.subscribe(setRecorderStatus);
+    return () => {
+      dataviz.setFrameListener(null);
+      unsubscribe();
+    };
+  }, []);
 
   const wasmModuleRef = React.useRef<any>(null);
   const galaxyFrontendRef = React.useRef<galaxy.Frontend | null>(null);
@@ -472,6 +485,20 @@ export function Interface() {
     rafRef.current = requestAnimationFrame(loop);
   }, []);
 
+  /// Start capture, or stop and hand the finished GIF to the browser.
+  /// The recorder samples the render funnel, so a capture spans whatever
+  /// the run does next - play it, step it, or leave it running.
+  const handleRecordToggle = async () => {
+    if (recorderStatus.recording) {
+      const blob = await recorder.stop();
+      if (blob) recorder.download(blob, recorder.fileName());
+      return;
+    }
+    if (!galaxyFrontendRef.current) return;
+    // Name the file after the permalink that reproduces the run.
+    recorder.start(`galaxy-${seed}-${scenarioToSlug(scenario)}-${galaxySize}`);
+  };
+
   const handleRunToggle = async () => {
     if (!galaxyFrontendRef.current) return;
     if (runningRef.current) {
@@ -645,6 +672,27 @@ export function Interface() {
                 disabled={!initialized || running || warping}
               >
                 step
+              </button>
+              <button
+                type="button"
+                className="btn-plum w-full"
+                data-testid="btn-record"
+                onClick={handleRecordToggle}
+                disabled={!initialized || warping || recorderStatus.encoding}
+                style={
+                  recorderStatus.recording
+                    ? {
+                        background: "var(--color-plum-900)",
+                        borderColor: "var(--color-plum-400)",
+                      }
+                    : undefined
+                }
+              >
+                {recorderStatus.encoding
+                  ? "encoding…"
+                  : recorderStatus.recording
+                    ? `stop recording (${recorderStatus.frames}/${recorderStatus.maxFrames})`
+                    : "record gif"}
               </button>
             </div>
 

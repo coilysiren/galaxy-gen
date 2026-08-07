@@ -642,6 +642,19 @@ export function updateData(galaxyFrontend: galaxy.Frontend, simTick?: number) {
   state.lastQuasarAxis = galaxyFrontend.quasarAxis();
   publishView(state);
   drawFrame(state, state.lastMass);
+  // Every render path funnels through here, so this is the one place a
+  // recorder can see a finished frame paired with its sim tick.
+  if (frameListener) frameListener(state.canvas, state.simTick);
+}
+
+type FrameListener = (canvas: HTMLCanvasElement, simTick: number) => void;
+let frameListener: FrameListener | null = null;
+
+/// Register a callback fired after each completed draw. Used by the GIF
+/// recorder; kept here rather than exporting the canvas so callers
+/// cannot redraw into it behind the renderer's back.
+export function setFrameListener(fn: FrameListener | null) {
+  frameListener = fn;
 }
 
 /// Fold the cell grid into the gas block grid and precompute everything

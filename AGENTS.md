@@ -17,6 +17,7 @@ Load-bearing files you will touch most often:
 - `src/js/lib/galaxy.ts` - `Frontend` class; the JS ↔ WASM boundary.
 - `src/js/lib/application.tsx` - React UI (controls + buttons). Test IDs on inputs/buttons (`data-testid="btn-init"` etc.) are load-bearing for E2E.
 - `src/js/lib/dataviz.tsx` - D3 scatter plot into `#dataviz`.
+- `src/js/lib/gif-recorder.ts` - client-side GIF capture. Subscribes to `dataviz.setFrameListener`; see `docs/gif-recording.md`.
 - `src/js/lib/styles.css` - custom styles (dark theme, galaxy-gen palette).
 - `e2e/galaxy.spec.ts` - Playwright end-to-end tests.
 - `playwright.config.ts` - Playwright config; auto-boots webpack-dev-server.

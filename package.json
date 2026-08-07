@@ -15,7 +15,7 @@
     "lint:fix": "eslint --fix 'src/**/*.{ts,tsx,js,jsx}' 'e2e/**/*.{ts,tsx}'",
     "format": "prettier --write 'src/**/*.{ts,tsx,js,jsx,css}' 'e2e/**/*.{ts,tsx}' '*.{js,json,md}'",
     "format:check": "prettier --check 'src/**/*.{ts,tsx,js,jsx,css}' 'e2e/**/*.{ts,tsx}' '*.{js,json,md}'",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit && tsc --noEmit -p tsconfig.e2e.json"
   },
   "babel": {
     "presets": [
@@ -46,6 +46,7 @@
     "eslint-plugin-react": "^7.37.5",
     "eslint-plugin-react-hooks": "^7.1.1",
     "galaxy_gen_backend": "file:pkg",
+    "gifenc": "^1.0.3",
     "postcss": "^8.5.10",
     "postcss-loader": "^8.2.1",
     "prettier": "^3.8.3",
