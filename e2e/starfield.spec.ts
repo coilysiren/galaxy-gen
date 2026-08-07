@@ -13,7 +13,9 @@ async function waitForWasm(page: Page) {
 async function generate(page: Page, seed: string) {
   // lock=1 pins the seed so `generate` cannot roll a fresh one, which
   // would make the determinism comparisons meaningless.
-  await page.goto(`/?seed=${seed}&size=${SIZE}&scenario=irregular-spiral&lock=1`);
+  // debug=1: these specs advance the sim with the single-step button,
+  // which is a debug affordance rather than a viewer control.
+  await page.goto(`/?seed=${seed}&size=${SIZE}&scenario=irregular-spiral&lock=1&debug=1`);
   await waitForWasm(page);
   await page.getByTestId("btn-init").click();
   await expect(page.locator("#dataviz canvas")).toBeVisible();

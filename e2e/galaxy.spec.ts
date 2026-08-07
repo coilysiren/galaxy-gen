@@ -49,19 +49,76 @@ test.describe("Galaxy Generator", () => {
     await expect(page.getByRole("heading", { name: "Galaxy Generator" })).toBeVisible();
     await expect(page.getByTestId("input-galaxy-size")).toHaveValue(String(DEFAULT_SIZE));
     await expect(page.getByTestId("stat-ticks")).toHaveText("0");
-    await expect(page.locator("table tbody tr")).toHaveCount(7);
-    await expect(page.getByTestId("stat-sn")).toHaveText("0");
-    await expect(page.getByTestId("stat-planetary-nebulae")).toHaveText("0");
-    await expect(page.getByTestId("stat-phase-mixed")).toHaveText("0");
     await expect(page.getByTestId("btn-init")).toBeVisible();
-    await expect(page.getByTestId("btn-tick")).toBeVisible();
+    await expect(page.getByTestId("btn-reset")).toBeVisible();
+    await expect(page.getByTestId("btn-ui-toggle")).toBeVisible();
     // Seed mass is URL-param-only; it must not render an input.
     await expect(page.getByTestId("input-seed-mass")).toHaveCount(0);
+  });
+
+  test("instrumentation stays out of the default view", async ({ page }) => {
+    // The counter table and single-step are debug affordances. Only the
+    // sim tick survives on the default view, as the canvas caption.
+    await expect(page.locator("table tbody tr")).toHaveCount(0);
+    await expect(page.getByTestId("stat-sn")).toHaveCount(0);
+    await expect(page.getByTestId("stat-planetary-nebulae")).toHaveCount(0);
+    await expect(page.getByTestId("stat-phase-mixed")).toHaveCount(0);
+    await expect(page.getByTestId("btn-tick")).toHaveCount(0);
+    await expect(page.getByTestId("stat-ticks")).toBeVisible();
+  });
+
+  test("reset returns the same seed to tick zero", async ({ page }) => {
+    await page.goto("/?seed=12345&size=50&t=25");
+    await waitForWasm(page);
+    await expect(page.getByTestId("stat-ticks")).toHaveText("25", { timeout: 20_000 });
+    const evolved = await page.evaluate(() =>
+      Array.from((window as any).__galaxyGen.frontend.massArray() as Uint16Array)
+    );
+
+    await page.getByTestId("btn-reset").click();
+    await expect(page.getByTestId("stat-ticks")).toHaveText("0");
+    // The spent `t` must leave the address, and the seed must not roll.
+    expect(new URL(page.url()).searchParams.get("t")).toBeNull();
+    expect(new URL(page.url()).searchParams.get("seed")).toBe("12345");
+    const first = await page.evaluate(() =>
+      Array.from((window as any).__galaxyGen.frontend.massArray() as Uint16Array)
+    );
+    expect(first).not.toEqual(evolved);
+    expect(first.some((m) => m > 0)).toBe(true);
+
+    // Reset is idempotent: same seed, same tick-zero universe.
+    await page.getByTestId("btn-reset").click();
+    await expect(page.getByTestId("stat-ticks")).toHaveText("0");
+    const second = await page.evaluate(() =>
+      Array.from((window as any).__galaxyGen.frontend.massArray() as Uint16Array)
+    );
+    expect(second).toEqual(first);
+  });
+
+  test("the ui toggle hides the controls and rides the ui=0 param", async ({ page }) => {
+    await expect(page.getByTestId("controls")).toBeVisible();
+    await page.getByTestId("btn-ui-toggle").click();
+    await expect(page.getByTestId("controls")).toBeHidden();
+    // The clean frame has to be a shareable address, not just local state.
+    expect(new URL(page.url()).searchParams.get("ui")).toBe("0");
+    // The toggle must survive its own press, or the state is a trap.
+    await expect(page.getByTestId("btn-ui-toggle")).toBeVisible();
+    await page.getByTestId("btn-ui-toggle").click();
+    await expect(page.getByTestId("controls")).toBeVisible();
+    expect(new URL(page.url()).searchParams.get("ui")).toBeNull();
+
+    await page.goto("/?ui=0");
+    await waitForWasm(page);
+    await expect(page.getByTestId("controls")).toBeHidden();
   });
 
   test("debug mode exposes detailed lifecycle counters", async ({ page }) => {
     await page.goto("/?debug=1");
     await waitForWasm(page);
+    await expect(page.getByTestId("btn-tick")).toBeVisible();
+    await expect(page.getByTestId("stat-sn")).toHaveText("0");
+    await expect(page.getByTestId("stat-planetary-nebulae")).toHaveText("0");
+    await expect(page.getByTestId("stat-phase-mixed")).toHaveText("0");
     await expect(page.getByTestId("stat-red-giants")).toHaveText("0");
     await expect(page.getByTestId("stat-white-dwarfs")).toHaveText("0");
     await expect(page.getByTestId("stat-neutron-stars")).toHaveText("0");
@@ -93,6 +150,9 @@ test.describe("Galaxy Generator", () => {
   });
 
   test("tick advances the simulation without errors", async ({ page }) => {
+    // Single-step is debug-gated; it is not a viewer control.
+    await page.goto("/?debug=1");
+    await waitForWasm(page);
     await page.getByTestId("btn-init").click();
     const host = page.locator("#dataviz");
     await expect(host).toHaveAttribute("data-frame-angle", "0.000000");
@@ -146,7 +206,8 @@ test.describe("Galaxy Generator", () => {
 
   test("the reference seed ignites and renders a quasar near tick 1000", async ({ page }) => {
     await page.goto(
-      "/?seed=409007255426557616&size=50&scenario=irregular-elliptical&t=1000&lock=1"
+      // debug=1: the quasar counter lives in the instrumentation table.
+      "/?seed=409007255426557616&size=50&scenario=irregular-elliptical&t=1000&lock=1&debug=1"
     );
     await waitForWasm(page);
     await expect(page.getByTestId("stat-ticks")).toHaveText("1000", {
@@ -242,7 +303,7 @@ test.describe("Galaxy Generator", () => {
     expect(rendered.edgeLitPixels).toBeGreaterThan(10);
 
     await page.goto(
-      "/?seed=409007255426557616&size=50&scenario=irregular-elliptical&t=1400&lock=1"
+      "/?seed=409007255426557616&size=50&scenario=irregular-elliptical&t=1400&lock=1&debug=1"
     );
     await waitForWasm(page);
     await expect(page.getByTestId("stat-ticks")).toHaveText("1400", {
@@ -555,6 +616,9 @@ test.describe("Galaxy Generator", () => {
   });
 
   test("switching scenario produces scenario-specific seed + ticks", async ({ page }) => {
+    // Drives single-step, which is debug-gated.
+    await page.goto("/?debug=1");
+    await waitForWasm(page);
     // Sanity: the dropdown carries the four start => end pairs.
     const select = page.getByTestId("select-scenario");
     await expect(select).toBeVisible();
@@ -609,6 +673,9 @@ test.describe("Galaxy Generator", () => {
   });
 
   test("run button ticks via the worker and pause resumes state cleanly", async ({ page }) => {
+    // Asserts single-step still works after a pause/restore round-trip.
+    await page.goto("/?debug=1");
+    await waitForWasm(page);
     await page.getByTestId("btn-init").click();
 
     // Worker API must exist; otherwise run path is a no-op.

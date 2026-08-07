@@ -72,8 +72,13 @@ interface InitialParams {
   /// `?lock=1`: generate reuses the seed instead of cycling to a fresh
   /// one on every press.
   seedLocked: boolean;
-  /// `?debug=1`: dev surfaces - camera interaction plus perf stats.
+  /// `?debug=1`: dev surfaces - camera interaction, single-step, and the
+  /// full lifecycle counter table.
   debug: boolean;
+  /// `?ui=0`: start with the control panel hidden. Makes a chrome-free
+  /// frame addressable, so a permalink or a recording can be clean
+  /// without hiding the panel by hand first.
+  uiHidden: boolean;
   /// `?t=N`: with a seed, auto-generate and fast-forward to this tick -
   /// (seed, size, t) is a complete address for a moment in time.
   warpTicks: number;
@@ -86,6 +91,7 @@ function readInitialParams(): InitialParams {
     scenario: galaxy.Scenario.IrregularSpiral,
     seedLocked: false,
     debug: false,
+    uiHidden: false,
     warpTicks: 0,
   };
   if (typeof window === "undefined") return defaults;
@@ -100,6 +106,7 @@ function readInitialParams(): InitialParams {
     scenario: scenarioFromSlug(params.get("scenario")) ?? defaults.scenario,
     seedLocked: lockRaw != null && lockRaw !== "0" && lockRaw !== "false",
     debug: params.has("debug"),
+    uiHidden: params.get("ui") === "0",
     warpTicks: (() => {
       const t = parseInt(params.get("t") ?? "", 10);
       return Number.isFinite(t) && t > 0 ? t : 0;
@@ -119,12 +126,30 @@ function patchUrlTick(t: number): void {
   );
 }
 
+/** Patch only the `ui` param, so a hidden-chrome view is shareable. */
+function patchUrlUi(hidden: boolean): void {
+  if (typeof window === "undefined") return;
+  const params = new URLSearchParams(window.location.search);
+  if (hidden) {
+    params.set("ui", "0");
+  } else {
+    params.delete("ui");
+  }
+  window.history.replaceState(
+    null,
+    "",
+    `${window.location.pathname}?${params.toString()}${window.location.hash}`
+  );
+}
+
 /** Push init params to URL via replaceState (avoids history pileup). */
 function writeUrlParams(p: {
   galaxySize: number;
   seed: string;
   scenario: galaxy.Scenario;
   seedLocked: boolean;
+  debug: boolean;
+  uiHidden: boolean;
 }): void {
   if (typeof window === "undefined") return;
   const params = new URLSearchParams();
@@ -132,6 +157,11 @@ function writeUrlParams(p: {
   params.set("size", p.galaxySize.toString());
   params.set("scenario", scenarioToSlug(p.scenario));
   if (p.seedLocked) params.set("lock", "1");
+  // Generate rebuilds the query from scratch, so view-state params have
+  // to be re-applied or a generate would silently drop them from a URL
+  // the viewer is about to copy.
+  if (p.debug) params.set("debug", "1");
+  if (p.uiHidden) params.set("ui", "0");
   const next = `${window.location.pathname}?${params.toString()}${window.location.hash}`;
   window.history.replaceState(null, "", next);
 }
@@ -147,6 +177,9 @@ export function Interface() {
   // reproduce.
   const seedLocked = initial.seedLocked;
   const debug = initial.debug;
+  // Chrome visibility. Mirrored to `?ui=0` so a clean frame is a
+  // shareable address and a recording can be captured without chrome.
+  const [uiHidden, setUiHidden] = React.useState(initial.uiHidden);
   const hasGeneratedRef = React.useRef(false);
   const [scenario, setScenario] = React.useState<galaxy.Scenario>(initial.scenario);
   const [wasmReady, setWasmReady] = React.useState(false);
@@ -184,6 +217,24 @@ export function Interface() {
     return () => {
       dataviz.setFrameListener(null);
       unsubscribe();
+    };
+  }, []);
+
+  // Pointer activity wakes the chrome toggle. Without this a viewer who
+  // hides the UI has no visible affordance to bring it back.
+  React.useEffect(() => {
+    if (typeof document === "undefined") return;
+    let timer: ReturnType<typeof setTimeout> | null = null;
+    const wake = () => {
+      document.body.classList.add("ui-toggle-wake");
+      if (timer) clearTimeout(timer);
+      timer = setTimeout(() => document.body.classList.remove("ui-toggle-wake"), 2000);
+    };
+    window.addEventListener("pointermove", wake, { passive: true });
+    return () => {
+      window.removeEventListener("pointermove", wake);
+      if (timer) clearTimeout(timer);
+      document.body.classList.remove("ui-toggle-wake");
     };
   }, []);
 
@@ -309,7 +360,10 @@ export function Interface() {
     }
   }, []);
 
-  const handleInitClick = () => {
+  /// `forceReuse` is the reset path: rebuild the *same* universe at tick
+  /// zero rather than rolling a fresh seed. Generate passes false and
+  /// keeps the existing cycle-unless-locked behaviour.
+  const regenerate = (forceReuse: boolean) => {
     const module = wasmModuleRef.current;
     if (!module) {
       console.error("wasm not yet loaded");
@@ -332,7 +386,8 @@ export function Interface() {
     // current seed only when locked or on the first generate of a
     // seed-bearing URL; otherwise every press rolls a fresh galaxy.
     let effectiveSeed = seed;
-    const reuse = parseSeed(effectiveSeed) != null && (seedLocked || !hasGeneratedRef.current);
+    const reuse =
+      parseSeed(effectiveSeed) != null && (forceReuse || seedLocked || !hasGeneratedRef.current);
     if (!reuse) {
       effectiveSeed = randomU64Seed().toString();
       setSeed(effectiveSeed);
@@ -376,8 +431,24 @@ export function Interface() {
       seed: effectiveSeed,
       scenario,
       seedLocked,
+      debug,
+      uiHidden,
     });
     exposeForTests();
+  };
+
+  const handleInitClick = () => regenerate(false);
+
+  /// Reset: same seed, same scenario, back to tick zero. Distinct from
+  /// generate, which rolls a new universe unless the seed is locked.
+  const handleResetClick = () => regenerate(true);
+
+  const handleUiToggle = () => {
+    setUiHidden((hidden) => {
+      const next = !hidden;
+      patchUrlUi(next);
+      return next;
+    });
   };
 
   const handleTickClick = async () => {
@@ -597,16 +668,38 @@ export function Interface() {
 
   return (
     <div data-testid="app" data-wasm-ready={wasmReady ? "true" : "false"} className="min-h-screen">
-      <main>
-        <aside className="fixed left-3 top-3 z-10 w-72 max-w-[calc(100vw-1.5rem)] max-h-[calc(100vh-1.5rem)] overflow-y-auto">
-          <section className="panel p-5">
-            <header className="mb-5">
-              <h1 className="text-2xl tracking-[0.1em]">Galaxy Generator</h1>
-              <p className="mt-2 text-xs tracking-[0.08em] text-[color:var(--color-plum-400)]">
+      {/* Chrome toggle. Always mounted and above every layer, so the
+          hidden state is always reversible without a reload. */}
+      <button
+        type="button"
+        className="ui-toggle"
+        data-testid="btn-ui-toggle"
+        aria-pressed={uiHidden}
+        aria-label={uiHidden ? "show controls" : "hide controls"}
+        title={uiHidden ? "show controls" : "hide controls"}
+        onClick={handleUiToggle}
+      >
+        {uiHidden ? "◴" : "◵"}
+      </button>
+
+      {/* Mobile stacks column-reverse: canvas on top, controls as a
+          horizontal bar beneath it, so the two never overlap. From `sm`
+          up the panel floats over a full-bleed canvas as before. */}
+      <main className="fixed inset-0 flex flex-col-reverse sm:block">
+        <aside
+          className={`${
+            uiHidden ? "hidden" : ""
+          } z-10 shrink-0 max-h-[45vh] overflow-y-auto sm:fixed sm:left-3 sm:top-3 sm:w-72 sm:max-w-[calc(100vw-1.5rem)] sm:max-h-[calc(100vh-1.5rem)]`}
+          data-testid="controls"
+        >
+          <section className="panel p-4 sm:p-5">
+            <header className="mb-3 sm:mb-5">
+              <h1 className="text-lg tracking-[0.1em] sm:text-2xl">Galaxy Generator</h1>
+              <p className="mt-2 hidden text-xs tracking-[0.08em] text-[color:var(--color-plum-400)] sm:block">
                 Gravitational sim computed in Rust, rendered in the browser.
               </p>
             </header>
-            <div className="grid gap-4">
+            <div className="grid grid-cols-2 gap-3 sm:grid-cols-1 sm:gap-4">
               <label className="block">
                 <span className="input-label mb-1 block">Galaxy Size</span>
                 <input
@@ -639,7 +732,7 @@ export function Interface() {
               </label>
             </div>
 
-            <div className="mt-5 space-y-2">
+            <div className="mt-4 grid grid-cols-2 gap-2 sm:mt-5 sm:grid-cols-1">
               <button
                 type="button"
                 className="btn-plum w-full"
@@ -669,12 +762,25 @@ export function Interface() {
               <button
                 type="button"
                 className="btn-plum w-full"
-                data-testid="btn-tick"
-                onClick={handleTickClick}
-                disabled={!initialized || running || warping}
+                data-testid="btn-reset"
+                onClick={handleResetClick}
+                disabled={!initialized || warping}
               >
-                step
+                reset
               </button>
+              {/* Single-step is a dev affordance, not a viewer control.
+                  It lives with the camera and the counter table. */}
+              {debug && (
+                <button
+                  type="button"
+                  className="btn-plum w-full"
+                  data-testid="btn-tick"
+                  onClick={handleTickClick}
+                  disabled={!initialized || running || warping}
+                >
+                  step
+                </button>
+              )}
               <button
                 type="button"
                 className="btn-plum w-full"
@@ -698,120 +804,115 @@ export function Interface() {
               </button>
             </div>
 
-            {/* A table so a plain copy-paste yields "label<TAB>value"
-                per line - no copy button needed. */}
-            <table className="input-label mt-5 w-full border-separate border-spacing-y-1">
-              <tbody>
-                <tr>
-                  <td>ticks</td>
-                  <td className="text-right" data-testid="stat-ticks">
-                    {tickCount}
-                  </td>
-                </tr>
-                <tr>
-                  <td>resolved stars</td>
-                  <td className="text-right" data-testid="stat-stars">
-                    {starCount.toLocaleString()}
-                  </td>
-                </tr>
-                <tr>
-                  <td>supernovae</td>
-                  <td className="text-right" data-testid="stat-sn">
-                    {(snCount + typeIaCount).toLocaleString()}
-                  </td>
-                </tr>
-                <tr>
-                  <td>planetary nebulae</td>
-                  <td className="text-right" data-testid="stat-planetary-nebulae">
-                    {planetaryNebulaCount.toLocaleString()}
-                  </td>
-                </tr>
-                <tr>
-                  <td>phase-mixed stars</td>
-                  <td className="text-right" data-testid="stat-phase-mixed">
-                    {phaseMixedCount.toLocaleString()}
-                  </td>
-                </tr>
-                <tr>
-                  <td>black hole</td>
-                  <td className="text-right">×{bhFactor.toFixed(2)}</td>
-                </tr>
-                {quasarActivity > 0 && (
+            {/* Instrumentation, not viewer-facing. The sim tick is the
+                one number a viewer can act on (it addresses a moment via
+                `?t=`), so it lives as a caption under the canvas instead.
+                A table so a plain copy-paste yields "label<TAB>value" per
+                line - no copy button needed. */}
+            {debug && (
+              <table className="input-label mt-5 w-full border-separate border-spacing-y-1">
+                <tbody>
                   <tr>
-                    <td>quasar</td>
-                    <td className="text-right" data-testid="stat-quasar">
-                      {(quasarActivity * 100).toFixed(0)}%
+                    <td>resolved stars</td>
+                    <td className="text-right" data-testid="stat-stars">
+                      {starCount.toLocaleString()}
                     </td>
                   </tr>
-                )}
-                <tr>
-                  <td>gas reservoir</td>
-                  <td className="text-right">{gasPct.toFixed(0)}%</td>
-                </tr>
-                {debug && (
-                  <>
+                  <tr>
+                    <td>supernovae</td>
+                    <td className="text-right" data-testid="stat-sn">
+                      {(snCount + typeIaCount).toLocaleString()}
+                    </td>
+                  </tr>
+                  <tr>
+                    <td>planetary nebulae</td>
+                    <td className="text-right" data-testid="stat-planetary-nebulae">
+                      {planetaryNebulaCount.toLocaleString()}
+                    </td>
+                  </tr>
+                  <tr>
+                    <td>phase-mixed stars</td>
+                    <td className="text-right" data-testid="stat-phase-mixed">
+                      {phaseMixedCount.toLocaleString()}
+                    </td>
+                  </tr>
+                  <tr>
+                    <td>black hole</td>
+                    <td className="text-right">×{bhFactor.toFixed(2)}</td>
+                  </tr>
+                  {quasarActivity > 0 && (
                     <tr>
-                      <td>red giants</td>
-                      <td className="text-right" data-testid="stat-red-giants">
-                        {redGiantCount.toLocaleString()}
+                      <td>quasar</td>
+                      <td className="text-right" data-testid="stat-quasar">
+                        {(quasarActivity * 100).toFixed(0)}%
                       </td>
                     </tr>
-                    <tr>
-                      <td>white dwarfs</td>
-                      <td className="text-right" data-testid="stat-white-dwarfs">
-                        {whiteDwarfCount.toLocaleString()}
-                      </td>
-                    </tr>
-                    <tr>
-                      <td>neutron stars</td>
-                      <td className="text-right" data-testid="stat-neutron-stars">
-                        {neutronStarCount.toLocaleString()}
-                      </td>
-                    </tr>
-                    <tr>
-                      <td>core-collapse supernovae</td>
-                      <td className="text-right" data-testid="stat-core-collapse">
-                        {snCount.toLocaleString()}
-                      </td>
-                    </tr>
-                    <tr>
-                      <td>type ia supernovae</td>
-                      <td className="text-right" data-testid="stat-type-ia">
-                        {typeIaCount.toLocaleString()}
-                      </td>
-                    </tr>
-                    <tr>
-                      <td>short gamma-ray bursts</td>
-                      <td className="text-right" data-testid="stat-grb">
-                        {grbCount.toLocaleString()}
-                      </td>
-                    </tr>
-                    <tr>
-                      <td>associations formed</td>
-                      <td className="text-right" data-testid="stat-associations">
-                        {associationCount.toLocaleString()}
-                      </td>
-                    </tr>
-                    <tr>
-                      <td>eaten by black hole</td>
-                      <td className="text-right">{captureCount.toLocaleString()}</td>
-                    </tr>
-                    <tr>
-                      <td>tick ms</td>
-                      <td className="text-right" data-testid="stat-tick-ms">
-                        {tickMs.toFixed(1)}
-                      </td>
-                    </tr>
-                    <tr>
-                      <td>fps</td>
-                      <td className="text-right" data-testid="stat-fps">
-                        {fps}
-                      </td>
-                    </tr>
-                  </>
-                )}
-              </tbody>
-            </table>
+                  )}
+                  <tr>
+                    <td>gas reservoir</td>
+                    <td className="text-right">{gasPct.toFixed(0)}%</td>
+                  </tr>
+                  <tr>
+                    <td>red giants</td>
+                    <td className="text-right" data-testid="stat-red-giants">
+                      {redGiantCount.toLocaleString()}
+                    </td>
+                  </tr>
+                  <tr>
+                    <td>white dwarfs</td>
+                    <td className="text-right" data-testid="stat-white-dwarfs">
+                      {whiteDwarfCount.toLocaleString()}
+                    </td>
+                  </tr>
+                  <tr>
+                    <td>neutron stars</td>
+                    <td className="text-right" data-testid="stat-neutron-stars">
+                      {neutronStarCount.toLocaleString()}
+                    </td>
+                  </tr>
+                  <tr>
+                    <td>core-collapse supernovae</td>
+                    <td className="text-right" data-testid="stat-core-collapse">
+                      {snCount.toLocaleString()}
+                    </td>
+                  </tr>
+                  <tr>
+                    <td>type ia supernovae</td>
+                    <td className="text-right" data-testid="stat-type-ia">
+                      {typeIaCount.toLocaleString()}
+                    </td>
+                  </tr>
+                  <tr>
+                    <td>short gamma-ray bursts</td>
+                    <td className="text-right" data-testid="stat-grb">
+                      {grbCount.toLocaleString()}
+                    </td>
+                  </tr>
+                  <tr>
+                    <td>associations formed</td>
+                    <td className="text-right" data-testid="stat-associations">
+                      {associationCount.toLocaleString()}
+                    </td>
+                  </tr>
+                  <tr>
+                    <td>eaten by black hole</td>
+                    <td className="text-right">{captureCount.toLocaleString()}</td>
+                  </tr>
+                  <tr>
+                    <td>tick ms</td>
+                    <td className="text-right" data-testid="stat-tick-ms">
+                      {tickMs.toFixed(1)}
+                    </td>
+                  </tr>
+                  <tr>
+                    <td>fps</td>
+                    <td className="text-right" data-testid="stat-fps">
+                      {fps}
+                    </td>
+                  </tr>
+                </tbody>
+              </table>
+            )}
 
             {!wasmReady && (
               <p className="mt-4 text-xs tracking-widest uppercase text-[color:var(--color-plum-400)]">
@@ -821,8 +922,16 @@ export function Interface() {
           </section>
         </aside>
 
-        <section className="fixed inset-0 z-0">
+        {/* Mobile: takes the remaining column above the control bar.
+            Desktop: full-bleed behind the floating panel, as before. */}
+        <section className="relative min-h-0 flex-1 sm:fixed sm:inset-0 sm:z-0">
           <div id="dataviz" className="h-full w-full" />
+          {/* The one viewer-facing number: `?t=` makes it an address. */}
+          {!uiHidden && (
+            <p className="tick-caption">
+              tick <span data-testid="stat-ticks">{tickCount}</span>
+            </p>
+          )}
         </section>
       </main>
     </div>

@@ -54,14 +54,18 @@ function countFrames(bytes: Buffer): number {
 
 test.describe("GIF recording", () => {
   test.beforeEach(async ({ page }) => {
-    await page.goto("/");
+    // debug=1: capture is driven by the single-step button, which is a
+    // debug affordance rather than a viewer control.
+    await page.goto("/?debug=1");
     await waitForWasm(page);
     await page.getByTestId("input-galaxy-size").fill(String(RECORD_SIZE));
     await page.getByTestId("btn-init").click();
   });
 
   test("record button is gated until a galaxy exists", async ({ page }) => {
-    await page.goto("/");
+    // debug=1: capture is driven by the single-step button, which is a
+    // debug affordance rather than a viewer control.
+    await page.goto("/?debug=1");
     await waitForWasm(page);
     await expect(page.getByTestId("btn-record")).toBeDisabled();
     await page.getByTestId("btn-init").click();
