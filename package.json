@@ -13,9 +13,9 @@
     "pretest:e2e": "wasm-pack build && npm install ./pkg --no-save",
     "lint": "eslint 'src/**/*.{ts,tsx,js,jsx}' 'e2e/**/*.{ts,tsx}'",
     "lint:fix": "eslint --fix 'src/**/*.{ts,tsx,js,jsx}' 'e2e/**/*.{ts,tsx}'",
-    "format": "prettier --write 'src/**/*.{ts,tsx,js,jsx,css}' 'e2e/**/*.{ts,tsx}' '*.{js,json,md}'",
-    "format:check": "prettier --check 'src/**/*.{ts,tsx,js,jsx,css}' 'e2e/**/*.{ts,tsx}' '*.{js,json,md}'",
-    "typecheck": "tsc --noEmit && tsc --noEmit -p tsconfig.e2e.json"
+    "format": "prettier --write 'src/**/*.{ts,tsx,js,jsx,css}' 'e2e/**/*.{ts,tsx}' '*.{js,json,jsonc,md}'",
+    "format:check": "prettier --check 'src/**/*.{ts,tsx,js,jsx,css}' 'e2e/**/*.{ts,tsx}' '*.{js,json,jsonc,md}'",
+    "typecheck": "tsc --noEmit && tsc --noEmit -p tsconfig.e2e.jsonc"
   },
   "babel": {
     "presets": [

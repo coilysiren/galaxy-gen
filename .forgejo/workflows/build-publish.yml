@@ -15,10 +15,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: Install rust toolchain
-        run: |
-          set -euo pipefail
-          curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --profile minimal
-          echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
+        run: bash scripts/ci/install-rust.sh
       - run: cargo test
       - name: Alert Telegram on main failure
         if: ${{ failure() && github.ref == 'refs/heads/main' }}

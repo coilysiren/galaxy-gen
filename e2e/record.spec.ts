@@ -52,9 +52,8 @@ function countFrames(bytes: Buffer): number {
   return frames;
 }
 
-/// Walk the ISO-BMFF box tree at the top level. An MP4 that plays has
-/// both an `ftyp` and a `moov`; a truncated or unfinalized capture is
-/// missing `moov`, which a naive size check would let through.
+/// Walk the top level of the ISO-BMFF box tree. A playable MP4 has both `ftyp`
+/// and `moov`, and an unfinalized capture drops `moov` past any size check.
 function topLevelBoxes(bytes: Buffer): string[] {
   const boxes: string[] = [];
   let i = 0;

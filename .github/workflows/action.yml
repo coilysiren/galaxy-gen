@@ -19,14 +19,7 @@ jobs:
       # wasm
       - run: cargo install wasm-pack
       - name: Install binaryen (pinned release)
-        # Ubuntu's apt binaryen produces WASM that trips
-        # `WebAssembly.Table.grow(): failed to grow table by 4` in
-        # chromium. Pin to an upstream release binary.
-        run: |
-          VER=version_119
-          curl -sSL "https://github.com/WebAssembly/binaryen/releases/download/${VER}/binaryen-${VER}-x86_64-linux.tar.gz" -o /tmp/binaryen.tgz
-          sudo tar -xzf /tmp/binaryen.tgz -C /usr/local --strip-components=1
-          wasm-opt --version
+        run: bash scripts/ci/install-binaryen.sh
       - run: wasm-pack build
       - name: Alert Telegram on main failure
         if: ${{ failure() && github.ref == 'refs/heads/main' }}
@@ -54,14 +47,7 @@ jobs:
       # wasm
       - run: cargo install wasm-pack
       - name: Install binaryen (pinned release)
-        # Ubuntu's apt binaryen produces WASM that trips
-        # `WebAssembly.Table.grow(): failed to grow table by 4` in
-        # chromium. Pin to an upstream release binary.
-        run: |
-          VER=version_119
-          curl -sSL "https://github.com/WebAssembly/binaryen/releases/download/${VER}/binaryen-${VER}-x86_64-linux.tar.gz" -o /tmp/binaryen.tgz
-          sudo tar -xzf /tmp/binaryen.tgz -C /usr/local --strip-components=1
-          wasm-opt --version
+        run: bash scripts/ci/install-binaryen.sh
       - run: wasm-pack build
 
       # js
@@ -94,14 +80,7 @@ jobs:
 
       - run: cargo install wasm-pack
       - name: Install binaryen (pinned release)
-        # Ubuntu's apt binaryen produces WASM that trips
-        # `WebAssembly.Table.grow(): failed to grow table by 4` in
-        # chromium. Pin to an upstream release binary.
-        run: |
-          VER=version_119
-          curl -sSL "https://github.com/WebAssembly/binaryen/releases/download/${VER}/binaryen-${VER}-x86_64-linux.tar.gz" -o /tmp/binaryen.tgz
-          sudo tar -xzf /tmp/binaryen.tgz -C /usr/local --strip-components=1
-          wasm-opt --version
+        run: bash scripts/ci/install-binaryen.sh
       - run: wasm-pack build
 
       - run: npm ci

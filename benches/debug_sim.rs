@@ -41,14 +41,13 @@ struct Metrics {
     /// Fraction of stars inside 0.3 disk_r - the elliptical is mostly
     /// a star glow, so its concentration lives here, not in the gas.
     star_central: f64,
-    /// Mean disk-star tangential speed over the circular speed of the
-    /// field they read. 1.0 is a balanced disk; above 1.0 the population
-    /// carries more angular momentum than its potential holds.
+    /// Mean disk-star tangential speed over the circular speed of their
+    /// field. 1.0 is balanced, above 1.0 carries excess angular momentum.
     star_circ_ratio: f64,
-    /// v_rot / sigma over the disk - the metric that actually separates
-    /// a rotating disk (>1.5) from a pressure-supported mush (<0.7).
     /// Do stars sit where the gas is. 1.0 = no arm tracing.
     arm_affinity: f64,
+    /// v_rot / sigma over the disk - separates a rotating disk (>1.5)
+    /// from a pressure-supported mush (<0.7).
     v_over_sigma: f64,
     /// The same ratio a newborn is handed at 0.5 disk_r. Separates
     /// "born wrong" from "drifted wrong".

@@ -21,24 +21,7 @@ jobs:
         uses: actions/checkout@v4
 
       - name: TruffleHog (filesystem, offline)
-        run: |
-          cat > /tmp/trufflehog-exclude <<'EOF'
-          (^|/)\.git/
-          (^|/)\.venv/
-          (^|/)venv/
-          (^|/)node_modules/
-          (^|/)__pycache__/
-          (^|/)\.mypy_cache/
-          (^|/)\.pytest_cache/
-          (^|/)\.ruff_cache/
-          EOF
-          docker run --rm \
-            -v "${{ github.workspace }}:/pwd:ro" \
-            -v /tmp/trufflehog-exclude:/exclude:ro \
-            trufflesecurity/trufflehog:latest \
-            filesystem /pwd \
-            --no-verification --no-update --fail \
-            --exclude-paths=/exclude
+        run: bash scripts/ci/trufflehog-scan.sh "${{ github.workspace }}"
       - name: Alert Telegram on main failure
         if: ${{ failure() && github.ref == 'refs/heads/main' }}
         continue-on-error: true

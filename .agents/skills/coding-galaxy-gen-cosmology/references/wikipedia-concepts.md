@@ -61,7 +61,7 @@ In physical cosmology and astronomy, dark energy is a proposed form of energy th
 
 ## Cosmological constant
 
-In cosmology, the cosmological constant, alternatively called Einstein's cosmological constant, 
+In cosmology, the cosmological constant, alternatively called Einstein's cosmological constant,
 is a coefficient that Albert Einstein initially added to his field equations of general relativity. He later removed it; however, much later it was revived to express the energy density of space, or vacuum energy, that arises in quantum mechanics. It is closely associated with the concept of dark energy.
 
 [Source: Wikipedia](https://en.wikipedia.org/wiki/Cosmological_constant)
@@ -104,7 +104,7 @@ The Tolman surface brightness test is one out of six cosmological tests that wer
 
 ## Special relativity
 
-In physics, the special theory of relativity, or simply special relativity, is a scientific theory of the relationship between space and time. In Albert Einstein's 1905 paper, 
+In physics, the special theory of relativity, or simply special relativity, is a scientific theory of the relationship between space and time. In Albert Einstein's 1905 paper,
 "On the Electrodynamics of Moving Bodies", the theory is presented as being based on just two postulates:The laws of physics are invariant (identical) in all inertial frames of reference. This is known as the principle of relativity.
 The speed of light in vacuum is the same for all observers, regardless of the motion of light source or observer. This is known as the principle of light constancy, or the principle of light speed invariance.
 
@@ -127,4 +127,3 @@ In astronomy, aberration is a phenomenon where celestial objects exhibit an appa
 Luminosity distance DL is defined in terms of the relationship between the absolute magnitude M and apparent magnitude m of an astronomical object.
 
 [Source: Wikipedia](https://en.wikipedia.org/wiki/Luminosity_distance)
-

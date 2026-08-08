@@ -1,0 +1,8 @@
+# Domain vocabulary typos reads as misspellings. NED is the NASA Extragalactic
+# Database, Ba is the Hubble bar class in SBa-SBd, and iy is the y-axis index
+# paired with ix throughout the grid code.
+[default.extend-words]
+NED = "NED"
+Ba = "Ba"
+iy = "iy"
+mis = "mis"

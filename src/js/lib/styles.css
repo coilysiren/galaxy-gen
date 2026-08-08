@@ -92,10 +92,8 @@
     box-shadow: 0 0 0 2px rgba(145, 146, 187, 0.3);
   }
 
-  /* Chrome toggle. Sits above every layer so the hidden state is always
-     reversible. It rests near-invisible so it does not read as part of
-     the composition, and returns to full strength on hover, focus, or
-     any pointer movement over the page (see .ui-toggle-wake). */
+  /* Chrome toggle. Sits above every layer so hiding stays reversible, and rests
+     near-invisible until hover, focus, or pointer movement (see .ui-toggle-wake). */
   .ui-toggle {
     position: fixed;
     top: 0.75rem;

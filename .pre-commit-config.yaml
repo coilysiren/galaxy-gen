@@ -28,13 +28,15 @@ repos:
 
   # BEGIN managed by agentic-os/scripts/apply-agentic-os-hooks.py
   - repo: https://forgejo.coilysiren.me/coilyco-flight-deck/agentic-os
-    rev: v0.193.0
+    rev: aos-precommit-v0.15.0
     hooks:
       - id: catalog-doc-size
       - id: catalog-trifecta
       - id: documentation-layout
       - id: context-load-points
       - id: code-comments
+      - id: actions-run-one-line
+      - id: source-doc-refs
       - id: catalog-block-present
       - id: check-skills
       - id: dead-cross-links
@@ -46,6 +48,36 @@ repos:
   - repo: https://github.com/pre-commit/pre-commit-hooks
     rev: v6.0.0
     hooks:
+      - id: trailing-whitespace
+      - id: end-of-file-fixer
+      - id: check-added-large-files
+        args: [--maxkb=2048]
       - id: check-merge-conflict
         args: [--assume-in-merge]
+      - id: check-case-conflict
+      - id: check-illegal-windows-names
+      - id: mixed-line-ending
+      - id: check-json
+      - id: check-toml
+  - repo: https://github.com/rhysd/actionlint
+    rev: v1.7.12
+    hooks:
+      # Forgejo workflows use GitHub Actions syntax; no exclude split is needed yet.
+      - id: actionlint
+        files: ^\.forgejo/workflows/.*\.(ya?ml)$
+  - repo: https://code.forgejo.org/forgejo/runner
+    rev: v12.10.1
+    hooks:
+      - id: forgejo-runner-validate
+  - repo: https://github.com/shellcheck-py/shellcheck-py
+    rev: v0.11.0.1
+    hooks:
+      - id: shellcheck
+        exclude: ^shell/(zshrc|warp\.zsh)$
+        args: [--severity=error]
+  - repo: https://github.com/crate-ci/typos
+    rev: v1.48.0
+    hooks:
+      - id: typos
+        args: []
   # END managed by agentic-os/scripts/apply-agentic-os-hooks.py

@@ -63,9 +63,8 @@ function evenDown(n: number): number {
   return Math.max(2, Math.floor(n) & ~1);
 }
 
-/// WebCodecs plus an H.264 encoder. Checked once per page: the answer
-/// cannot change within a session, and `canEncodeVideo` probes the
-/// hardware, so it is not free.
+/// WebCodecs plus an H.264 encoder, probed once per page. The answer cannot
+/// change within a session and `canEncodeVideo` hits hardware, so it is not free.
 let mp4SupportProbe: Promise<boolean> | null = null;
 export function isMp4Available(): Promise<boolean> {
   if (mp4SupportProbe) return mp4SupportProbe;
@@ -111,9 +110,8 @@ let listeners: StatusListener[] = [];
 /// still traceable to a reproducible `?seed=...` URL.
 let label = "galaxy";
 
-/// MP4 state. `mp4Source` is created on the first captured frame rather
-/// than at `start`, because Mediabunny fixes track dimensions at track
-/// creation and the canvas size is not known until then.
+/// MP4 state. `mp4Source` waits for the first captured frame rather than
+/// `start`: Mediabunny fixes track dimensions when the track is created.
 let mp4Output: Output<Mp4OutputFormat, BufferTarget> | null = null;
 let mp4Source: CanvasSource | null = null;
 /// Serializes `add` calls. The render funnel is synchronous but encoding
@@ -169,9 +167,8 @@ export function start(runLabel: string, overrides: Partial<RecorderOptions> = {}
   emit();
 }
 
-/// Downsample the finished canvas, then hand it to whichever encoder
-/// the capture is using. Called from the render funnel, so it stays
-/// cheap - quantization and video encoding both happen off this path.
+/// Downsample the finished canvas, then hand it to the active encoder. Called
+/// from the render funnel, so quantization and encoding stay off this path.
 export function capture(canvas: HTMLCanvasElement, simTick: number) {
   if (!recording || !scratch) return;
   if (lastCapturedTick != null && simTick - lastCapturedTick < options.ticksPerFrame) return;
@@ -209,9 +206,8 @@ export function capture(canvas: HTMLCanvasElement, simTick: number) {
   scheduleDrain();
 }
 
-/// Push the scratch canvas into the MP4 track. No pixel readback: the
-/// encoder reads the canvas directly. `CanvasSource.add` resolves on
-/// encoder backpressure, so the chain is what keeps memory bounded.
+/// Push the scratch canvas into the MP4 track, no pixel readback. `CanvasSource.add`
+/// resolves on encoder backpressure, so awaiting the chain is what bounds memory.
 function captureMp4() {
   if (!scratch) return;
   const frameIndex = frames;

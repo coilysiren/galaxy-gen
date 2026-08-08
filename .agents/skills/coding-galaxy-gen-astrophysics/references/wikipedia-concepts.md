@@ -11,7 +11,7 @@ It was invented by John Henry Reynolds and Sir James Jeans.
 
 ## Elliptical galaxy
 
-An elliptical galaxy is a type of galaxy with an approximately ellipsoidal shape and a smooth, nearly featureless image. They are one of the three main classes of galaxy described by Edwin Hubble in his Hubble sequence and 1936 work The Realm of the Nebulae, along with spiral and lenticular galaxies. 
+An elliptical galaxy is a type of galaxy with an approximately ellipsoidal shape and a smooth, nearly featureless image. They are one of the three main classes of galaxy described by Edwin Hubble in his Hubble sequence and 1936 work The Realm of the Nebulae, along with spiral and lenticular galaxies.
 Elliptical (E) galaxies are, together with lenticular galaxies (S0) with their large-scale disks, and ES galaxies with their intermediate scale disks, a subset of the "early-type" galaxy population.
 
 [Source: Wikipedia](https://en.wikipedia.org/wiki/Elliptical_galaxy)
@@ -48,7 +48,7 @@ The Sérsic profile is a mathematical function that describes how the intensity 
 
 ## Navarro–Frenk–White profile
 
-The Navarro–Frenk–White (NFW) profile is one of the most commonly used models for the structure of dark matter halos.. It describes the average density of dark matter in galaxy and galaxy cluster halos as a function of distance from their center. It was originally proposed on the basis of N-body simulations by Julio Navarro, Carlos Frenk and Simon White. 
+The Navarro–Frenk–White (NFW) profile is one of the most commonly used models for the structure of dark matter halos.. It describes the average density of dark matter in galaxy and galaxy cluster halos as a function of distance from their center. It was originally proposed on the basis of N-body simulations by Julio Navarro, Carlos Frenk and Simon White.
 The substantial impact of this work on the theoretical understanding of cosmic structure formation can be traced to three key insights.
 
 [Source: Wikipedia](https://en.wikipedia.org/wiki/Navarro%E2%80%93Frenk%E2%80%93White_profile)
@@ -126,4 +126,3 @@ An active galactic nucleus (AGN) is a compact region at the center of a galaxy t
 Interacting galaxies, also known as colliding galaxies, are two or more galaxies whose gravitational fields result in a disturbance of one another. There are several types of galactic interactions, including major interactions, minor interactions, and galaxy harassment. Major interactions occur between galaxies with similar amounts of mass, whereas minor interactions involve galaxies with masses that vary significantly. An example of a minor interaction is a satellite galaxy disturbing the primary galaxy's spiral arms. An example of a major interaction is a galactic collision, such as the one that astronomers estimate will happen in the future between the Milky Way and Andromeda. Collisions may lead to galaxy mergers and may also lead to other phenomena such as star formation and black hole activity.
 
 [Source: Wikipedia](https://en.wikipedia.org/wiki/Interacting_galaxy)
-

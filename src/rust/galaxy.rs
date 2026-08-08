@@ -5075,10 +5075,10 @@ impl Tree {
 }
 
 #[cfg(test)]
-mod tests_intial_generation {
+mod tests_initial_generation {
     use super::*;
     #[test]
-    fn test_inital_generation_no_panic() {
+    fn test_initial_generation_no_panic() {
         Galaxy::new(10, 0);
     }
     #[test]
