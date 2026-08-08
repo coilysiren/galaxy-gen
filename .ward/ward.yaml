@@ -93,6 +93,9 @@ capabilities:
   - agentic-os/coding-rust
   - agentic-os/coding-javascript-react
 
+agent:
+  workflow: merge-remote-main
+
 # Catalog metadata for the cross-repo knowledge graph.
 # Schema: agentic-os-kai#420 (tracker).
 catalog:
