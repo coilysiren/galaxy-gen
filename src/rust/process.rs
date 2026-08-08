@@ -43,7 +43,7 @@ pub struct ProcessDescriptor {
 /// Declared execution order. This IS the causal chain - a change here is a
 /// physics change, not a refactor.
 pub fn registry() -> &'static [ProcessDescriptor] {
-    &REGISTRY
+    REGISTRY
 }
 
 static REGISTRY: &[ProcessDescriptor] = &[

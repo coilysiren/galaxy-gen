@@ -73,6 +73,12 @@ pub struct EventQueue {
     executed_counts: [u64; EVENT_KIND_COUNT],
 }
 
+impl Default for EventQueue {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl EventQueue {
     pub fn new() -> EventQueue {
         EventQueue {

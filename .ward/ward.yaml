@@ -20,6 +20,9 @@ commands:
   format-rust:
     run: bash scripts/ward-command.sh format-rust
     description: Format Rust sources with rustfmt.
+  lint-rust:
+    run: bash scripts/ward-command.sh lint-rust
+    description: "The Rust lint gate: clippy across all targets with warnings denied, plus a rustfmt check. CI runs this same script."
   build-rust:
     run: bash scripts/ward-command.sh build-rust
     description: Build Rust + WASM (debug).

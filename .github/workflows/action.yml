@@ -14,6 +14,8 @@ jobs:
       # rust
       - run: cargo build
       - run: cargo check
+      - name: Rust lint gate
+        run: bash scripts/ward-command.sh lint-rust
       - run: cargo test
 
       # wasm

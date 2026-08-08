@@ -10,6 +10,13 @@ test_rust() {
   cargo test -- --color always
 }
 
+# The single definition of the Rust lint gate. CI calls this script rather than
+# repeating the flags, so local and CI cannot drift apart.
+lint_rust() {
+  cargo clippy --all-targets -- -D warnings
+  cargo fmt --check
+}
+
 test_e2e() {
   build_wasm
   npm install ./pkg --no-save
@@ -32,6 +39,9 @@ case "${1:-}" in
     ;;
   format-rust)
     cargo fmt
+    ;;
+  lint-rust)
+    lint_rust
     ;;
   build-rust)
     build_wasm
@@ -103,6 +113,7 @@ case "${1:-}" in
     npx playwright test --ui
     ;;
   test)
+    lint_rust
     test_rust
     test_e2e
     ;;

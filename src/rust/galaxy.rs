@@ -523,7 +523,6 @@ impl Galaxy {
     /// Radial fraction where the seed density starts feathering toward
     /// zero at the disk rim - no cookie-cutter edge on the clouds.
     const EDGE_FEATHER_START: f32 = 0.55;
-    const SPIRAL_AMP: f32 = 0.55;
     const SPIRAL_PITCH: f32 = 4.0;
 
     // Cloud-collapse tuning. A cell must stay above its scenario-owned
@@ -929,6 +928,8 @@ impl Galaxy {
                 // `additional` is the intensity knob (fixed SEED_MASS
                 // constant on the JS side; the URL knob is retired).
                 let core_fill = ((additional as f32 * p.core_fill_scale) as u16).max(40);
+                // SoA lanes: a range loop indexes every array, an iterator one.
+                #[allow(clippy::needless_range_loop)]
                 for i in 0..self.n {
                     let x = self.xs_i[i] as f32 - cx;
                     let y = self.ys_i[i] as f32 - cy;
@@ -2810,7 +2811,7 @@ impl Galaxy {
     /// Exchange visible disk gas with the hot halo on a feedback/cooling
     /// limit cycle. See docs/galaxy-rust.md.
     pub(crate) fn process_gas_fountain(&mut self, _time: f32) {
-        if self.stars.len() == 0 && self.halo_gas_mass == 0 {
+        if self.stars.is_empty() && self.halo_gas_mass == 0 {
             return;
         }
         let cold: u64 = self.mass.iter().map(|&m| m as u64).sum();
@@ -4092,6 +4093,7 @@ impl Galaxy {
 
     /// Birth budgets currently in flight on pending StarBirth events.
     /// Part of the baryonic ledger between collapse and birth.
+    #[cfg(test)]
     pub(crate) fn pending_birth_mass(&self) -> f64 {
         self.events
             .pending()
@@ -4101,6 +4103,7 @@ impl Galaxy {
     }
 
     /// Heavy elements carried by in-flight StarBirth events.
+    #[cfg(test)]
     pub(crate) fn pending_birth_metals(&self) -> f64 {
         self.events
             .pending()
@@ -4111,6 +4114,7 @@ impl Galaxy {
 
     /// Baryonic ledger: gas + resolved stars + in-flight births + the black
     /// hole + both halo reservoirs and the radiated sink.
+    #[cfg(test)]
     pub(crate) fn baryonic_total(&self) -> f64 {
         let gas: f64 = self.mass.iter().map(|&m| m as f64).sum();
         let stars: f64 = self.stars.mass.iter().map(|&m| m as f64).sum();
@@ -4123,6 +4127,7 @@ impl Galaxy {
     }
 
     /// Composition ledger across every carrier and in-flight birth event.
+    #[cfg(test)]
     pub(crate) fn tracked_metal_total(&self) -> f64 {
         let gas: f64 = self.metal_mass.iter().map(|&m| m as f64).sum();
         let stars: f64 = self.stars.metal_mass.iter().map(|&m| m as f64).sum();
@@ -4783,6 +4788,8 @@ impl Galaxy {
             }
         }
 
+        // SoA lanes: a range loop indexes every array, an iterator one.
+        #[allow(clippy::needless_range_loop)]
         for i in 0..self.n {
             if delta_mass[i] == 0
                 && self.scratch_metal_mass[i] == 0.0
@@ -6206,7 +6213,6 @@ mod tests_stars_dynamics {
         let soft = 24.0f32;
         let hard = soft * Galaxy::HARD_CLIP_FACTOR;
         let mut max_r = 0.0f32;
-        let mut g = g;
         for _ in 0..4000 {
             g = g.tick(0.5);
             let Some(i) = g.stars.id.iter().position(|&id| id == star_id) else {

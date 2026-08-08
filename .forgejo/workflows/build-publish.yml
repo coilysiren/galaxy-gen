@@ -16,6 +16,8 @@ jobs:
       - uses: actions/checkout@v4
       - name: Install rust toolchain
         run: bash scripts/ci/install-rust.sh
+      - name: Rust lint gate
+        run: bash scripts/ward-command.sh lint-rust
       - run: cargo test
       - name: Alert Telegram on main failure
         if: ${{ failure() && github.ref == 'refs/heads/main' }}
