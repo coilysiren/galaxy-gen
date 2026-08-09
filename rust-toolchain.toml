@@ -1,0 +1,23 @@
+# Pin the toolchain so the lint gate means the same thing everywhere.
+#
+# `scripts/ci/install-rust.sh` installs whatever stable rustup serves that
+# day, so before this file CI drifted ahead of every developer machine. The
+# clippy gate landed in that state and main went red on the same commit that
+# added it: 1.97 emits `unnecessary_cast` on ten `col_row_to_index(..) as
+# usize` calls that 1.94 says nothing about, and `-D warnings` turns any new
+# lint into a hard failure. rustfmt output moves between releases too, so
+# `cargo fmt --check` had the same exposure.
+#
+# A floating toolchain plus a deny-by-default gate means any Rust release can
+# break main with no commit of ours involved. Pinning makes toolchain upgrades
+# a deliberate change that arrives with its own fallout fixed in the same
+# commit.
+#
+# Pinned to the Dockerfile's `rust:1.90-bookworm` rather than to the newest
+# stable, deliberately: the gate should judge the compiler that actually
+# builds the deployed artifact. It also keeps the publish job from having to
+# fetch a second toolchain inside the image build. Bump both together, then
+# run `ward exec lint-rust`.
+[toolchain]
+channel = "1.90.0"
+components = ["clippy", "rustfmt"]

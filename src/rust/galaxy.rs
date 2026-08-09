@@ -2424,18 +2424,14 @@ impl Galaxy {
             }
             let col = i as i32 % size;
             let row = i as i32 / size;
-            let left = self.mass
-                [self.col_row_to_index(wrap(col - 1, size) as u16, row as u16) as usize]
-                as f32;
-            let right = self.mass
-                [self.col_row_to_index(wrap(col + 1, size) as u16, row as u16) as usize]
-                as f32;
-            let up = self.mass
-                [self.col_row_to_index(col as u16, wrap(row - 1, size) as u16) as usize]
-                as f32;
-            let down = self.mass
-                [self.col_row_to_index(col as u16, wrap(row + 1, size) as u16) as usize]
-                as f32;
+            let left =
+                self.mass[self.col_row_to_index(wrap(col - 1, size) as u16, row as u16)] as f32;
+            let right =
+                self.mass[self.col_row_to_index(wrap(col + 1, size) as u16, row as u16)] as f32;
+            let up =
+                self.mass[self.col_row_to_index(col as u16, wrap(row - 1, size) as u16)] as f32;
+            let down =
+                self.mass[self.col_row_to_index(col as u16, wrap(row + 1, size) as u16)] as f32;
             self.acc_x[i] += pressure_scale * (left - right);
             self.acc_y[i] += pressure_scale * (up - down);
         }
@@ -3437,7 +3433,7 @@ impl Galaxy {
                 }
                 let col = wrap(center_col + dc, size) as u16;
                 let row = wrap(center_row + dr, size) as u16;
-                targets.push(self.col_row_to_index(col, row) as usize);
+                targets.push(self.col_row_to_index(col, row));
             }
         }
 
@@ -3511,7 +3507,7 @@ impl Galaxy {
                 }
                 let nc = wrap(c_col + dc, size) as u16;
                 let nr = wrap(c_row + dr, size) as u16;
-                targets.push(self.col_row_to_index(nc, nr) as usize);
+                targets.push(self.col_row_to_index(nc, nr));
             }
         }
         let share = ejected / targets.len() as u16;
@@ -3695,7 +3691,7 @@ impl Galaxy {
                 }
                 let nc = wrap(c_col + dc, size) as u16;
                 let nr = wrap(c_row + dr, size) as u16;
-                let ni = self.col_row_to_index(nc, nr) as usize;
+                let ni = self.col_row_to_index(nc, nr);
                 self.collapse_heat[ni] =
                     self.collapse_heat[ni].saturating_add(Galaxy::SHOCK_HEAT_BOOST);
                 self.heat_parent[ni] = ev.id;
@@ -4070,7 +4066,7 @@ impl Galaxy {
         for (dc, dr) in [(1, 0), (-1, 0), (0, 1), (0, -1)] {
             let nc = wrap(col + dc, size) as u16;
             let nr = wrap(row + dr, size) as u16;
-            let ni = self.col_row_to_index(nc, nr) as usize;
+            let ni = self.col_row_to_index(nc, nr);
             let part = take(self.mass[ni], Galaxy::COLLAPSE_CONSUME_FRACTION * 0.5);
             metal_budget += self.remove_cell_mass_with_metals(ni, part);
             budget += part as f32;
@@ -4861,7 +4857,7 @@ impl Galaxy {
             for (dc, dr) in [(1, 0), (-1, 0), (0, 1), (0, -1)] {
                 let nc = wrap(col + dc, size) as u16;
                 let nr = wrap(row + dr, size) as u16;
-                let ni = self.col_row_to_index(nc, nr) as usize;
+                let ni = self.col_row_to_index(nc, nr);
                 let nm = self.mass[ni];
                 let new_m = nm.saturating_add(share);
                 let moved = new_m - nm;
@@ -4926,7 +4922,6 @@ impl Galaxy {
             let row = i as i32 / size;
             let neighbors = offsets.map(|(dc, dr)| {
                 self.col_row_to_index(wrap(col + dc, size) as u16, wrap(row + dr, size) as u16)
-                    as usize
             });
             let neighborhood_mass = neighbors
                 .iter()
