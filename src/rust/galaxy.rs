@@ -1734,6 +1734,40 @@ impl Galaxy {
         }
     }
 
+    /// Fraction of resolved stars in `[min_age, max_age)` that sit inside
+    /// `radius_frac` of the disk radius.
+    ///
+    /// Paired with the all-ages `star_central` in `debug-sim` this says
+    /// whether a centrally concentrated star field was *born* that way or
+    /// drifted inward afterwards. Young stars have not had time to move,
+    /// so their number is close to the radial shape of star formation
+    /// itself. If the two agree, the concentration is where the gas
+    /// collapses and no star is migrating; if the old number is higher,
+    /// something is pulling the population in. See galaxy-gen#70.
+    pub fn central_fraction_for_age(&self, min_age: f32, max_age: f32, radius_frac: f32) -> f32 {
+        let center = self.size as f32 * 0.5;
+        let inner = self.disk_radius() * radius_frac;
+        let inner_sq = inner * inner;
+        let (mut inside, mut total) = (0u32, 0u32);
+        for i in 0..self.stars.len() {
+            let age = self.stars.age[i];
+            if age < min_age || age >= max_age {
+                continue;
+            }
+            let dx = self.stars.pos_x[i] - center;
+            let dy = self.stars.pos_y[i] - center;
+            total += 1;
+            if dx * dx + dy * dy <= inner_sq {
+                inside += 1;
+            }
+        }
+        if total == 0 {
+            0.0
+        } else {
+            inside as f32 / total as f32
+        }
+    }
+
     /// Rotational support of the resolved star population: mean streaming
     /// speed over velocity dispersion (`v_rot / sigma`), averaged across
     /// radial bins of the luminous disk.
@@ -2893,7 +2927,9 @@ impl Galaxy {
                     continue;
                 }
             }
-            if self.radiation_at_cell(i) >= Galaxy::COLLAPSE_RADIATION_RESIST {
+            if self.radiation_at_cell(i) >= Galaxy::COLLAPSE_RADIATION_RESIST
+                && !crate::ablation::ablation().no_collapse_radiation_resist
+            {
                 continue;
             }
             self.collapse_heat[i] = self.collapse_heat[i].saturating_add(1);

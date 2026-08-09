@@ -41,6 +41,11 @@ struct Metrics {
     /// Fraction of stars inside 0.3 disk_r - the elliptical is mostly
     /// a star glow, so its concentration lives here, not in the gas.
     star_central: f64,
+    /// The same fraction for young stars only. Young stars have not had
+    /// time to migrate, so this is close to the radial shape of star
+    /// formation. Compare against star_central: agreement means the
+    /// concentration is where stars are born, not somewhere they drift.
+    star_central_young: f64,
     /// Mean disk-star tangential speed over the circular speed of their
     /// field. 1.0 is balanced, above 1.0 carries excess angular momentum.
     star_circ_ratio: f64,
@@ -179,6 +184,7 @@ fn metrics(g: &Galaxy, size: u16) -> Metrics {
         } else {
             0.0
         },
+        star_central_young: g.central_fraction_for_age(0.0, 150.0, 0.3) as f64,
         star_circ_ratio: g.star_circular_ratio() as f64,
         arm_affinity: g.stellar_arm_affinity() as f64,
         v_over_sigma: g.rotation_dispersion_ratio() as f64,
@@ -264,7 +270,7 @@ fn main() {
                 }
                 let m = metrics(&g, size);
                 println!(
-                    "t={cp:5}  nz={:5}  gas={:6}  vt={:+.3}  rot={:+.2}  r_pk={:.2}  ctr={:.2}  m2={:.2}  spi={:.2}  cov={:.2}  ring={:.2}  hollow={:.2}  rcov={:.2}  rw={:.2}  svt={:+.3}  sctr={:.2}  arm={:.2}  vsig={:.2}  vsy={:.2}  vsm={:.2}  vso={:.2}  scirc={:.2}  bcirc={:.2}  econ={:.2}  esm={:.2}  axis={:.2}  ext={:.2}  erot={:.2}  bh={:.2}  q={:.2}  qep={}  qrate={:.5}  stars={:5}  mixed={:5}  ev(col/b/sn/sh/d/cap/nsm/grb/pn/ia/q)={}/{}/{}/{}/{}/{}/{}/{}/{}/{}/{}",
+                    "t={cp:5}  nz={:5}  gas={:6}  vt={:+.3}  rot={:+.2}  r_pk={:.2}  ctr={:.2}  m2={:.2}  spi={:.2}  cov={:.2}  ring={:.2}  hollow={:.2}  rcov={:.2}  rw={:.2}  svt={:+.3}  sctr={:.2}  sctry={:.2}  arm={:.2}  vsig={:.2}  vsy={:.2}  vsm={:.2}  vso={:.2}  scirc={:.2}  bcirc={:.2}  econ={:.2}  esm={:.2}  axis={:.2}  ext={:.2}  erot={:.2}  bh={:.2}  q={:.2}  qep={}  qrate={:.5}  stars={:5}  mixed={:5}  ev(col/b/sn/sh/d/cap/nsm/grb/pn/ia/q)={}/{}/{}/{}/{}/{}/{}/{}/{}/{}/{}",
                     m.nonzero,
                     m.total,
                     m.vt,
@@ -280,6 +286,7 @@ fn main() {
                     m.ring_width,
                     m.star_vt,
                     m.star_central,
+                    m.star_central_young,
                     m.arm_affinity,
                     m.v_over_sigma,
                     m.v_over_sigma_young,

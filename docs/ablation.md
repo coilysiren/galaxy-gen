@@ -34,6 +34,7 @@ first line, so a captured run always records the physics that produced it.
 | `GALAXY_ABL_NO_BIRTH_DISPERSION` | Newborns get their association's center-of-mass orbit exactly, with no internal velocity. |
 | `GALAXY_ABL_BIRTH_ORBIT_RATIO_CAP` | Clamp a newborn's orbital speed to this multiple of local circular speed rather than to an absolute speed. |
 | `GALAXY_ABL_STAR_WAVE_COUPLING` | Override `STAR_WAVE_COUPLING`: the share of the analytic spiral and ring density wave that also acts on stars. |
+| `GALAXY_ABL_NO_COLLAPSE_RADIATION_RESIST` | Let a dense cell ignite however irradiated it is. Tests whether retained stars suppress the next generation. |
 
 ## Why the switches live in the kernel
 

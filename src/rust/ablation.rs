@@ -76,6 +76,16 @@ pub struct Ablation {
     /// without heating the way a clump-dominated 64-grid field does. A
     /// density wave stars pass through should not scatter them.
     pub star_wave_coupling: Option<f32>,
+    /// Bypass the `COLLAPSE_RADIATION_RESIST` gate in the collapse watch,
+    /// so a dense cell can ignite regardless of how irradiated it is.
+    ///
+    /// Not a heating candidate. This one tests the star-formation drop
+    /// that arrives with the birth ratio cap: capped stars stay in the
+    /// disk instead of being flung into the halo, and the suspicion is
+    /// that their radiation then suppresses the collapses that would have
+    /// made the next generation. If collapse counts recover with the gate
+    /// off, that loop is the mechanism.
+    pub no_collapse_radiation_resist: bool,
 }
 
 impl Ablation {
@@ -115,6 +125,9 @@ impl Ablation {
         if let Some(coupling) = self.star_wave_coupling {
             parts.push(format!("star-wave-coupling={coupling}"));
         }
+        if self.no_collapse_radiation_resist {
+            parts.push("no-collapse-radiation-resist".to_string());
+        }
         parts.join(",")
     }
 }
@@ -153,6 +166,7 @@ fn load() -> Ablation {
         no_birth_dispersion: flag_env("GALAXY_ABL_NO_BIRTH_DISPERSION"),
         birth_orbit_ratio_cap: parse_env("GALAXY_ABL_BIRTH_ORBIT_RATIO_CAP"),
         star_wave_coupling: parse_env("GALAXY_ABL_STAR_WAVE_COUPLING"),
+        no_collapse_radiation_resist: flag_env("GALAXY_ABL_NO_COLLAPSE_RADIATION_RESIST"),
     }
 }
 
