@@ -63,11 +63,21 @@ non-axisymmetric structure, stellar self-gravity, association binding, or
 birth dispersion. Each on its own left the disk crossing into spheroid
 territory on the same schedule.
 
-Two factors together hold the disk indefinitely - a birth orbit ratio cap
-plus an axisymmetric field, `vsig` 2.2-2.4 at t=2500 against 0.3-0.5 for
-baseline. Neither works alone, because there are two independent heat
-sources and either one is sufficient on its own to destroy the disk: an
-over-fast birth becomes permanent eccentricity in a torque-free potential,
-and a correct birth is scattered apart by a lumpy one. One-at-a-time
-ablation cannot find that pair, which is worth remembering the next time a
-sweep comes back empty. Full numbers on galaxy-gen#66.
+Two factors together hold it indefinitely - a birth orbit ratio cap plus an
+axisymmetric field, `vsig` 2.2-2.4 at t=2500 against 0.3-0.5 for baseline.
+Neither works alone, because there are two independent heat sources and
+either is sufficient on its own: an over-fast birth becomes permanent
+eccentricity in a torque-free potential, and a correct birth is scattered
+apart by a lumpy one. One-at-a-time ablation cannot find that pair, which is
+worth remembering the next time a sweep comes back empty.
+
+Two follow-ups narrowed the second source. Box smoothing does not substitute
+for axisymmetrization - twenty passes is a Gaussian of about 11% of the disk
+radius, which erases cell texture and barely touches an arm, and it saturates
+around 0.5. So the heating is the large-scale transient mass distribution,
+not grid noise. Meanwhile the analytic density wave does not heat at all,
+even at 0.70 coupling. The difference is coherence, not amplitude: stars are
+heated by structure that changes under them, not by structure that rotates
+with them.
+
+Full numbers on galaxy-gen#70, which compiles #65 and #66.
