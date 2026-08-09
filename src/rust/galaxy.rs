@@ -3187,10 +3187,22 @@ impl Galaxy {
             let aged_single_white_dwarf = stage == Stage::WhiteDwarf
                 && self.stars.binary_id[i] == NO_BINARY
                 && self.stars.age[i] >= Galaxy::WHITE_DWARF_RESOLVED_AGE;
+            // #72: a field star too faint to read as a point is diffuse
+            // light, not a particle. Association members are exempt -
+            // a cluster should read as a cluster while it is one.
+            let unresolvably_faint = match crate::ablation::ablation().resolved_luminosity_floor {
+                Some(floor) => {
+                    stage == Stage::MainSequence
+                        && self.stars.cluster_id[i] == NO_CLUSTER
+                        && self.stars.luminosity[i] < floor
+                }
+                None => false,
+            };
             if !(spatially_mixed
                 || aged_remnant
                 || aged_single_neutron_star
-                || aged_single_white_dwarf)
+                || aged_single_white_dwarf
+                || unresolvably_faint)
             {
                 i += 1;
                 continue;

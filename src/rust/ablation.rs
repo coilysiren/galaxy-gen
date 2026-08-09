@@ -111,6 +111,20 @@ pub struct Ablation {
     /// making them proportional would actually buy, before anyone commits
     /// to the refactor. See galaxy-gen#70.
     pub length_reference_size: Option<f32>,
+    /// Retire an unbound main-sequence star from the resolved set once its
+    /// luminosity falls below this floor, folding it into the diffuse
+    /// stellar reservoir the way aged remnants already are.
+    ///
+    /// Luminosity is `mass^2` under a Salpeter-flavored IMF, so the
+    /// number-heavy end is the light-poor end: half of all births are
+    /// under 5 solar masses and produce under 4% of the light. Nothing
+    /// currently retires them - mass recycles, and only about 4% of stars
+    /// die of old age inside a run - so the only sink is the spatial halo
+    /// drain that galaxy-gen#70 removes. See galaxy-gen#72.
+    ///
+    /// Association members are exempt regardless of luminosity: a cluster
+    /// should read as a cluster while it is one.
+    pub resolved_luminosity_floor: Option<f32>,
 }
 
 impl Ablation {
@@ -159,6 +173,9 @@ impl Ablation {
         if let Some(reference) = self.length_reference_size {
             parts.push(format!("length-reference-size={reference}"));
         }
+        if let Some(floor) = self.resolved_luminosity_floor {
+            parts.push(format!("resolved-luminosity-floor={floor}"));
+        }
         parts.join(",")
     }
 }
@@ -200,6 +217,7 @@ fn load() -> Ablation {
         no_collapse_radiation_resist: flag_env("GALAXY_ABL_NO_COLLAPSE_RADIATION_RESIST"),
         birth_velocity_dispersion: parse_env("GALAXY_ABL_BIRTH_VELOCITY_DISPERSION"),
         length_reference_size: parse_env("GALAXY_ABL_LENGTH_REFERENCE_SIZE"),
+        resolved_luminosity_floor: parse_env("GALAXY_ABL_RESOLVED_LUMINOSITY_FLOOR"),
     }
 }
 
