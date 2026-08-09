@@ -1,31 +1,27 @@
 # syntax=docker/dockerfile:1.7
 # -----------------------------------------------------------------------------
 # Stage 1: build Rust -> WASM -> JS static bundle
+#
+# The builder is the promoted dev-base image, the same one CI and dispatched
+# agents run in, so the bundle that ships is the bundle those environments
+# actually tested. It supplies rust, node, wasm-pack, and a pinned binaryen.
+# This stage used to install all four itself, and local dev, GitHub PR CI, and
+# this Dockerfile each resolved a different wasm-pack and a different wasm-opt
+# (galaxy-gen#74). binaryen is the one that mattered: wasm-pack takes wasm-opt
+# from PATH when it finds one and otherwise downloads its own floating latest,
+# so the local build optimized every bundle by date rather than by source.
+# agentic-os#986 pinned both into the image's Rust payload.
+#
+# rust-toolchain.toml still pins 1.90.0. rustup honours it on the first cargo
+# call, so the gate keeps judging the compiler that builds the artifact.
+#
+# The moving :release alias is deliberate, matching the aos CI-in-dev-base
+# convention (agentic-os#328).
+# Pulling it needs a forgejo.coilysiren.me login, which scripts/publish-image.sh
+# already performs before `docker build`. A local `ward exec build-docker` needs
+# that login too, where the old public base needed none.
 # -----------------------------------------------------------------------------
-FROM rust:1.90-bookworm AS builder
-
-# Node (for webpack) + curl (for wasm-pack and binaryen installers).
-# Binaryen is pulled from the upstream release tarball below, NOT apt:
-# Debian's binaryen produces wasm-opt output that trips
-# `WebAssembly.Table.grow(): failed to grow table by 4` in chromium at
-# instantiation time, which wedges the whole JS module graph (React never
-# mounts). Matches the pin used by .github/workflows/*.yml.
-RUN apt-get update \
- && apt-get install -y --no-install-recommends \
-      curl ca-certificates \
- && curl -fsSL https://deb.nodesource.com/setup_20.x | bash - \
- && apt-get install -y --no-install-recommends nodejs \
- && rm -rf /var/lib/apt/lists/*
-
-# Pinned upstream binaryen release. Keep the version in sync with
-# .github/workflows/action.yml.
-RUN VER=version_119 \
- && curl -sSL "https://github.com/WebAssembly/binaryen/releases/download/${VER}/binaryen-${VER}-x86_64-linux.tar.gz" -o /tmp/binaryen.tgz \
- && tar -xzf /tmp/binaryen.tgz -C /usr/local --strip-components=1 \
- && rm /tmp/binaryen.tgz \
- && wasm-opt --version
-
-RUN curl -sSf https://rustwasm.github.io/wasm-pack/installer/init.sh | sh
+FROM forgejo.coilysiren.me/coilyco-flight-deck/agentic-os:release AS builder
 
 WORKDIR /app
 

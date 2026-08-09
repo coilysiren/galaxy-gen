@@ -8,17 +8,20 @@ on:
 jobs:
   test:
     runs-on: docker
-    # Rust unit tests only. No `container:` override - the checkout JS action
-    # needs node in the job container, which the default runner image ships
-    # but rust:* images don't; rust is installed via rustup below. The browser
-    # e2e + tsc typecheck run on GitHub PR CI (.github/workflows/action.yml).
+    # Runs in the promoted dev-base image, the same builder the publish job
+    # below feeds into `docker build`, so the gate and the shipped artifact
+    # share one toolchain (agentic-os#986, galaxy-gen#74). The previous note
+    # here said a `container:` override would cost us node, which was true of
+    # `rust:*` images. dev-base carries rust, node, wasm-pack, and a pinned
+    # binaryen together, so the tradeoff is gone and the typecheck can join
+    # the Rust gate instead of living only on the GitHub mirror.
+    container: forgejo.coilysiren.me/coilyco-flight-deck/agentic-os:release
     steps:
       - uses: actions/checkout@v4
-      - name: Install rust toolchain
-        run: bash scripts/ci/install-rust.sh
-      - name: Rust lint gate
-        run: bash scripts/ward-command.sh lint-rust
-      - run: cargo test
+      - run: ward exec ci-setup
+      - run: ward exec lint-rust
+      - run: ward exec test-rust
+      - run: ward exec check-js
       - name: Alert Telegram on main failure
         if: ${{ failure() && github.ref == 'refs/heads/main' }}
         continue-on-error: true

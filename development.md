@@ -32,7 +32,8 @@ The Galaxy is immutable-style — methods like `seed()`, `tick()` return new Gal
 
 ### CI
 
-- GitHub Actions (`.github/workflows/action.yml`): two jobs — `rust` (build/check/test + wasm-pack) and `js` (wasm-pack + npm ci)
+- Forgejo (`.forgejo/workflows/ci.yml` on PRs, `build-publish.yml` on `main`): the Rust and JS gates, run inside the dev-base image through `ward exec` verbs. The image supplies rust, node, wasm-pack, and a pinned binaryen, so CI installs no toolchain and the gate matches what `docker build` ships.
+- GitHub Actions (`.github/workflows/action.yml`): browser e2e, which stays there because the in-cluster runner cannot reach the Playwright browser CDN. Its `rust` and `js` jobs now duplicate the Forgejo gate and are queued for removal (galaxy-gen#74).
 
 ## Commands
 

@@ -58,11 +58,21 @@ Raw commands: `cargo test`, `cargo clippy -- -D warnings`, `cargo fmt`, `wasm-pa
 
 ## CI
 
-GitHub Actions (`.github/workflows/action.yml`) runs three jobs on PR to `main`:
+The Rust and JS gates run on Forgejo inside the promoted dev-base image, the
+same image the publish job feeds into `docker build`, so the gate and the
+shipped artifact share one toolchain. Nothing in CI installs a toolchain: rust,
+node, wasm-pack, and a pinned binaryen all arrive with the image
+(agentic-os#986, the aos CI-in-dev-base convention).
 
-- `rust` - `cargo build` / `check` / `test` / `wasm-pack build`
-- `js` - `wasm-pack build` / `npm ci` / `npm run build`
-- `e2e` - `wasm-pack build` / `npm ci` / `playwright test` (uploads HTML report artifact on failure)
+- `.forgejo/workflows/ci.yml` - `gate` on pull requests - `ward exec ci-setup` / `lint-rust` / `test-rust` / `check-js`
+- `.forgejo/workflows/build-publish.yml` - `test` on push to `main` - the same four verbs, then the `publish` job
+
+GitHub Actions (`.github/workflows/action.yml`) still runs `rust`, `js`, and
+`e2e` on PRs to `main`. Only `e2e` is load-bearing now, and it is the one gate
+that does not share the shipping toolchain: it builds its own bundle with its
+own wasm-pack and binaryen because the in-cluster runner cannot reach the
+Playwright browser CDN. Retiring the duplicated `rust` and `js` jobs, and
+finding e2e a home on the shipping toolchain, are tracked in galaxy-gen#74.
 
 ## Workflow
 
@@ -71,10 +81,14 @@ finished work straight to `main` on Forgejo, then close the issue. Do not park
 a finished change on a task branch waiting for a human to merge it, and do not
 open a pull request for the default case.
 
-Pushing to `main` publishes the image and rolls the public site, so the gate is
-the test suite rather than a review. Land only with `ward exec test-rust`,
-`ward exec check-js`, and `ward exec test-e2e` green, and never with
-`--no-verify`.
+Pushing to `main` publishes the image, so the gate is the test suite rather
+than a review. Land only with `ward exec test-rust`, `ward exec check-js`, and
+`ward exec test-e2e` green, and never with `--no-verify`.
+
+It does not roll the public site. The deploy repo pins an exact source SHA and
+rolls only when its own `services/galaxy-gen/**` changes. Auto-rolling from an
+upstream push here still needs cross-repo dispatch (deploy#11), so a new image
+sits unused until that pin moves.
 
 Use a branch only when the work is genuinely unfinished, when a human has to
 choose between paths first, or when Kai asks for one. A branch is also the
@@ -83,13 +97,21 @@ rather than leaving the only copy local.
 
 ## Deploy
 
-Source CI owns the image build. A push to `main` first runs the Rust test job,
-then the trusted `deploy` runner publishes the private image as
+Source CI owns the image build. A push to `main` first runs the Rust and JS
+test job, then the trusted `deploy` runner publishes the private image as
 `forgejo.coilysiren.me/coilyco-gaming/galaxy-gen:<full-source-sha>`. The runner
 supplies package write authority as `REGISTRY_TOKEN`, and the publisher proves
-the remote immutable manifest after its single-architecture push. Browser e2e
-and tsc stay on GitHub PR CI because the in-cluster runner cannot reach the
-Playwright browser CDN.
+the remote immutable manifest after its single-architecture push.
+
+The image build is a two-stage Dockerfile whose builder stage is that same
+dev-base image, so `docker build` needs a `forgejo.coilysiren.me` login before
+it can pull its own base. `scripts/publish-image.sh` already logs in first. A
+local `ward exec build-docker` needs that login too, where the old public Rust
+base needed none.
+
+Browser e2e stays on GitHub PR CI because the in-cluster runner cannot reach
+the Playwright browser CDN. The tsc typecheck no longer does: `check-js` now
+runs on the Forgejo side with the rest of the gate.
 
 The deploy surface remains in
 [coilyco-bridge/deploy](https://forgejo.coilysiren.me/coilyco-bridge/deploy)

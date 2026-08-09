@@ -14,6 +14,9 @@ commands:
   deps-sync:
     run: bash scripts/ward-command.sh deps-sync
     description: Refresh package-lock.json after an intentional package.json change.
+  ci-setup:
+    run: bash scripts/ward-command.sh ci-setup
+    description: "Lockfile-exact npm ci for CI, which takes Rust, Node, wasm-pack, and binaryen from the dev-base image instead of from install."
   test-rust:
     run: bash scripts/ward-command.sh test-rust
     description: cargo check + cargo test.

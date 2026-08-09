@@ -26,13 +26,22 @@ test_e2e() {
 case "${1:-}" in
   install)
     cargo build
-    cargo install wasm-pack
+    # Unconditional install would overwrite dev-base's pinned wasm-pack in the
+    # shared CARGO_HOME/bin with a floating one (galaxy-gen#74).
+    if ! command -v wasm-pack >/dev/null 2>&1; then
+      cargo install wasm-pack
+    fi
     build_wasm
     npm install
     npx playwright install chromium
     ;;
   deps-sync)
     npm install --package-lock-only
+    ;;
+  ci-setup)
+    # Lockfile-exact node_modules. CI needs no `install`: the toolchain
+    # arrives with the dev-base image.
+    npm ci
     ;;
   test-rust)
     test_rust
