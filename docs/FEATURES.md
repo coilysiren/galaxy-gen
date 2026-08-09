@@ -60,6 +60,10 @@ deterministic event queue, and per-(process, tick) RNG streams derived from the
   client. HMR and dual auto-reload via `cargo watch` and `webpack-dev-server`.
 - ESLint, Prettier, TS noEmit, `clippy -D warnings`, `cargo fmt`, and the Ward
   `debug-sim` seeded structure probe.
+- Ward `ablation-sweep`: switch one candidate force off at a time and compare
+  the stellar-disk metrics. Switches are read by the kernel and echoed into
+  each run, and every one is off by default so the shipped physics and the
+  browser build are untouched. See [ablation.md](ablation.md).
 - Playwright E2E plus the `perf-profile` and `test-perf` GPU specs.
 - Served on k3s at `galaxy-gen.coilysiren.me` by unprivileged nginx. Forgejo CI
   tests the Rust core, then the trusted deploy lane publishes a sha-tagged image
