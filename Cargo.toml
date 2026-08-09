@@ -31,6 +31,16 @@ wasm-bindgen = "^0.2"
 getrandom = { version = "^0.4", features = ["wasm_js"] }
 rand = "^0.10"
 
+# The scenario tests integrate real galaxies for a thousand ticks, so an
+# unoptimized test binary is the difference between a suite that runs in
+# under a minute and one nobody waits for. Optimizing the test profile
+# keeps debug assertions and overflow checks on - it trades compile time
+# for run time, not for safety. Rust does not enable fast-math, so f32
+# results are identical across opt levels and the golden hashes hold; the
+# golden mass field test is what proves that stays true.
+[profile.test]
+opt-level = 3
+
 [profile.release]
 opt-level = 3
 lto = true

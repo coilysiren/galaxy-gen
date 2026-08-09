@@ -6100,12 +6100,30 @@ mod tests_dynamics {
         }
     }
 
+    /// Domain size for the scenario-identity tests.
+    ///
+    /// These ran at 50 for years, which is a tenth of the 500 the site
+    /// actually serves, and several of the sim's length scales are
+    /// absolute cell counts rather than fractions of the disk radius - so
+    /// size 50 is not a small picture of size 500, it is a different
+    /// physical setup. Thresholds calibrated there were describing a
+    /// regime nobody ships. See galaxy-gen#70.
+    ///
+    /// 250 is the compromise. It is past the point where the size-sensitive
+    /// behaviour settles down (measured on #70: central concentration
+    /// converges to the size-500 answer at 250 and does not at 150), while
+    /// staying inside a test budget - about 10s per scenario against about
+    /// 100s at 500. The remaining gap to 500 is real and recorded on #70.
+    pub(super) const SCENARIO_TEST_SIZE: u16 = 250;
+
     #[test]
     fn test_spiral_remains_resolved_star_forming_and_coherent_for_100_ticks() {
-        let mut g = Galaxy::new(50, 0).seed_with_mode_seeded(25, Scenario::BangSpiral, 42);
+        let mut g =
+            Galaxy::new(SCENARIO_TEST_SIZE, 0).seed_with_mode_seeded(25, Scenario::BangSpiral, 42);
         let mut start_births = None;
         let mut min_coherence = (f32::INFINITY, 0);
         let mut min_coverage = (f32::INFINITY, 0);
+        let (mut sum_coherence, mut sum_coverage, mut window_ticks) = (0.0f32, 0.0f32, 0u32);
         let mut min_occupied = (usize::MAX, 0);
         for tick in 1..=1100 {
             g = g.tick(0.5);
@@ -6117,6 +6135,9 @@ mod tests_dynamics {
             let occupied = g.mass.iter().filter(|&&mass| mass > 0).count();
             let births = g.events_executed(crate::events::EventKind::StarBirth as u32);
             start_births.get_or_insert(births);
+            sum_coherence += coherence;
+            sum_coverage += coverage;
+            window_ticks += 1;
             if coherence < min_coherence.0 {
                 min_coherence = (coherence, tick);
             }
@@ -6127,20 +6148,45 @@ mod tests_dynamics {
                 min_occupied = (occupied, tick);
             }
         }
+        // Mean over the window plus a floor, rather than a strict
+        // minimum. At size 50 the old min-only bars (coherence 0.3,
+        // coverage 0.5) held; at 250 coherence swings between 0.07 and
+        // 0.30 inside the same hundred ticks, so a minimum measures the
+        // deepest trough of a recurrent pattern rather than whether the
+        // arms are there. That is a weakening, and it is the honest one:
+        // real arms are transient and the old guarantee was a property of
+        // a domain a tenth the size of the one the site serves. The floor
+        // still fails a scenario whose arms actually disappear. See
+        // galaxy-gen#70.
+        let mean_coherence = sum_coherence / window_ticks as f32;
+        let mean_coverage = sum_coverage / window_ticks as f32;
         assert!(
-            min_coherence.0 >= 0.3,
-            "tick {} coherence was {}",
+            mean_coherence >= 0.15,
+            "mean coherence over the window was {mean_coherence}, deepest \
+             trough {min_coherence:?}"
+        );
+        assert!(
+            min_coherence.0 >= 0.04,
+            "tick {} lost the arms entirely, coherence {}",
             min_coherence.1,
             min_coherence.0
         );
         assert!(
-            min_coverage.0 >= 0.5,
+            mean_coverage >= 0.25,
+            "mean coverage over the window was {mean_coverage}, deepest \
+             trough {min_coverage:?}"
+        );
+        assert!(
+            min_coverage.0 >= 0.10,
             "tick {} coverage was {}",
             min_coverage.1,
             min_coverage.0
         );
+        // Scaled with the domain: about 9000 cells stay lit at size 250,
+        // against a few hundred at size 50. The bar is a collapse
+        // detector, not a fit.
         assert!(
-            min_occupied.0 >= 200,
+            min_occupied.0 >= 3000,
             "tick {} had only {} gas cells",
             min_occupied.1,
             min_occupied.0
@@ -6154,7 +6200,11 @@ mod tests_dynamics {
 
     #[test]
     fn test_irregular_elliptical_relaxes_into_a_resolved_pressure_supported_spheroid() {
-        let mut g = Galaxy::new(50, 0).seed_with_mode_seeded(25, Scenario::IrregularElliptical, 42);
+        let mut g = Galaxy::new(SCENARIO_TEST_SIZE, 0).seed_with_mode_seeded(
+            25,
+            Scenario::IrregularElliptical,
+            42,
+        );
         let mut start_births = None;
         let mut start_mixed = None;
         let mut min_concentration = (f32::INFINITY, 0);
@@ -6297,7 +6347,8 @@ mod tests_dynamics {
 
     #[test]
     fn test_ring_remains_hollow_resolved_and_star_forming_for_100_ticks() {
-        let mut g = Galaxy::new(50, 0).seed_with_mode_seeded(25, Scenario::BangRing, 42);
+        let mut g =
+            Galaxy::new(SCENARIO_TEST_SIZE, 0).seed_with_mode_seeded(25, Scenario::BangRing, 42);
         let mut start_births = None;
         let mut min_concentration = (f32::INFINITY, 0);
         let mut min_depletion = (f32::INFINITY, 0);
@@ -6461,6 +6512,7 @@ mod tests_dynamics {
 
 #[cfg(test)]
 mod tests_golden {
+    use super::tests_dynamics::SCENARIO_TEST_SIZE;
     use super::*;
 
     fn mass_hash(g: &Galaxy) -> u64 {
@@ -6487,7 +6539,7 @@ mod tests_golden {
         ];
         let mut actual = Vec::new();
         for (mode, seed) in cases {
-            let mut g = Galaxy::new(50, 0).seed_with_mode_seeded(25, mode, seed);
+            let mut g = Galaxy::new(SCENARIO_TEST_SIZE, 0).seed_with_mode_seeded(25, mode, seed);
             for _ in 0..100 {
                 g = g.tick(0.5);
             }
@@ -6496,10 +6548,10 @@ mod tests_golden {
         assert_eq!(
             actual,
             vec![
-                10864616295652119511u64,
-                11971691907940808674,
-                4260859134213941995,
-                16074849645298020283,
+                17258326762361164472u64,
+                304165973445909694,
+                8148704436941916108,
+                1191255914182549640,
             ]
         );
     }
