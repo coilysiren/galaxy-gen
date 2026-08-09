@@ -2248,7 +2248,8 @@ impl Galaxy {
         // only ever sense a quarter-strength, 64-grid-smoothed echo of the
         // result - which is why they never traced the arms. A spiral
         // reads as a spiral because young stars sit in it.
-        if Galaxy::STAR_WAVE_COUPLING > 0.0 {
+        let coupling = Galaxy::star_wave_coupling();
+        if coupling > 0.0 {
             for s in 0..self.stars.len() {
                 let x = self.stars.pos_x[s] - center;
                 let y = self.stars.pos_y[s] - center;
@@ -2269,8 +2270,7 @@ impl Galaxy {
                 let inv_r2 = 1.0 / r2;
                 let grad_x = (-2.0 * y - Galaxy::SPIRAL_PITCH * x) * inv_r2;
                 let grad_y = (2.0 * x - Galaxy::SPIRAL_PITCH * y) * inv_r2;
-                let force =
-                    -p.spiral_wave_strength * taper * phase.sin() * Galaxy::STAR_WAVE_COUPLING;
+                let force = -p.spiral_wave_strength * taper * phase.sin() * coupling;
                 // Stars integrate outside the gas acceleration buffers, so
                 // this applies as a velocity increment over the step.
                 self.stars.vel_x[s] += force * grad_x * time;
@@ -2309,7 +2309,8 @@ impl Galaxy {
         // Stars feel the annulus too, at the same fraction as the spiral
         // arms. A ring galaxy whose stars ignore the ring is a ring of
         // gas with a uniform star haze laid over it.
-        if Galaxy::STAR_WAVE_COUPLING > 0.0 {
+        let coupling = Galaxy::star_wave_coupling();
+        if coupling > 0.0 {
             for s in 0..self.stars.len() {
                 let x = self.stars.pos_x[s] - center;
                 let y = self.stars.pos_y[s] - center;
@@ -2317,9 +2318,7 @@ impl Galaxy {
                 if r <= disk_r * 0.06 || r >= disk_r * 0.96 {
                     continue;
                 }
-                let radial_force = -p.ring_wave_strength
-                    * ((r - target) / scale).tanh()
-                    * Galaxy::STAR_WAVE_COUPLING;
+                let radial_force = -p.ring_wave_strength * ((r - target) / scale).tanh() * coupling;
                 self.stars.vel_x[s] += radial_force * x / r * time;
                 self.stars.vel_y[s] += radial_force * y / r * time;
             }
@@ -2529,6 +2528,15 @@ impl Galaxy {
                 self.field_ay[fy * res + fx] = -mean_inward * wy / r;
             }
         }
+    }
+
+    /// Effective share of the analytic density-wave force acting on stars.
+    /// `STAR_WAVE_COUPLING` unless a #66 ablation run overrides it, which a
+    /// default build and the wasm build never do.
+    fn star_wave_coupling() -> f32 {
+        crate::ablation::ablation()
+            .star_wave_coupling
+            .unwrap_or(Galaxy::STAR_WAVE_COUPLING)
     }
 
     /// Bilinear sample of the coarse acceleration field at world (x, y).

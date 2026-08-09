@@ -66,6 +66,16 @@ pub struct Ablation {
     /// cheapest way to measure it without re-landing a change that breaks
     /// the elliptical scenario.
     pub birth_orbit_ratio_cap: Option<f32>,
+    /// Override `STAR_WAVE_COUPLING`, normally 0.0: the fraction of the
+    /// analytic spiral and ring density-wave force that also acts on
+    /// stars.
+    ///
+    /// This is the other half of the pair the ablation matrix pointed at.
+    /// An axisymmetric field holds the disk but has no arms in it, so the
+    /// question is whether a coherent analytic wave can put the arms back
+    /// without heating the way a clump-dominated 64-grid field does. A
+    /// density wave stars pass through should not scatter them.
+    pub star_wave_coupling: Option<f32>,
 }
 
 impl Ablation {
@@ -101,6 +111,9 @@ impl Ablation {
         }
         if let Some(cap) = self.birth_orbit_ratio_cap {
             parts.push(format!("birth-orbit-ratio-cap={cap}"));
+        }
+        if let Some(coupling) = self.star_wave_coupling {
+            parts.push(format!("star-wave-coupling={coupling}"));
         }
         parts.join(",")
     }
@@ -139,6 +152,7 @@ fn load() -> Ablation {
         no_association_binding: flag_env("GALAXY_ABL_NO_ASSOCIATION_BINDING"),
         no_birth_dispersion: flag_env("GALAXY_ABL_NO_BIRTH_DISPERSION"),
         birth_orbit_ratio_cap: parse_env("GALAXY_ABL_BIRTH_ORBIT_RATIO_CAP"),
+        star_wave_coupling: parse_env("GALAXY_ABL_STAR_WAVE_COUPLING"),
     }
 }
 
