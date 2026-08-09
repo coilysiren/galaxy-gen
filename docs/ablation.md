@@ -36,6 +36,7 @@ first line, so a captured run always records the physics that produced it.
 | `GALAXY_ABL_STAR_WAVE_COUPLING` | Override `STAR_WAVE_COUPLING`: the share of the analytic spiral and ring density wave that also acts on stars. |
 | `GALAXY_ABL_NO_COLLAPSE_RADIATION_RESIST` | Let a dense cell ignite however irradiated it is. Tests whether retained stars suppress the next generation. |
 | `GALAXY_ABL_BIRTH_VELOCITY_DISPERSION` | Isotropic random birth velocity as a multiple of local circular speed. Tests giving a spheroid its dispersion on purpose. |
+| `GALAXY_ABL_LENGTH_REFERENCE_SIZE` | Scale the sim's absolute length constants by `size / reference`, so every domain size is a scaled copy of the reference. |
 
 ## Why the switches live in the kernel
 

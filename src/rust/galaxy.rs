@@ -2435,6 +2435,7 @@ impl Galaxy {
             pm.push(self.bh_mass);
         }
         let tree = build_quadtree(&px, &py, &pm, 0.0, 0.0, size_f);
+        let length_scale = self.length_scale();
         let res = Galaxy::FIELD_RES;
         let cell = size_f / res as f32;
         let theta_sq = Galaxy::THETA * Galaxy::THETA;
@@ -2458,7 +2459,7 @@ impl Galaxy {
                     wx,
                     wy,
                     theta_sq,
-                    Galaxy::FIELD_SOFTENING_SQ,
+                    Galaxy::FIELD_SOFTENING_SQ * length_scale * length_scale,
                     Galaxy::GRAVATIONAL_CONSTANT,
                     &mut stack,
                 );
@@ -2564,6 +2565,16 @@ impl Galaxy {
         }
     }
 
+    /// Factor applied to the sim's absolute length constants. 1.0 unless
+    /// a #70 ablation run has asked for lengths proportional to the
+    /// domain, which a default build and the wasm build never do.
+    fn length_scale(&self) -> f32 {
+        match crate::ablation::ablation().length_reference_size {
+            Some(reference) if reference > 1.0 => self.size as f32 / reference,
+            _ => 1.0,
+        }
+    }
+
     /// Effective share of the analytic density-wave force acting on stars.
     /// `STAR_WAVE_COUPLING` unless a #66 ablation run overrides it, which a
     /// default build and the wasm build never do.
@@ -2630,7 +2641,8 @@ impl Galaxy {
     /// members rather than an ever-expanding bounding box, preventing a
     /// long tidal stream from chaining unrelated births across the disk.
     fn nearby_young_association(&self, x: f32, y: f32) -> Option<u32> {
-        let join_r2 = Galaxy::ASSOCIATION_JOIN_RADIUS * Galaxy::ASSOCIATION_JOIN_RADIUS;
+        let join_radius = Galaxy::ASSOCIATION_JOIN_RADIUS * self.length_scale();
+        let join_r2 = join_radius * join_radius;
         let mut best: Option<(f32, u32)> = None;
         for i in 0..self.stars.len() {
             let cluster = self.stars.cluster_id[i];
@@ -2706,8 +2718,8 @@ impl Galaxy {
         (Galaxy::ASSOCIATION_BINDING_G * bound_mass / (3.0 * omega_sq))
             .cbrt()
             .clamp(
-                Galaxy::ASSOCIATION_TIDAL_RADIUS_MIN,
-                Galaxy::ASSOCIATION_TIDAL_RADIUS_MAX,
+                Galaxy::ASSOCIATION_TIDAL_RADIUS_MIN * self.length_scale(),
+                Galaxy::ASSOCIATION_TIDAL_RADIUS_MAX * self.length_scale(),
             )
     }
 
@@ -2770,6 +2782,7 @@ impl Galaxy {
         // zero rather than skipping the loop, so the release rules above
         // and the integration below are untouched.
         let bind = !crate::ablation::ablation().no_association_binding;
+        let binding_soften = self.length_scale() * self.length_scale();
         for i in 0..self.stars.len() {
             let cluster = self.stars.cluster_id[i];
             if !bind || cluster == NO_CLUSTER || cluster as usize >= associations.len() {
@@ -2785,7 +2798,8 @@ impl Galaxy {
             let (cx, cy) = association.center();
             let dx = cx - self.stars.pos_x[i];
             let dy = cy - self.stars.pos_y[i];
-            let softened = dx * dx + dy * dy + Galaxy::ASSOCIATION_BINDING_SOFTENING_SQ;
+            let softened =
+                dx * dx + dy * dy + Galaxy::ASSOCIATION_BINDING_SOFTENING_SQ * binding_soften;
             let mut scale = Galaxy::ASSOCIATION_BINDING_G * association.mass * age_fraction.powi(2)
                 / (softened * softened.sqrt());
             let raw_magnitude = scale * (dx * dx + dy * dy).sqrt();
@@ -4188,8 +4202,9 @@ impl Galaxy {
                 )
             } else {
                 let angle = rng.random_range(0.0f32..std::f32::consts::TAU);
-                let radius =
-                    Galaxy::ASSOCIATION_BIRTH_RADIUS * rng.random_range(0.0f32..1.0).sqrt();
+                let radius = Galaxy::ASSOCIATION_BIRTH_RADIUS
+                    * self.length_scale()
+                    * rng.random_range(0.0f32..1.0).sqrt();
                 (
                     (cx + angle.cos() * radius).clamp(0.0, self.size as f32 - 1e-3),
                     (cy + angle.sin() * radius).clamp(0.0, self.size as f32 - 1e-3),

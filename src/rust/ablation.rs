@@ -98,6 +98,19 @@ pub struct Ablation {
     /// scenario the dispersion explicitly - which is what it physically
     /// wants - rebuilds the spheroid without the bug.
     pub birth_velocity_dispersion: Option<f32>,
+    /// Reference domain size for the sim's absolute length constants.
+    /// When set, every length below is multiplied by `size / reference`,
+    /// so a run at any size is a scaled copy of a run at the reference.
+    ///
+    /// The sim's length scales are absolute cell counts while `disk_r` is
+    /// not, so an association is three times larger relative to the disk
+    /// at size 150 than at size 500 and the coarse field is three times
+    /// softer relative to it. Size 150 is a different physical setup, not
+    /// a smaller picture of the same one - which is why the scenario
+    /// tests and the deployed site disagree. This switch measures what
+    /// making them proportional would actually buy, before anyone commits
+    /// to the refactor. See galaxy-gen#70.
+    pub length_reference_size: Option<f32>,
 }
 
 impl Ablation {
@@ -143,6 +156,9 @@ impl Ablation {
         if let Some(sigma) = self.birth_velocity_dispersion {
             parts.push(format!("birth-velocity-dispersion={sigma}"));
         }
+        if let Some(reference) = self.length_reference_size {
+            parts.push(format!("length-reference-size={reference}"));
+        }
         parts.join(",")
     }
 }
@@ -183,6 +199,7 @@ fn load() -> Ablation {
         star_wave_coupling: parse_env("GALAXY_ABL_STAR_WAVE_COUPLING"),
         no_collapse_radiation_resist: flag_env("GALAXY_ABL_NO_COLLAPSE_RADIATION_RESIST"),
         birth_velocity_dispersion: parse_env("GALAXY_ABL_BIRTH_VELOCITY_DISPERSION"),
+        length_reference_size: parse_env("GALAXY_ABL_LENGTH_REFERENCE_SIZE"),
     }
 }
 
