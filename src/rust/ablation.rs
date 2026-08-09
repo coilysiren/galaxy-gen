@@ -86,6 +86,18 @@ pub struct Ablation {
     /// made the next generation. If collapse counts recover with the gate
     /// off, that loop is the mechanism.
     pub no_collapse_radiation_resist: bool,
+    /// Isotropic random velocity given to every newborn, as a multiple of
+    /// the local circular speed, on top of the association's own internal
+    /// motion. Momentum-neutral within the birth batch.
+    ///
+    /// A pressure-supported spheroid is *defined* by having dispersion
+    /// comparable to its rotation. The elliptical scenario currently gets
+    /// that for free from the birth-speed bug: stars launched at 2-3x
+    /// circular scatter into a spheroid. Cap the births and it collapses
+    /// into a small rotating core. This switch asks whether giving the
+    /// scenario the dispersion explicitly - which is what it physically
+    /// wants - rebuilds the spheroid without the bug.
+    pub birth_velocity_dispersion: Option<f32>,
 }
 
 impl Ablation {
@@ -128,6 +140,9 @@ impl Ablation {
         if self.no_collapse_radiation_resist {
             parts.push("no-collapse-radiation-resist".to_string());
         }
+        if let Some(sigma) = self.birth_velocity_dispersion {
+            parts.push(format!("birth-velocity-dispersion={sigma}"));
+        }
         parts.join(",")
     }
 }
@@ -167,6 +182,7 @@ fn load() -> Ablation {
         birth_orbit_ratio_cap: parse_env("GALAXY_ABL_BIRTH_ORBIT_RATIO_CAP"),
         star_wave_coupling: parse_env("GALAXY_ABL_STAR_WAVE_COUPLING"),
         no_collapse_radiation_resist: flag_env("GALAXY_ABL_NO_COLLAPSE_RADIATION_RESIST"),
+        birth_velocity_dispersion: parse_env("GALAXY_ABL_BIRTH_VELOCITY_DISPERSION"),
     }
 }
 

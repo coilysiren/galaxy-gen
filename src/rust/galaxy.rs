@@ -4238,6 +4238,22 @@ impl Galaxy {
             } else {
                 (0.0, 0.0)
             };
+            // #70 ablation: isotropic random dispersion on top of the
+            // association's own internal motion, scaled to the local
+            // circular speed. Drawn before the mean subtraction below, so
+            // the batch still carries no net momentum.
+            let (ivx, ivy) = match crate::ablation::ablation().birth_velocity_dispersion {
+                Some(sigma) if sigma > 0.0 => {
+                    let scale = self.association_circular_speed(galactic_r) * sigma;
+                    let angle = rng.random_range(0.0f32..std::f32::consts::TAU);
+                    // Rayleigh-ish magnitude from a uniform draw: more
+                    // small kicks than large ones, no hard ceiling at the
+                    // nominal sigma.
+                    let magnitude = scale * (-rng.random_range(1e-6f32..1.0).ln()).sqrt();
+                    (ivx + angle.cos() * magnitude, ivy + angle.sin() * magnitude)
+                }
+                _ => (ivx, ivy),
+            };
             internal_velocities.push((ivx, ivy));
             internal_momentum_x += masses[k] * ivx;
             internal_momentum_y += masses[k] * ivy;

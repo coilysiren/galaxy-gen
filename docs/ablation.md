@@ -35,6 +35,7 @@ first line, so a captured run always records the physics that produced it.
 | `GALAXY_ABL_BIRTH_ORBIT_RATIO_CAP` | Clamp a newborn's orbital speed to this multiple of local circular speed rather than to an absolute speed. |
 | `GALAXY_ABL_STAR_WAVE_COUPLING` | Override `STAR_WAVE_COUPLING`: the share of the analytic spiral and ring density wave that also acts on stars. |
 | `GALAXY_ABL_NO_COLLAPSE_RADIATION_RESIST` | Let a dense cell ignite however irradiated it is. Tests whether retained stars suppress the next generation. |
+| `GALAXY_ABL_BIRTH_VELOCITY_DISPERSION` | Isotropic random birth velocity as a multiple of local circular speed. Tests giving a spheroid its dispersion on purpose. |
 
 ## Why the switches live in the kernel
 
@@ -80,5 +81,12 @@ not grid noise. Meanwhile the analytic density wave does not heat at all,
 even at 0.70 coupling. The difference is coherence, not amplitude: stars are
 heated by structure that changes under them, not by structure that rotates
 with them.
+
+One caution the sweep earned the hard way: **a result at one domain size is a
+hypothesis at another.** Several of the sim's length scales are absolute cell
+counts rather than fractions of the disk radius, so size 150 is a different
+physical setup from size 500 and not a smaller picture of it. Compare like with
+like - same size, same tick count - or the age effect and the size effect will
+be indistinguishable.
 
 Full numbers on galaxy-gen#70, which compiles #65 and #66.
