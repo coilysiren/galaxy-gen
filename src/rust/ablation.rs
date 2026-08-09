@@ -111,19 +111,12 @@ pub struct Ablation {
     /// making them proportional would actually buy, before anyone commits
     /// to the refactor. See galaxy-gen#70.
     pub length_reference_size: Option<f32>,
-    /// Retire an unbound main-sequence star from the resolved set once its
-    /// luminosity falls below this floor, folding it into the diffuse
-    /// stellar reservoir the way aged remnants already are.
+    /// Override `RESOLVED_LUMINOSITY_FLOOR`, the luminosity below which an
+    /// unbound main-sequence star stops being drawn as a point.
     ///
-    /// Luminosity is `mass^2` under a Salpeter-flavored IMF, so the
-    /// number-heavy end is the light-poor end: half of all births are
-    /// under 5 solar masses and produce under 4% of the light. Nothing
-    /// currently retires them - mass recycles, and only about 4% of stars
-    /// die of old age inside a run - so the only sink is the spatial halo
-    /// drain that galaxy-gen#70 removes. See galaxy-gen#72.
-    ///
-    /// Association members are exempt regardless of luminosity: a cluster
-    /// should read as a cluster while it is one.
+    /// The floor now ships on by default; this switch only exists to
+    /// re-measure it. `0` disables retirement entirely, which is the
+    /// control the #72 numbers were taken against.
     pub resolved_luminosity_floor: Option<f32>,
 }
 

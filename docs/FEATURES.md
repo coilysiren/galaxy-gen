@@ -32,6 +32,10 @@ deterministic event queue, and per-(process, tick) RNG streams derived from the
 - Bounded stellar lifecycles through red giants, white dwarfs, Type Ia and
   core-collapse supernovae, neutron-star mergers, and a phase-mixed halo.
   See [stellar-evolution.md](stellar-evolution.md).
+- Bounded resolved star population. Faint unbound field stars retire into
+  diffuse light below a per-scenario luminosity floor, so the point count
+  settles instead of growing for as long as a session runs. The elliptical
+  opts out: its spheroid is made of exactly that population.
 - Star formation into temporary bound associations that tidally release into
   streams. See [stellar-associations.md](stellar-associations.md).
 - Central black hole with nuclear viscosity, slow accretion, and brief bipolar
@@ -62,8 +66,11 @@ deterministic event queue, and per-(process, tick) RNG streams derived from the
   `debug-sim` seeded structure probe.
 - Ward `ablation-sweep`: switch one candidate force off at a time and compare
   the stellar-disk metrics. Switches are read by the kernel and echoed into
-  each run, and every one is off by default so the shipped physics and the
-  browser build are untouched. See [ablation.md](ablation.md).
+  each run. Most are off by default; the two that shipped
+  (`RESOLVED_LUMINOSITY_FLOOR`, `STAR_WAVE_COUPLING`) keep a switch as an
+  override so they can be re-measured. The browser build reads no
+  environment and always runs the shipped physics.
+  See [ablation.md](ablation.md).
 - Playwright E2E plus the `perf-profile` and `test-perf` GPU specs.
 - Served on k3s at `galaxy-gen.coilysiren.me` by unprivileged nginx. Forgejo CI
   tests the Rust core, then the trusted deploy lane publishes a sha-tagged image

@@ -17,9 +17,11 @@ Or set a switch on a single `debug-sim` run:
 GALAXY_ABL_AXISYMMETRIC_FIELD=1 ward exec debug-sim 2500 500 2 12345 2
 ```
 
-Every switch defaults to off. The wasm build reads no environment and always
-runs the shipped physics, and the golden mass field test proves a default
-native build does too. `debug-sim` prints the resolved configuration as its
+Most switches default to off. Two override a shipped constant instead -
+`GALAXY_ABL_RESOLVED_LUMINOSITY_FLOOR` and `GALAXY_ABL_STAR_WAVE_COUPLING` -
+so a landed default can still be re-measured without editing it. The wasm
+build reads no environment and always runs the shipped physics, and the
+golden mass field test proves a default native build does too. `debug-sim` prints the resolved configuration as its
 first line, so a captured run always records the physics that produced it.
 
 ## Switches
@@ -37,7 +39,7 @@ first line, so a captured run always records the physics that produced it.
 | `GALAXY_ABL_NO_COLLAPSE_RADIATION_RESIST` | Let a dense cell ignite however irradiated it is. Tests whether retained stars suppress the next generation. |
 | `GALAXY_ABL_BIRTH_VELOCITY_DISPERSION` | Isotropic random birth velocity as a multiple of local circular speed. Tests giving a spheroid its dispersion on purpose. |
 | `GALAXY_ABL_LENGTH_REFERENCE_SIZE` | Scale the sim's absolute length constants by `size / reference`, so every domain size is a scaled copy of the reference. |
-| `GALAXY_ABL_RESOLVED_LUMINOSITY_FLOOR` | Retire unbound main-sequence stars below this luminosity into the diffuse reservoir. Bounds the resolved population. |
+| `GALAXY_ABL_RESOLVED_LUMINOSITY_FLOOR` | Override the per-scenario luminosity floor that bounds the resolved population. `0` disables retirement, the control the #72 numbers were taken against. |
 
 ## Why the switches live in the kernel
 

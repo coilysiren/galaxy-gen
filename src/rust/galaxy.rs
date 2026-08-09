@@ -120,6 +120,22 @@ pub struct ScenarioParams {
     /// drag to settle its swarm into the central glow instead. Zero for
     /// disk scenarios - their stars must keep orbiting forever.
     pub star_drag: f32,
+    /// Luminosity below which an unbound main-sequence star stops being
+    /// drawn as a point and becomes diffuse light. Per scenario, because
+    /// what the dim population *is* differs by scenario.
+    ///
+    /// Disk scenarios use `RESOLVED_LUMINOSITY_FLOOR`: their faint field
+    /// stars are a thin haze spread over the whole disk, and deleting
+    /// them outright moves frame brightness by 1.5% (galaxy-gen#72).
+    ///
+    /// The elliptical uses zero. Its defining feature is a concentrated
+    /// stellar spheroid, and that spheroid is *made of* the accumulated
+    /// faint old population - applying the disk floor to it drops
+    /// `spheroid_concentration` from 0.45-0.85 to 0.28-0.32, which is the
+    /// object losing its identity rather than shedding invisible light.
+    /// It needs the retired light rendered before it can have a floor,
+    /// which is tracked on galaxy-gen#72 rather than bodged here.
+    pub resolved_luminosity_floor: f32,
 }
 
 impl Scenario {
@@ -153,6 +169,7 @@ impl Scenario {
                 seed_gain: 1.0,
                 vel_dispersion: 0.0,
                 star_drag: 0.0,
+                resolved_luminosity_floor: Galaxy::RESOLVED_LUMINOSITY_FLOOR,
             },
             Scenario::BangSpiral => ScenarioParams {
                 bang: true,
@@ -182,6 +199,7 @@ impl Scenario {
                 seed_gain: 1.0,
                 vel_dispersion: 0.0,
                 star_drag: 0.0,
+                resolved_luminosity_floor: Galaxy::RESOLVED_LUMINOSITY_FLOOR,
             },
             Scenario::IrregularSpiral => ScenarioParams {
                 bang: false,
@@ -211,6 +229,7 @@ impl Scenario {
                 seed_gain: 1.5,
                 vel_dispersion: 0.0,
                 star_drag: 0.0,
+                resolved_luminosity_floor: Galaxy::RESOLVED_LUMINOSITY_FLOOR,
             },
             Scenario::IrregularElliptical => ScenarioParams {
                 bang: false,
@@ -240,6 +259,7 @@ impl Scenario {
                 seed_gain: 1.5,
                 vel_dispersion: 0.5,
                 star_drag: 0.0015,
+                resolved_luminosity_floor: 0.0,
             },
         }
     }
@@ -490,6 +510,25 @@ impl Galaxy {
     const STAR_LIFETIME_COEFF: f32 = 900.0;
     /// Max stars spawned per birth event (render + integration budget).
     const BIRTH_MAX_STARS: usize = 24;
+    /// Luminosity below which an unbound main-sequence star stops being
+    /// drawn as a point and becomes part of the diffuse stellar light.
+    ///
+    /// Luminosity is mass squared, so 100 is ten solar masses. Under the
+    /// Salpeter-flavored IMF that is about 81% of stars carrying about
+    /// 12% of the light, and the population is even more skewed than the
+    /// birth numbers because the massive stars are the ones that die.
+    ///
+    /// This is the population's only real sink. Mass recycles through
+    /// supernovae and the fountain, and only about 4% of stars born reach
+    /// end of life inside a run - half of all births live 64800 ticks - so
+    /// without this the resolved count grows without bound. Measured on
+    /// galaxy-gen#72: 23-30k with the floor against 123-131k without, and
+    /// deleting that light outright costs 1.5% of frame brightness, which
+    /// is why it needs no diffuse-light machinery to replace it.
+    ///
+    /// Association members are exempt whatever their brightness, so a
+    /// cluster reads as a cluster while it is one.
+    const RESOLVED_LUMINOSITY_FLOOR: f32 = 100.0;
     /// Radius beyond which a sustained orbit becomes unresolved halo light.
     const STELLAR_HALO_MIX_RADIUS: f32 = 1.18;
     /// Eight cadence scans = 64 ticks outside the luminous disk.
@@ -3165,6 +3204,9 @@ impl Galaxy {
     pub(crate) fn process_stellar_halo(&mut self, _time: f32) {
         let center = self.size as f32 * 0.5;
         let mix_radius = self.disk_radius() * Galaxy::STELLAR_HALO_MIX_RADIUS;
+        let floor = crate::ablation::ablation()
+            .resolved_luminosity_floor
+            .unwrap_or(self.scenario.params().resolved_luminosity_floor);
         let mut i = 0;
         while i < self.stars.len() {
             let dx = self.stars.pos_x[i] - center;
@@ -3190,14 +3232,10 @@ impl Galaxy {
             // #72: a field star too faint to read as a point is diffuse
             // light, not a particle. Association members are exempt -
             // a cluster should read as a cluster while it is one.
-            let unresolvably_faint = match crate::ablation::ablation().resolved_luminosity_floor {
-                Some(floor) => {
-                    stage == Stage::MainSequence
-                        && self.stars.cluster_id[i] == NO_CLUSTER
-                        && self.stars.luminosity[i] < floor
-                }
-                None => false,
-            };
+            let unresolvably_faint = floor > 0.0
+                && stage == Stage::MainSequence
+                && self.stars.cluster_id[i] == NO_CLUSTER
+                && self.stars.luminosity[i] < floor;
             if !(spatially_mixed
                 || aged_remnant
                 || aged_single_neutron_star
