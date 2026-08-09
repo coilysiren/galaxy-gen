@@ -1750,7 +1750,27 @@ impl Galaxy {
     /// Binned rather than global because a disk's streaming speed varies
     /// with radius: pooling all radii would charge the radial gradient to
     /// dispersion and understate rotation everywhere.
+    ///
+    /// Pools every age, which is what "is the visible star layer a disk"
+    /// asks. To ask instead whether stars are being *heated* after birth,
+    /// use `rotation_dispersion_ratio_for_age`: a population whose cohorts
+    /// are each individually cold but born on different mean orbits reads
+    /// as a mush here while no star has been heated at all.
     pub fn rotation_dispersion_ratio(&self) -> f32 {
+        self.rotation_dispersion_ratio_for_age(0.0, f32::INFINITY)
+    }
+
+    /// `rotation_dispersion_ratio` restricted to stars whose age falls in
+    /// `[min_age, max_age)`, in sim-time units.
+    ///
+    /// This separates the two ways a star layer loses rotational support,
+    /// which the pooled metric cannot tell apart. If each age cohort is
+    /// cold and only the mixture is hot, the dispersion was written in at
+    /// birth and accumulates as generations pile up - no force is heating
+    /// anything, and ablating forces will not move it. If old cohorts read
+    /// hotter than young ones, something is heating stars after birth and
+    /// the gap between cohorts is the heating rate. See galaxy-gen#66.
+    pub fn rotation_dispersion_ratio_for_age(&self, min_age: f32, max_age: f32) -> f32 {
         const BINS: usize = 8;
         /// Below this a bin's dispersion is noise, not a measurement.
         const MIN_BIN_STARS: u32 = 20;
@@ -1765,6 +1785,10 @@ impl Galaxy {
         let (mut sum_t, mut sum_r) = ([0.0f32; BINS], [0.0f32; BINS]);
         let (mut sum_t2, mut sum_r2) = ([0.0f32; BINS], [0.0f32; BINS]);
         for i in 0..self.stars.len() {
+            let age = self.stars.age[i];
+            if age < min_age || age >= max_age {
+                continue;
+            }
             let rx = self.stars.pos_x[i] - center;
             let ry = self.stars.pos_y[i] - center;
             let r = (rx * rx + ry * ry).sqrt();
@@ -2358,10 +2382,12 @@ impl Galaxy {
                 pm.push(self.mass[i] as f32);
             }
         }
-        for i in 0..self.stars.len() {
-            px.push(self.stars.pos_x[i].clamp(0.0, size_f - 1e-3));
-            py.push(self.stars.pos_y[i].clamp(0.0, size_f - 1e-3));
-            pm.push(self.stars.mass[i]);
+        if !crate::ablation::ablation().no_star_self_gravity {
+            for i in 0..self.stars.len() {
+                px.push(self.stars.pos_x[i].clamp(0.0, size_f - 1e-3));
+                py.push(self.stars.pos_y[i].clamp(0.0, size_f - 1e-3));
+                pm.push(self.stars.mass[i]);
+            }
         }
         if self.bh_mass > 0.0 {
             px.push(size_f * 0.5);
@@ -2403,6 +2429,97 @@ impl Galaxy {
                     (ax * Galaxy::STAR_GAS_FIELD_BOOST - ah * hx) * Galaxy::STAR_FIELD_SCALE;
                 self.field_ay[fy * res + fx] =
                     (ay * Galaxy::STAR_GAS_FIELD_BOOST - ah * hy) * Galaxy::STAR_FIELD_SCALE;
+            }
+        }
+        self.apply_field_ablations();
+    }
+
+    /// Post-process the freshly built star field for a #66 ablation run.
+    /// Inert unless a switch is set, which is never the case in the wasm
+    /// build or a default native build.
+    fn apply_field_ablations(&mut self) {
+        let ablation = crate::ablation::ablation();
+        for _ in 0..ablation.field_smooth_passes {
+            self.smooth_star_field();
+        }
+        if ablation.axisymmetric_field {
+            self.axisymmetrize_star_field();
+        }
+    }
+
+    /// One 3x3 box-blur pass over the coarse field, edges clamped. Removes
+    /// small-scale clumpiness without changing the field's overall
+    /// magnitude or its large-scale shape.
+    fn smooth_star_field(&mut self) {
+        let res = Galaxy::FIELD_RES;
+        let mut out_x = vec![0.0f32; res * res];
+        let mut out_y = vec![0.0f32; res * res];
+        for fy in 0..res {
+            for fx in 0..res {
+                let (mut sum_x, mut sum_y) = (0.0f32, 0.0f32);
+                for dy in -1i32..=1 {
+                    for dx in -1i32..=1 {
+                        let sx = (fx as i32 + dx).clamp(0, res as i32 - 1) as usize;
+                        let sy = (fy as i32 + dy).clamp(0, res as i32 - 1) as usize;
+                        sum_x += self.field_ax[sy * res + sx];
+                        sum_y += self.field_ay[sy * res + sx];
+                    }
+                }
+                out_x[fy * res + fx] = sum_x / 9.0;
+                out_y[fy * res + fx] = sum_y / 9.0;
+            }
+        }
+        self.field_ax = out_x;
+        self.field_ay = out_y;
+    }
+
+    /// Replace the field with its azimuthal average about the galactic
+    /// center: radially binned mean inward acceleration, re-emitted as a
+    /// purely radial field. Leaves a potential with no arms, no clumps,
+    /// and no time-varying pattern, while keeping the radial profile - so
+    /// the circular speed at every radius is preserved.
+    fn axisymmetrize_star_field(&mut self) {
+        let res = Galaxy::FIELD_RES;
+        let cell = self.size as f32 / res as f32;
+        let center = self.size as f32 * 0.5;
+        // One bin per field cell along the diagonal reach of the domain.
+        let bins = (res as f32 * std::f32::consts::SQRT_2).ceil() as usize + 1;
+        let mut sum = vec![0.0f64; bins];
+        let mut count = vec![0u32; bins];
+        let radius_at = |fx: usize, fy: usize| {
+            let wx = (fx as f32 + 0.5) * cell - center;
+            let wy = (fy as f32 + 0.5) * cell - center;
+            (wx, wy, (wx * wx + wy * wy).sqrt())
+        };
+        for fy in 0..res {
+            for fx in 0..res {
+                let (wx, wy, r) = radius_at(fx, fy);
+                if r < 1e-3 {
+                    continue;
+                }
+                let bin = ((r / cell) as usize).min(bins - 1);
+                let inward =
+                    -(self.field_ax[fy * res + fx] * wx + self.field_ay[fy * res + fx] * wy) / r;
+                sum[bin] += inward as f64;
+                count[bin] += 1;
+            }
+        }
+        for fy in 0..res {
+            for fx in 0..res {
+                let (wx, wy, r) = radius_at(fx, fy);
+                if r < 1e-3 {
+                    self.field_ax[fy * res + fx] = 0.0;
+                    self.field_ay[fy * res + fx] = 0.0;
+                    continue;
+                }
+                let bin = ((r / cell) as usize).min(bins - 1);
+                let mean_inward = if count[bin] > 0 {
+                    (sum[bin] / count[bin] as f64) as f32
+                } else {
+                    0.0
+                };
+                self.field_ax[fy * res + fx] = -mean_inward * wx / r;
+                self.field_ay[fy * res + fx] = -mean_inward * wy / r;
             }
         }
     }
@@ -2599,9 +2716,14 @@ impl Galaxy {
         let mut binding_ay = vec![0.0f32; self.stars.len()];
         let mut recoil_x = vec![0.0f32; associations.len()];
         let mut recoil_y = vec![0.0f32; associations.len()];
+        // #66 ablation: associations still form, release, and stream, they
+        // just stop pulling on their members. Leaves the binding arrays at
+        // zero rather than skipping the loop, so the release rules above
+        // and the integration below are untouched.
+        let bind = !crate::ablation::ablation().no_association_binding;
         for i in 0..self.stars.len() {
             let cluster = self.stars.cluster_id[i];
-            if cluster == NO_CLUSTER || cluster as usize >= associations.len() {
+            if !bind || cluster == NO_CLUSTER || cluster as usize >= associations.len() {
                 continue;
             }
             let association = associations[cluster as usize];
@@ -4043,7 +4165,9 @@ impl Galaxy {
             let dx = px - association_x;
             let dy = py - association_y;
             let local_r = (dx * dx + dy * dy).sqrt();
-            let speed = if local_r > 1e-3 {
+            // #66 ablation: born cold, every member on the association's
+            // center-of-mass orbit exactly.
+            let speed = if local_r > 1e-3 && !crate::ablation::ablation().no_birth_dispersion {
                 (Galaxy::ASSOCIATION_BINDING_G * combined_mass / (local_r + 0.8)).sqrt()
                     * Galaxy::ASSOCIATION_INTERNAL_SPEED_SCALE
             } else {
@@ -5520,6 +5644,252 @@ mod tests_dynamics {
         assert!(
             cold > hot * 3.0,
             "the metric must separate the two clearly: cold {cold} vs hot {hot}"
+        );
+    }
+
+    /// Calibration for the age-resolved split against the two ways a star
+    /// layer loses pooled rotational support, which pooled `vsig` reports
+    /// identically and the split has to tell apart.
+    ///
+    /// Generational offset: cohorts each perfectly cold, streaming at
+    /// different speeds. Pooling charges the gap between them to
+    /// dispersion, so pooled reads far below either cohort while nothing
+    /// has been heated.
+    ///
+    /// Heating: the old cohort's own velocities randomized. Pooled falls
+    /// too, but now the old cohort reads hot measured on its own.
+    ///
+    /// The discriminator is therefore the *cohort* number, not the pooled
+    /// one. Worth stating precisely, because the offset effect is weaker
+    /// than it looks: two cold cohorts a factor of two apart in speed
+    /// still pool to about 4.2, so generational offset alone cannot drive
+    /// pooled `vsig` under 1.0 unless the old cohort has lost nearly all
+    /// of its streaming - which is heating again.
+    ///
+    /// Without this the age split is just three more plausible curves, and
+    /// galaxy-gen#66 already spent one round on those.
+    #[test]
+    fn test_age_split_tells_generational_offset_from_actual_heating() {
+        let size = 100u16;
+        let center = size as f32 * 0.5;
+        let disk_r = (size as f32 * 0.5 - 1.0).max(1.0);
+        const N: usize = 400;
+        let sample = |k: usize| std::f32::consts::TAU * k as f32 / N as f32;
+        let radius = |k: usize| disk_r * (0.3 + 0.4 * ((k % 7) as f32 / 7.0));
+
+        // Two cold cohorts on the same orbits at different speeds: the
+        // young one at 2.0, the old one lagging at 1.0. Real disks do this
+        // - it is asymmetric drift - and it is not heating.
+        let mut layered = Galaxy::new(size, 0);
+        for (age, speed) in [(10.0f32, 2.0f32), (800.0, 1.0)] {
+            for k in 0..N {
+                let angle = sample(k);
+                let r = radius(k);
+                layered.spawn_star(
+                    center + r * angle.cos(),
+                    center + r * angle.sin(),
+                    -angle.sin() * speed,
+                    angle.cos() * speed,
+                    10.0,
+                );
+                let last = layered.stars.len() - 1;
+                layered.stars.age[last] = age;
+            }
+        }
+
+        let pooled = layered.rotation_dispersion_ratio();
+        let young = layered.rotation_dispersion_ratio_for_age(0.0, 150.0);
+        let old = layered.rotation_dispersion_ratio_for_age(500.0, f32::INFINITY);
+
+        assert!(
+            young > 1.5 && old > 1.5,
+            "each cohort is exactly circular and must read as a disk: \
+             young {young}, old {old}"
+        );
+        assert!(
+            pooled < young * 0.5 && pooled < old * 0.5,
+            "pooling cohorts that stream at different speeds must charge \
+             the gap between them to dispersion, so pooled lands far below \
+             either cohort: pooled {pooled}, young {young}, old {old}"
+        );
+
+        // Contrast: genuine heating of the old cohort, same mean speed.
+        // Here the split must report the old cohort itself as hot, so a
+        // low pooled number cannot be blamed on generational offset.
+        let mut heated = Galaxy::new(size, 0);
+        for k in 0..N {
+            let angle = sample(k);
+            let r = radius(k);
+            heated.spawn_star(
+                center + r * angle.cos(),
+                center + r * angle.sin(),
+                -angle.sin() * 2.0,
+                angle.cos() * 2.0,
+                10.0,
+            );
+            let last = heated.stars.len() - 1;
+            heated.stars.age[last] = 10.0;
+        }
+        for k in 0..N {
+            let angle = sample(k);
+            let r = radius(k);
+            // Same speed, direction decorrelated from position: hot.
+            let vdir = sample((k * 37) % N);
+            heated.spawn_star(
+                center + r * angle.cos(),
+                center + r * angle.sin(),
+                vdir.cos() * 2.0,
+                vdir.sin() * 2.0,
+                10.0,
+            );
+            let last = heated.stars.len() - 1;
+            heated.stars.age[last] = 800.0;
+        }
+
+        let heated_young = heated.rotation_dispersion_ratio_for_age(0.0, 150.0);
+        let heated_old = heated.rotation_dispersion_ratio_for_age(500.0, f32::INFINITY);
+        assert!(
+            heated_young > 1.5,
+            "the young cohort is untouched and must still read cold, got \
+             {heated_young}"
+        );
+        assert!(
+            heated_old < 0.7,
+            "a genuinely heated cohort must read hot on its own, got \
+             {heated_old}"
+        );
+        // The discrimination, stated as one comparison: offset leaves the
+        // old cohort cold, heating does not, and pooled cannot tell.
+        assert!(
+            old > heated_old * 3.0,
+            "the split must separate an offset old cohort from a heated \
+             one: offset {old} against heated {heated_old}"
+        );
+    }
+
+    /// Lay a known field: inward magnitude `base` everywhere, plus an m=2
+    /// azimuthal perturbation of relative size `wobble`.
+    fn lay_test_field(g: &mut Galaxy, base: f32, wobble: f32) {
+        let res = Galaxy::FIELD_RES;
+        let cell = g.size as f32 / res as f32;
+        let center = g.size as f32 * 0.5;
+        for fy in 0..res {
+            for fx in 0..res {
+                let wx = (fx as f32 + 0.5) * cell - center;
+                let wy = (fy as f32 + 0.5) * cell - center;
+                let r = (wx * wx + wy * wy).sqrt();
+                if r < 1e-3 {
+                    g.field_ax[fy * res + fx] = 0.0;
+                    g.field_ay[fy * res + fx] = 0.0;
+                    continue;
+                }
+                let inward = base * (1.0 + wobble * (2.0 * wy.atan2(wx)).cos());
+                g.field_ax[fy * res + fx] = -inward * wx / r;
+                g.field_ay[fy * res + fx] = -inward * wy / r;
+            }
+        }
+    }
+
+    /// Sample the inward acceleration at `samples` angles on one radius.
+    fn inward_ring(g: &Galaxy, radius: f32, samples: usize) -> Vec<f32> {
+        let center = g.size as f32 * 0.5;
+        (0..samples)
+            .map(|k| {
+                let angle = std::f32::consts::TAU * k as f32 / samples as f32;
+                let (rx, ry) = (angle.cos(), angle.sin());
+                let (ax, ay) = g.sample_field(center + rx * radius, center + ry * radius);
+                -(ax * rx + ay * ry)
+            })
+            .collect()
+    }
+
+    /// The axisymmetric-field ablation (galaxy-gen#66) has to remove
+    /// azimuthal structure *without* changing the rotation curve, or a run
+    /// under it measures a different galaxy rather than the same galaxy
+    /// with its arms removed. Checked against a field whose answer is
+    /// known by construction, for the reason recorded on the vsig
+    /// calibration above.
+    #[test]
+    fn test_axisymmetrizing_the_field_keeps_the_rotation_curve_and_drops_the_arms() {
+        let size = 200u16;
+        let mut g = Galaxy::new(size, 0);
+        let radius = size as f32 * 0.25;
+        lay_test_field(&mut g, 0.02, 0.5);
+
+        let before = inward_ring(&g, radius, 32);
+        let spread_before = before.iter().cloned().fold(f32::MIN, f32::max)
+            - before.iter().cloned().fold(f32::MAX, f32::min);
+        let mean_before = before.iter().sum::<f32>() / before.len() as f32;
+
+        g.axisymmetrize_star_field();
+
+        let after = inward_ring(&g, radius, 32);
+        let spread_after = after.iter().cloned().fold(f32::MIN, f32::max)
+            - after.iter().cloned().fold(f32::MAX, f32::min);
+        let mean_after = after.iter().sum::<f32>() / after.len() as f32;
+
+        assert!(
+            spread_before > 0.5 * mean_before,
+            "the m=2 test field must actually vary with angle: spread \
+             {spread_before} against mean {mean_before}"
+        );
+        assert!(
+            spread_after < 0.05 * mean_before,
+            "after axisymmetrizing, one radius must read the same at every \
+             angle: spread {spread_after} against mean {mean_before}"
+        );
+        assert!(
+            (mean_after - mean_before).abs() < 0.05 * mean_before,
+            "the radial profile, and so the circular speed, must survive: \
+             {mean_before} before against {mean_after} after"
+        );
+    }
+
+    /// The smoothed-field ablation must remove cell-scale roughness while
+    /// leaving the field's overall strength alone - otherwise it doubles
+    /// as a rotation-curve change and its result cannot be attributed.
+    #[test]
+    fn test_smoothing_the_field_removes_roughness_without_moving_the_mean() {
+        let size = 200u16;
+        let res = Galaxy::FIELD_RES;
+        let mut g = Galaxy::new(size, 0);
+        lay_test_field(&mut g, 0.02, 0.0);
+        // Cell-scale checkerboard on top of the smooth radial field: the
+        // stand-in for clump roughness, and zero-mean by construction.
+        for fy in 0..res {
+            for fx in 0..res {
+                let sign = if (fx + fy) % 2 == 0 { 1.0 } else { -1.0 };
+                g.field_ax[fy * res + fx] += sign * 0.01;
+                g.field_ay[fy * res + fx] += sign * 0.01;
+            }
+        }
+        let mean_of = |field: &[f32]| field.iter().sum::<f32>() / field.len() as f32;
+        let roughness_of = |field: &[f32]| {
+            let mut total = 0.0f32;
+            for fy in 0..res {
+                for fx in 0..res - 1 {
+                    total += (field[fy * res + fx + 1] - field[fy * res + fx]).abs();
+                }
+            }
+            total
+        };
+        let mean_before = mean_of(&g.field_ax);
+        let roughness_before = roughness_of(&g.field_ax);
+
+        g.smooth_star_field();
+        g.smooth_star_field();
+
+        let roughness_after = roughness_of(&g.field_ax);
+        let mean_after = mean_of(&g.field_ax);
+        assert!(
+            roughness_after < 0.2 * roughness_before,
+            "two box passes must flatten the checkerboard: {roughness_before} \
+             before against {roughness_after} after"
+        );
+        assert!(
+            (mean_after - mean_before).abs() < 1e-4,
+            "smoothing must not move the field's mean: {mean_before} before \
+             against {mean_after} after"
         );
     }
 

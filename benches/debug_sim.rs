@@ -49,6 +49,13 @@ struct Metrics {
     /// v_rot / sigma over the disk - separates a rotating disk (>1.5)
     /// from a pressure-supported mush (<0.7).
     v_over_sigma: f64,
+    /// The same ratio for three age cohorts, in sim-time units. Pooled
+    /// `vsig` cannot tell post-birth heating from generations piling up
+    /// on different birth orbits; comparing cohorts can. Flat across the
+    /// three means nothing is heating stars and the mush is generational.
+    v_over_sigma_young: f64,
+    v_over_sigma_mid: f64,
+    v_over_sigma_old: f64,
     /// The same ratio a newborn is handed at 0.5 disk_r. Separates
     /// "born wrong" from "drifted wrong".
     birth_circ_ratio: f64,
@@ -175,6 +182,9 @@ fn metrics(g: &Galaxy, size: u16) -> Metrics {
         star_circ_ratio: g.star_circular_ratio() as f64,
         arm_affinity: g.stellar_arm_affinity() as f64,
         v_over_sigma: g.rotation_dispersion_ratio() as f64,
+        v_over_sigma_young: g.rotation_dispersion_ratio_for_age(0.0, 150.0) as f64,
+        v_over_sigma_mid: g.rotation_dispersion_ratio_for_age(150.0, 500.0) as f64,
+        v_over_sigma_old: g.rotation_dispersion_ratio_for_age(500.0, f32::INFINITY) as f64,
         birth_circ_ratio: g.birth_circular_ratio(0.5) as f64,
         spheroid_concentration: g.spheroid_concentration() as f64,
         spheroid_smoothness: g.spheroid_smoothness() as f64,
@@ -206,6 +216,13 @@ fn main() {
         .and_then(|a| a.parse().ok())
         .unwrap_or(12345);
     let scenario_filter: Option<usize> = std::env::args().nth(5).and_then(|a| a.parse().ok());
+    // Print the resolved #66 ablation switches, so a captured run always
+    // records the physics it was produced under rather than leaving that
+    // to the shell history.
+    println!(
+        "ablation: {}",
+        galaxy_gen_backend::ablation::ablation().describe()
+    );
     let checkpoints = [
         0usize, 250, 500, 900, 1000, 1100, 1200, 1500, 2000, 2300, 2400, 2500, 2600, 2700, 3000,
         4000, 5000,
@@ -247,7 +264,7 @@ fn main() {
                 }
                 let m = metrics(&g, size);
                 println!(
-                    "t={cp:5}  nz={:5}  gas={:6}  vt={:+.3}  rot={:+.2}  r_pk={:.2}  ctr={:.2}  m2={:.2}  spi={:.2}  cov={:.2}  ring={:.2}  hollow={:.2}  rcov={:.2}  rw={:.2}  svt={:+.3}  sctr={:.2}  arm={:.2}  vsig={:.2}  scirc={:.2}  bcirc={:.2}  econ={:.2}  esm={:.2}  axis={:.2}  ext={:.2}  erot={:.2}  bh={:.2}  q={:.2}  qep={}  qrate={:.5}  stars={:5}  mixed={:5}  ev(col/b/sn/sh/d/cap/nsm/grb/pn/ia/q)={}/{}/{}/{}/{}/{}/{}/{}/{}/{}/{}",
+                    "t={cp:5}  nz={:5}  gas={:6}  vt={:+.3}  rot={:+.2}  r_pk={:.2}  ctr={:.2}  m2={:.2}  spi={:.2}  cov={:.2}  ring={:.2}  hollow={:.2}  rcov={:.2}  rw={:.2}  svt={:+.3}  sctr={:.2}  arm={:.2}  vsig={:.2}  vsy={:.2}  vsm={:.2}  vso={:.2}  scirc={:.2}  bcirc={:.2}  econ={:.2}  esm={:.2}  axis={:.2}  ext={:.2}  erot={:.2}  bh={:.2}  q={:.2}  qep={}  qrate={:.5}  stars={:5}  mixed={:5}  ev(col/b/sn/sh/d/cap/nsm/grb/pn/ia/q)={}/{}/{}/{}/{}/{}/{}/{}/{}/{}/{}",
                     m.nonzero,
                     m.total,
                     m.vt,
@@ -265,6 +282,9 @@ fn main() {
                     m.star_central,
                     m.arm_affinity,
                     m.v_over_sigma,
+                    m.v_over_sigma_young,
+                    m.v_over_sigma_mid,
+                    m.v_over_sigma_old,
                     m.star_circ_ratio,
                     m.birth_circ_ratio,
                     m.spheroid_concentration,

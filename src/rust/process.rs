@@ -281,9 +281,12 @@ static REGISTRY: &[ProcessDescriptor] = &[
     },
 ];
 
-/// True when `p` is due at `tick`.
+/// True when `p` is due at `tick`. The cadence goes through
+/// `ablation::cadence_for`, which returns the declared value untouched
+/// unless a native ablation run has overridden it. See galaxy-gen#66.
 pub fn is_due(p: &ProcessDescriptor, tick: u64) -> bool {
-    tick % p.cadence == p.phase_offset % p.cadence
+    let cadence = crate::ablation::cadence_for(p.name, p.cadence);
+    tick % cadence == p.phase_offset % cadence
 }
 
 #[cfg(test)]

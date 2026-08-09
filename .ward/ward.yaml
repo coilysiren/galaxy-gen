@@ -32,6 +32,9 @@ commands:
   debug-sim:
     run: bash scripts/ward-command.sh debug-sim
     description: Run the native seeded physics probe with ticks, size, seed-count, and start-seed arguments.
+  ablation-sweep:
+    run: bash scripts/ablation-sweep.sh
+    description: Run the stellar-heating ablation matrix (galaxy-gen#66) and print vsig per configuration.
   build-js-prod:
     run: bash scripts/ward-command.sh build-js-prod
     description: Production webpack build.
