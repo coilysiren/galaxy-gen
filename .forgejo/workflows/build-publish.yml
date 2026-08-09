@@ -1,3 +1,12 @@
+# Gate and publish on main. The test job runs in the promoted dev-base image,
+# the same builder the publish job feeds into `docker build`, so the gate and
+# the shipped artifact share one toolchain (agentic-os#986, galaxy-gen#74).
+#
+# The note that used to sit on that job said a `container:` override would cost
+# us node, which was true of `rust:*` images. dev-base carries rust, node,
+# wasm-pack, and a pinned binaryen together, so the tradeoff is gone and the
+# typecheck can join the Rust gate instead of living only on the GitHub mirror.
+
 name: build-publish
 
 on:
@@ -8,13 +17,6 @@ on:
 jobs:
   test:
     runs-on: docker
-    # Runs in the promoted dev-base image, the same builder the publish job
-    # below feeds into `docker build`, so the gate and the shipped artifact
-    # share one toolchain (agentic-os#986, galaxy-gen#74). The previous note
-    # here said a `container:` override would cost us node, which was true of
-    # `rust:*` images. dev-base carries rust, node, wasm-pack, and a pinned
-    # binaryen together, so the tradeoff is gone and the typecheck can join
-    # the Rust gate instead of living only on the GitHub mirror.
     container: forgejo.coilysiren.me/coilyco-flight-deck/agentic-os:release
     steps:
       - uses: actions/checkout@v4
