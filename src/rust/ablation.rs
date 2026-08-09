@@ -27,7 +27,7 @@
 use std::sync::OnceLock;
 
 /// Resolved ablation configuration for this process.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub struct Ablation {
     /// Override the `gravity_field` process cadence, normally 4 ticks.
     /// Stars integrate against a field up to three ticks stale; `1` makes
@@ -53,6 +53,19 @@ pub struct Ablation {
     /// Zero the internal velocity newborns receive about their
     /// association's center of mass, so the population is born cold.
     pub no_birth_dispersion: bool,
+    /// Clamp a newborn association's orbital speed to this multiple of the
+    /// local circular speed, instead of to the absolute
+    /// `ASSOCIATION_ORBIT_SPEED_CAP`. 1.06 keeps newborns just above
+    /// circular, well under the ~1.41 escape ratio.
+    ///
+    /// This one is not a force ablation. It was built and reverted on #66
+    /// before `rotation_dispersion_ratio` existed, and judged against
+    /// `star_circular_ratio`, which was then retracted as unable to tell a
+    /// circular orbit from an eccentric one at pericenter. So its effect
+    /// on the disk has never actually been measured. A switch is the
+    /// cheapest way to measure it without re-landing a change that breaks
+    /// the elliptical scenario.
+    pub birth_orbit_ratio_cap: Option<f32>,
 }
 
 impl Ablation {
@@ -85,6 +98,9 @@ impl Ablation {
         }
         if self.no_birth_dispersion {
             parts.push("no-birth-dispersion".to_string());
+        }
+        if let Some(cap) = self.birth_orbit_ratio_cap {
+            parts.push(format!("birth-orbit-ratio-cap={cap}"));
         }
         parts.join(",")
     }
@@ -122,6 +138,7 @@ fn load() -> Ablation {
         no_star_self_gravity: flag_env("GALAXY_ABL_NO_STAR_SELF_GRAVITY"),
         no_association_binding: flag_env("GALAXY_ABL_NO_ASSOCIATION_BINDING"),
         no_birth_dispersion: flag_env("GALAXY_ABL_NO_BIRTH_DISPERSION"),
+        birth_orbit_ratio_cap: parse_env("GALAXY_ABL_BIRTH_ORBIT_RATIO_CAP"),
     }
 }
 

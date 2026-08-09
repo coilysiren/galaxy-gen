@@ -1905,8 +1905,15 @@ impl Galaxy {
         let background_support = self.association_background_speed(r);
         // Mirrors birth: gas tangential is capped at BIRTH_GAS_VEL_CAP,
         // so the worst case a newborn can inherit is that cap.
-        let target = (Galaxy::BIRTH_GAS_VEL_CAP + stellar_support + background_support)
+        let mut target = (Galaxy::BIRTH_GAS_VEL_CAP + stellar_support + background_support)
             .min(Galaxy::ASSOCIATION_ORBIT_SPEED_CAP);
+        // The birth site's ablation clamp has to be mirrored here too. On
+        // #66 the previous sweep reported an uncapped ratio while births
+        // were actually capped, and the retraction that followed cost more
+        // than this branch does. Probe and call site move together.
+        if let Some(ratio) = crate::ablation::ablation().birth_orbit_ratio_cap {
+            target = target.min(v_circ * ratio);
+        }
         target / v_circ
     }
 
@@ -4095,8 +4102,16 @@ impl Galaxy {
         // spheroid is currently produced by those over-fast births. Do
         // not "fix" this in isolation; #66 has the numbers.
         let smooth_support = stellar_support + background_support;
-        let target_tangential =
+        let mut target_tangential =
             (gas_tangential.max(0.0) + smooth_support).min(Galaxy::ASSOCIATION_ORBIT_SPEED_CAP);
+        // #66 ablation: clamp to a multiple of the local circular speed
+        // rather than to an absolute speed. Off by default.
+        if let Some(ratio) = crate::ablation::ablation().birth_orbit_ratio_cap {
+            let circular = self.association_circular_speed(galactic_r);
+            if circular > 1e-3 {
+                target_tangential = target_tangential.min(circular * ratio);
+            }
+        }
         let orbital_radial = gas_radial * Galaxy::ASSOCIATION_RADIAL_INHERITANCE;
         let orbital_tangential = target_tangential;
         let orbital_vx = radial_x * orbital_radial + tangent_x * orbital_tangential;

@@ -29,6 +29,7 @@ CONFIGS=(
   "no-star-self-gravity:GALAXY_ABL_NO_STAR_SELF_GRAVITY=1"
   "no-association-binding:GALAXY_ABL_NO_ASSOCIATION_BINDING=1"
   "no-birth-dispersion:GALAXY_ABL_NO_BIRTH_DISPERSION=1"
+  "birth-orbit-ratio-cap:GALAXY_ABL_BIRTH_ORBIT_RATIO_CAP=1.06"
 )
 
 # Build once so the configurations start together instead of racing cargo.
