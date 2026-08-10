@@ -1,22 +1,3 @@
-# Pull-request gate, run inside the promoted dev-base image through this
-# repo's own ward verbs, so a green PR means "this builds in the environment
-# that ships it" rather than "it passed on some other runner", matching the aos
-# CI-in-dev-base convention (agentic-os#328).
-#
-# Main is gated by build-publish.yml, which runs the same verbs in the same
-# image before it publishes. This workflow deliberately does not listen on
-# push, so the two do not duplicate each other.
-#
-# The image supplies rust, node, wasm-pack, and a pinned binaryen
-# (agentic-os#986). Nothing here installs a toolchain.
-#
-# Browser e2e is NOT here. It stays on GitHub PR CI because the in-cluster
-# runner cannot reach the Playwright browser CDN, so `playwright install`
-# cannot fetch chromium on this side at all. dev-base carrying no browser is
-# the second half of that problem and the easier half to fix. Until the egress
-# side is solved, the bundle e2e exercises is still built by GitHub's
-# toolchain rather than this one (galaxy-gen#74).
-
 name: ci
 
 on:
