@@ -23,7 +23,6 @@ excludes = [
   ".github/workflows/action.yml",
   ".github/workflows/trufflehog.yml",
   ".pre-commit-config.yaml",
-  ".ward/ward.yaml",
   "src/js/lib/application.tsx",
   "src/js/lib/dataviz.tsx",
   "src/js/lib/galaxy.ts",

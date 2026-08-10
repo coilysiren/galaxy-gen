@@ -39,9 +39,11 @@ case "${1:-}" in
     npm install --package-lock-only
     ;;
   ci-setup)
-    # Lockfile-exact node_modules. CI needs no `install`: the toolchain
-    # arrives with the dev-base image.
+    # Lockfile-exact deps plus the wasm package, which check-js needs for the
+    # galaxy_gen_backend types. CI installs no toolchain: dev-base supplies it.
     npm ci
+    build_wasm
+    npm install ./pkg --no-save
     ;;
   test-rust)
     test_rust
