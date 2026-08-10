@@ -1,9 +1,6 @@
-# Per-repo command allowlist for galaxy-gen. Ward is the canonical entry
-# point for dev verbs here. Multi-step workflows live in one focused helper.
-#
-# Names follow ward's [a-z0-9-] rule. Argv validation rejects shell
-# metacharacters at invocation time, so flags forward verbatim through
-# ward's argv handling.
+# Per-repo command allowlist for galaxy-gen. Ward is the canonical entry point
+# for dev verbs here. See docs/ward-config.md for the naming, capabilities, and
+# catalog rules this file follows.
 
 name: coilyco-gaming/galaxy-gen
 
@@ -14,6 +11,9 @@ commands:
   deps-sync:
     run: bash scripts/ward-command.sh deps-sync
     description: Refresh package-lock.json after an intentional package.json change.
+  ci-setup:
+    run: bash scripts/ward-command.sh ci-setup
+    description: "CI dependency setup: lockfile-exact npm ci plus the wasm package. Takes Rust, Node, wasm-pack, and binaryen from the dev-base image instead of from install."
   test-rust:
     run: bash scripts/ward-command.sh test-rust
     description: cargo check + cargo test.
@@ -87,14 +87,6 @@ commands:
     run: pre-commit run --all-files
     description: Run all pre-commit hooks against every file.
 
-# Provider skills this leaf pulls into its git-excluded .agents/skills/ for
-# confined harnesses (OpenClaw on Qwen). Resolved by scripts/pull-capabilities.py
-# and enforced by scripts/validate-harness-skills.py. Spec: the capability_pull
-# block of agentic-os-kai .agents/skills/categories.yaml. Keep this list minimal:
-# every entry widens what a 25k-budget Qwen session can see. galaxy-gen is
-# Rust -> WASM core + React/D3/TS browser surface, so exactly those two languages.
-# Infra (k8s / terraform) is deliberately omitted - Qwen escalates infra, it does
-# not run it (see kai-qwen-scope).
 capabilities:
   - agentic-os/coding-rust
   - agentic-os/coding-javascript-react
@@ -102,8 +94,6 @@ capabilities:
 agent:
   workflow: merge-remote-main
 
-# Catalog metadata for the cross-repo knowledge graph.
-# Schema: agentic-os-kai#420 (tracker).
 catalog:
   kind: Component
   type: website

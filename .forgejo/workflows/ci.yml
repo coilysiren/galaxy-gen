@@ -1,0 +1,15 @@
+name: ci
+
+on:
+  pull_request:
+
+jobs:
+  gate:
+    runs-on: docker
+    container: forgejo.coilysiren.me/coilyco-flight-deck/agentic-os:release
+    steps:
+      - uses: actions/checkout@v6
+      - run: ward exec ci-setup
+      - run: ward exec lint-rust
+      - run: ward exec test-rust
+      - run: ward exec check-js
