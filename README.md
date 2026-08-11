@@ -1,6 +1,6 @@
 # galaxy-gen
 
-[![Galaxy Generator interface showing an irregular galaxy evolving into a spiral](docs/project-galaxy-gen.gif)](https://galaxy-gen.coilysiren.me)
+[![Galaxy Generator interface showing an irregular galaxy evolving into a spiral](docs/galaxy.gif)](https://galaxy-gen.coilysiren.me)
 
 `{ rust → wasm → js }` living-galaxy simulation. Gravitational physics,
 star birth and death, planetary nebulae, Type Ia and core-collapse supernovae,
