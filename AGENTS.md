@@ -21,6 +21,8 @@ Load-bearing files you will touch most often:
 - `src/js/lib/starfield.ts` - seeded deep-space backdrop, built from the renderer's own sprites; see `docs/starfield.md`.
 - `src/js/lib/styles.css` - custom styles (dark theme, galaxy-gen palette).
 - `e2e/galaxy.spec.ts` - Playwright end-to-end tests.
+- `e2e/visual-capture.spec.ts` - before-and-after visual harness; see
+  [docs/visual-capture.md](docs/visual-capture.md).
 - `playwright.config.ts` - Playwright config; auto-boots webpack-dev-server.
 - `webpack.config.js` - dev server (HMR + live-reload on `pkg/` changes).
 
@@ -48,6 +50,11 @@ Raw commands: `cargo test`, `cargo clippy -- -D warnings`, `cargo fmt`, `wasm-pa
 - React state is plain `useState` - no state library.
 - Use `data-testid` on any UI element that an E2E test asserts against.
 - Commits that change the WASM surface should mention it in the subject line (e.g. `wasm: expose mass() typed array`) so `git log --grep=wasm` is useful.
+
+## Scope-shape signals
+
+README lists nine inspirational sibling projects. Consult it when evaluating
+scope adds. `docs/perf-rewrite.md` is load-bearing for the inner loop.
 
 ## Key References
 

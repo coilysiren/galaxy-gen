@@ -1,17 +1,17 @@
 # galaxy-gen feature inventory
 
 Coarse inventory of what ships. Pairs with `README.md` (pitch) and
-`development.md` (architecture). Each entry links its walkthrough.
+`development.md` (architecture).
 
-## Simulation core (Rust, `src/rust/galaxy.rs`)
+## Simulation core (`src/rust/galaxy.rs`)
 
 - Cell-grid N-body sim on a flat `size×size` Struct-of-Arrays grid. Newtonian
-  O(N²/2) symmetric pair sweep, `inv_r3` lookup table, no `sqrt` in the hot path.
+  O(N²/2) pair sweep, `inv_r3` lookup table, no `sqrt` in the hot path.
 - Sub-grid fractional offsets, per-tick step cap, softening length, and a
   scratch-buffer mass merge on collision.
 - Immutable-style API: `seed()` and `tick()` return a new `Galaxy`.
-  `from_state(...)` rebuilds across the worker boundary and
-  `tick_with_accel(...)` accepts an external force field.
+  `from_state(...)` rebuilds across the worker boundary, and
+  `tick_with_accel(...)` takes an external force field.
 - Reproducible ChaCha `StdRng` seeding, so the same `(additional, seed)` gives
   byte-identical galaxies. Zero-copy typed-array exports.
   See [galaxy-rust.md](galaxy-rust.md).
@@ -21,10 +21,10 @@ Coarse inventory of what ships. Pairs with `README.md` (pitch) and
   [spiral-density-waves.md](spiral-density-waves.md), and
   [elliptical-relaxation.md](elliptical-relaxation.md).
 
-## Living-galaxy loop (`src/rust/process.rs`, `src/rust/events.rs`, `src/rust/stars.rs`)
+## Living-galaxy loop (`process.rs`, `events.rs`, `stars.rs`)
 
 Static process registry with declared reads and writes, per-process cadence, a
-deterministic event queue, and per-(process, tick) RNG streams derived from the
+deterministic event queue, and per-(process, tick) RNG streams from the
 `?seed=` master. See [processes-events.md](processes-events.md).
 
 - Closed galactic fountain and a conserved metal ledger across gas, stars,
@@ -32,29 +32,27 @@ deterministic event queue, and per-(process, tick) RNG streams derived from the
 - Bounded stellar lifecycles through red giants, white dwarfs, Type Ia and
   core-collapse supernovae, neutron-star mergers, and a phase-mixed halo.
   See [stellar-evolution.md](stellar-evolution.md).
-- Bounded resolved star population. Faint unbound field stars retire into
+- Bounded resolved star population: faint unbound field stars retire into
   diffuse light below a per-scenario luminosity floor, so the point count
-  settles instead of growing for as long as a session runs. The elliptical
-  opts out: its spheroid is made of exactly that population.
+  settles rather than growing all session. The elliptical opts out.
 - Star formation into temporary bound associations that tidally release into
   streams. See [stellar-associations.md](stellar-associations.md).
-- Central black hole with nuclear viscosity, slow accretion, and brief bipolar
+- Central black hole with nuclear viscosity, slow accretion, and bipolar
   quasar episodes. See [quasar-feedback.md](quasar-feedback.md).
 
 ## Frontend
 
 - `Frontend` wraps the WASM `Galaxy` behind a stable JS surface with a
   runtime-selected `"cpu" | "webgpu"` backend (`src/js/lib/galaxy.ts`).
-- Physics runs off the main thread with zero-copy state transfer and a 20/s tick
-  cap. See [tick-worker.md](tick-worker.md).
-- WGSL direct-sum force kernel with feature detection and clean CPU fallback
+- Physics off the main thread, zero-copy state transfer, 20/s tick cap.
+  See [tick-worker.md](tick-worker.md).
+- WGSL direct-sum force kernel with feature detection and CPU fallback
   (`src/js/lib/webgpu.ts`).
 - Controls, URL round-trip, and the chrome toggle.
   See [ui-controls.md](ui-controls.md).
-- Layered canvas renderer with a gravitational-lens post-process.
-  See [rendering.md](rendering.md), [starfield.md](starfield.md),
-  [co-rotating-frame.md](co-rotating-frame.md), and
-  [perf-rewrite.md](perf-rewrite.md).
+- Layered canvas renderer with a gravitational-lens post-process. See
+  [rendering.md](rendering.md), [starfield.md](starfield.md),
+  [co-rotating-frame.md](co-rotating-frame.md), [perf-rewrite.md](perf-rewrite.md).
 - Client-side GIF and MP4 capture of a reproducible run.
   See [recording.md](recording.md).
 
@@ -63,23 +61,14 @@ deterministic event queue, and per-(process, tick) RNG streams derived from the
 - `wasm-pack build` outputs `pkg/`. Webpack 5, Babel, and Tailwind v4 build the
   client. HMR and dual auto-reload via `cargo watch` and `webpack-dev-server`.
 - ESLint, Prettier, TS noEmit, `clippy -D warnings`, `cargo fmt`, and the Ward
-  `debug-sim` seeded structure probe.
+  `debug-sim` structure probe.
 - Ward `ablation-sweep`: switch one candidate force off at a time and compare
-  the stellar-disk metrics. Switches are read by the kernel and echoed into
-  each run. Most are off by default; the two that shipped
-  (`RESOLVED_LUMINOSITY_FLOOR`, `STAR_WAVE_COUPLING`) keep a switch as an
-  override so they can be re-measured. The browser build reads no
-  environment and always runs the shipped physics.
+  the stellar-disk metrics. The browser build always runs the shipped physics.
   See [ablation.md](ablation.md).
-- Playwright E2E plus the `perf-profile` and `test-perf` GPU specs.
+- Playwright E2E plus `perf-profile` and `test-perf` GPU specs.
 - Served on k3s at `galaxy-gen.coilysiren.me` by unprivileged nginx. Forgejo CI
-  tests the Rust core, then the trusted deploy lane publishes a sha-tagged image
-  the deploy repo pulls read-only.
-
-## Known scope-shape signals
-
-README lists nine inspirational sibling projects. Consult it when evaluating
-scope adds. `docs/perf-rewrite.md` is load-bearing for the inner loop.
+  tests the Rust core, then the trusted deploy lane publishes a sha-tagged
+  image the deploy repo pulls read-only.
 
 ## See also
 

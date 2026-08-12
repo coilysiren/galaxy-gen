@@ -28,7 +28,7 @@ repos:
 
   # BEGIN managed by agentic-os/scripts/apply-agentic-os-hooks.py
   - repo: https://forgejo.coilysiren.me/coilyco-flight-deck/agentic-os
-    rev: aos-precommit-v0.15.0
+    rev: aos-precommit-v0.18.0
     hooks:
       - id: catalog-doc-size
       - id: catalog-trifecta
@@ -64,6 +64,9 @@ repos:
     hooks:
       # Forgejo workflows use GitHub Actions syntax; no exclude split is needed yet.
       - id: actionlint
+        args:
+          - -config-file
+          - .github/actionlint.yaml
         files: ^\.forgejo/workflows/.*\.(ya?ml)$
   - repo: https://code.forgejo.org/forgejo/runner
     rev: v12.10.1

@@ -41,10 +41,8 @@ struct Metrics {
     /// Fraction of stars inside 0.3 disk_r - the elliptical is mostly
     /// a star glow, so its concentration lives here, not in the gas.
     star_central: f64,
-    /// The same fraction for young stars only. Young stars have not had
-    /// time to migrate, so this is close to the radial shape of star
-    /// formation. Compare against star_central: agreement means the
-    /// concentration is where stars are born, not somewhere they drift.
+    /// The same fraction for young stars only, which have not had time to
+    /// migrate. Agreement with star_central means births set the concentration.
     star_central_young: f64,
     /// Mean disk-star tangential speed over the circular speed of their
     /// field. 1.0 is balanced, above 1.0 carries excess angular momentum.
@@ -54,10 +52,8 @@ struct Metrics {
     /// v_rot / sigma over the disk - separates a rotating disk (>1.5)
     /// from a pressure-supported mush (<0.7).
     v_over_sigma: f64,
-    /// The same ratio for three age cohorts, in sim-time units. Pooled
-    /// `vsig` cannot tell post-birth heating from generations piling up
-    /// on different birth orbits; comparing cohorts can. Flat across the
-    /// three means nothing is heating stars and the mush is generational.
+    /// The same ratio for three age cohorts, in sim-time units. Pooled `vsig`
+    /// cannot tell heating from generational offset. See docs/ablation.md.
     v_over_sigma_young: f64,
     v_over_sigma_mid: f64,
     v_over_sigma_old: f64,
@@ -222,9 +218,8 @@ fn main() {
         .and_then(|a| a.parse().ok())
         .unwrap_or(12345);
     let scenario_filter: Option<usize> = std::env::args().nth(5).and_then(|a| a.parse().ok());
-    // Print the resolved #66 ablation switches, so a captured run always
-    // records the physics it was produced under rather than leaving that
-    // to the shell history.
+    // Print the resolved #66 ablation switches, so a captured run records the
+    // physics it was produced under rather than leaving it to shell history.
     println!(
         "ablation: {}",
         galaxy_gen_backend::ablation::ablation().describe()

@@ -23,100 +23,49 @@
 //! `STAR_WAVE_COUPLING` is 0.0 and supernovae kick gas, not stars. The
 //! switches below cover both live paths and the birth velocities that set
 //! the population's initial dispersion.
+//!
+//! Per-switch reasoning lives in docs/ablation-rationale.md.
 
 use std::sync::OnceLock;
 
 /// Resolved ablation configuration for this process.
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub struct Ablation {
-    /// Override the `gravity_field` process cadence, normally 4 ticks.
-    /// Stars integrate against a field up to three ticks stale; `1` makes
-    /// it fresh every tick. Tests whether the staleness is pumping energy.
+    /// Override the `gravity_field` cadence, normally 4 ticks. `1` rebuilds the
+    /// field every tick, testing whether staleness pumps energy.
     pub field_cadence: Option<u64>,
-    /// 3x3 box-blur passes over the coarse star field after each rebuild.
-    /// Removes small-scale clumpiness while keeping the large-scale
-    /// pattern and the field's overall magnitude. Tests transient clump
-    /// scattering on its own.
+    /// 3x3 box-blur passes over the coarse star field after each rebuild, cutting
+    /// small-scale clumpiness while keeping the large-scale pattern.
     pub field_smooth_passes: u32,
-    /// Replace the coarse star field with its azimuthal average, so stars
-    /// orbit a perfectly axisymmetric potential. Removes clumps *and* the
-    /// spiral pattern - the upper bound on how much of the heating comes
-    /// from non-axisymmetric structure of any kind.
+    /// Replace the coarse star field with its azimuthal average. Removes clumps
+    /// and the spiral pattern both, bounding non-axisymmetric heating.
     pub axisymmetric_field: bool,
-    /// Leave stars out of the quadtree the star field is built from, so
-    /// stars stop scattering off each other's associations. Isolates
+    /// Leave stars out of the quadtree the star field is built from, isolating
     /// stellar self-gravity from gas clumpiness.
     pub no_star_self_gravity: bool,
     /// Zero the association binding acceleration. Associations still form,
     /// release, and stream; they just stop pulling on their members.
     pub no_association_binding: bool,
-    /// Zero the internal velocity newborns receive about their
-    /// association's center of mass, so the population is born cold.
+    /// Zero the internal velocity newborns receive about their association's
+    /// center of mass, so the population is born cold.
     pub no_birth_dispersion: bool,
-    /// Clamp a newborn association's orbital speed to this multiple of the
-    /// local circular speed, instead of to the absolute
-    /// `ASSOCIATION_ORBIT_SPEED_CAP`. 1.06 keeps newborns just above
-    /// circular, well under the ~1.41 escape ratio.
-    ///
-    /// This one is not a force ablation. It was built and reverted on #66
-    /// before `rotation_dispersion_ratio` existed, and judged against
-    /// `star_circular_ratio`, which was then retracted as unable to tell a
-    /// circular orbit from an eccentric one at pericenter. So its effect
-    /// on the disk has never actually been measured. A switch is the
-    /// cheapest way to measure it without re-landing a change that breaks
-    /// the elliptical scenario.
+    /// Clamp a newborn association's orbital speed to this multiple of local
+    /// circular speed instead of `ASSOCIATION_ORBIT_SPEED_CAP`. 1.06 is just above.
     pub birth_orbit_ratio_cap: Option<f32>,
-    /// Override `STAR_WAVE_COUPLING`, normally 0.0: the fraction of the
-    /// analytic spiral and ring density-wave force that also acts on
-    /// stars.
-    ///
-    /// This is the other half of the pair the ablation matrix pointed at.
-    /// An axisymmetric field holds the disk but has no arms in it, so the
-    /// question is whether a coherent analytic wave can put the arms back
-    /// without heating the way a clump-dominated 64-grid field does. A
-    /// density wave stars pass through should not scatter them.
+    /// Override `STAR_WAVE_COUPLING`, normally 0.0: the fraction of the analytic
+    /// spiral and ring density-wave force that also acts on stars.
     pub star_wave_coupling: Option<f32>,
-    /// Bypass the `COLLAPSE_RADIATION_RESIST` gate in the collapse watch,
-    /// so a dense cell can ignite regardless of how irradiated it is.
-    ///
-    /// Not a heating candidate. This one tests the star-formation drop
-    /// that arrives with the birth ratio cap: capped stars stay in the
-    /// disk instead of being flung into the halo, and the suspicion is
-    /// that their radiation then suppresses the collapses that would have
-    /// made the next generation. If collapse counts recover with the gate
-    /// off, that loop is the mechanism.
+    /// Bypass the `COLLAPSE_RADIATION_RESIST` gate in the collapse watch, so a
+    /// dense cell ignites however irradiated it is.
     pub no_collapse_radiation_resist: bool,
-    /// Isotropic random velocity given to every newborn, as a multiple of
-    /// the local circular speed, on top of the association's own internal
-    /// motion. Momentum-neutral within the birth batch.
-    ///
-    /// A pressure-supported spheroid is *defined* by having dispersion
-    /// comparable to its rotation. The elliptical scenario currently gets
-    /// that for free from the birth-speed bug: stars launched at 2-3x
-    /// circular scatter into a spheroid. Cap the births and it collapses
-    /// into a small rotating core. This switch asks whether giving the
-    /// scenario the dispersion explicitly - which is what it physically
-    /// wants - rebuilds the spheroid without the bug.
+    /// Isotropic random birth velocity as a multiple of local circular speed, on
+    /// top of the association's own motion. Momentum-neutral within the batch.
     pub birth_velocity_dispersion: Option<f32>,
-    /// Reference domain size for the sim's absolute length constants.
-    /// When set, every length below is multiplied by `size / reference`,
-    /// so a run at any size is a scaled copy of a run at the reference.
-    ///
-    /// The sim's length scales are absolute cell counts while `disk_r` is
-    /// not, so an association is three times larger relative to the disk
-    /// at size 150 than at size 500 and the coarse field is three times
-    /// softer relative to it. Size 150 is a different physical setup, not
-    /// a smaller picture of the same one - which is why the scenario
-    /// tests and the deployed site disagree. This switch measures what
-    /// making them proportional would actually buy, before anyone commits
-    /// to the refactor. See galaxy-gen#70.
+    /// Reference domain size for the sim's absolute length constants. Every length
+    /// is scaled by `size / reference`, making any run a scaled copy.
     pub length_reference_size: Option<f32>,
-    /// Override `RESOLVED_LUMINOSITY_FLOOR`, the luminosity below which an
-    /// unbound main-sequence star stops being drawn as a point.
-    ///
-    /// The floor now ships on by default; this switch only exists to
-    /// re-measure it. `0` disables retirement entirely, which is the
-    /// control the #72 numbers were taken against.
+    /// Override `RESOLVED_LUMINOSITY_FLOOR`, below which an unbound main-sequence
+    /// star stops being drawn as a point. `0` disables retirement.
     pub resolved_luminosity_floor: Option<f32>,
 }
 
@@ -255,9 +204,8 @@ mod tests {
 
     #[test]
     fn test_cadence_override_applies_only_to_the_field_rebuild() {
-        // The resolved configuration comes from the environment, so this
-        // asserts the routing rule rather than a particular override:
-        // every other process keeps its declared cadence no matter what.
+        // Asserts the routing rule rather than a particular override: the
+        // resolved configuration comes from the environment.
         assert_eq!(cadence_for("integrate_stars", 1), 1);
         assert_eq!(cadence_for("stellar_halo", 8), 8);
         let field = cadence_for("gravity_field", 4);
