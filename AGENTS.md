@@ -110,6 +110,12 @@ test job, then the trusted `deploy` runner publishes the private image as
 supplies package write authority as `REGISTRY_TOKEN`, and the publisher proves
 the remote immutable manifest after its single-architecture push.
 
+`build-publish` also takes `workflow_dispatch`, which is the only retry when a
+run dies without publishing: this Forgejo serves no `actions/runs/{id}/rerun`
+route, so the alternative is an empty commit. A stalled runner is the case that
+earns it - a `wasm-pack` fetch hung for the full 30-minute job timeout on
+`ef78300`, and the skipped `publish` left `main` with no image for that SHA.
+
 The image build is a two-stage Dockerfile whose builder stage is that same
 dev-base image, so `docker build` needs a `forgejo.coilysiren.me` login before
 it can pull its own base. `scripts/publish-image.sh` already logs in first. A
