@@ -1398,3 +1398,117 @@ disc a few hundred pixels across, each sprite covering far more area than
 the spacing between sprites. Coarsening blocks by occupancy rather than
 by screen scale alone would cut it, at the cost of the size-independent
 exposure described above.
+
+---
+
+# Part three — the traversal node, and fixing the profiler that measures it
+
+Part two left gravity at ~78% of the worker tick and named the node-visit
+count as the remaining cost. This part does not touch the visit count. It
+makes each visit cheaper, and it repairs two things about `perf_profile`
+that were quietly making before/after comparisons unusable.
+
+## The profiler could not see the regime that ships
+
+Two defects, both in `benches/perf_profile.rs`:
+
+- **Warmup was a constant 8 ticks.** Eight ticks clears the seeding
+  transient and nothing else. Every star process reads 0.000 ms/tick at
+  that warmup, so the profile described a galaxy with no stars in it -
+  not the one the site spends its time in. Warmup is an argv now, and
+  `perf-profile 500 20 1500` reaches a 34k-star galaxy.
+- **The seed was drawn fresh per process.** `seed()` calls
+  `rand::rng().random()` for the master seed, so at a mature warmup the
+  star population moved between runs: two runs of the same command came
+  back 7972 and 6633 stars. That is more spread than most changes worth
+  measuring, and it silently poisons any A/B. The profiler now takes a
+  seed and defaults to 424242, the same fixed seed the e2e perf specs
+  use.
+
+The second one is worth dwelling on: the numbers in this document's part
+two were read off a profiler that could not hold its subject still. The
+fresh-regime rows were fine - no stars, nothing to vary - but nothing
+mature was comparable run to run.
+
+## Where the tick goes, measured properly
+
+Native release, seed 424242, `ward exec perf-profile`:
+
+| regime      | per tick | gravity  | share |
+| ----------- | -------: | -------: | ----: |
+| 250 fresh   |  24.6 ms |  19.2 ms |   78% |
+| 250 mature  |   7.6 ms |   5.1 ms |   67% |
+| 500 fresh   | 108.0 ms |  88.0 ms |   82% |
+| 500 mature  |  32.8 ms |  22.4 ms |   68% |
+
+`integrate_gas` is second everywhere at 14-20%; nothing else clears 6%.
+Note that "500 fresh" is a sharper worst case than anything the browser
+sees - it is the first handful of ticks, and part two's coda showed 500
+drains out of the uniform-gas state within ~40 ticks.
+
+Splitting gravity at size 500, 135k active cells: gather 0.3 ms, build
+the quadtree 7.4 ms, **walk it 76 ms**. The walk makes 21.5 million node
+visits per tick - 195 per body, a sane interaction list for theta = 0.7 -
+at roughly 3 ns each.
+
+## Lever 1 — a 24-byte traversal node
+
+`Node` is 48 bytes and half of it is dead by traversal time. `cx`, `cy`,
+and `body` exist for subdivision; the four-way child array is mostly
+`NO_CHILD` holes; and `h` is only ever wanted as a squared side length,
+which the walk recomputed on every visit.
+
+The build arena is now copied once into a 24-byte `HotNode` - center of
+mass, mass, squared side, first child, child count - laid out depth-first
+with each node's children contiguous. The child count answers the leaf
+question that part two's `leaf` flag answered, so the copy replaces the
+leaf-resolution pass rather than adding a pass.
+
+Push order is preserved deliberately. Change which order children go on
+the stack and every body sums its force terms differently, which moves
+the last bits of a result the sim promises is reproducible. It is
+byte-identical instead: `debug-sim` output diffs clean, and a 1500-tick
+run at 250 and at 500 lands on the same star count before and after
+(4523 and 33970).
+
+Paired, same seed, same machine:
+
+| regime      | gravity before | gravity after |  delta |
+| ----------- | -------------: | ------------: | -----: |
+| 250 fresh   |       19.19 ms |      18.33 ms |  -4.5% |
+| 250 mature  |        5.09 ms |       4.74 ms |  -7.0% |
+| 500 fresh   |       88.01 ms |      83.93 ms |  -4.6% |
+| 500 mature  |       22.44 ms |      21.22 ms |  -5.5% |
+
+Three repeats at 500 fresh: 88.47 / 88.46 / 91.01 before, 84.21 / 83.85 /
+84.07 after. Non-overlapping, so the effect is real, but it is 5%, not
+the 1.5x the halved node size suggests.
+
+**That is the expected size, and part two already said why.** Tiling the
+active list for locality "did nothing" because the tree fits in cache and
+the traversal was never memory-bound. Halving the node does not help a
+walk that is not waiting on memory. What this change actually buys is the
+two multiplies per visit that the precomputed squared side removes, times
+21.5 million visits, plus the arena-wide leaf pass. Booking it as a cache
+win would be reading the wrong cause into a real number.
+
+At the 20 ticks/s cap this raises no ceiling where the worker already
+sustains the cap. It narrows the opening window at 500 where it does not.
+
+## What this leaves
+
+Unchanged from part two, and this part is evidence for it rather than
+against: **the remaining gravity cost is the visit count**, and 195
+visits per body is what theta = 0.7 costs. The levers that move it are
+theta itself, a multipole expansion that lets a node be accepted from
+further in, or SIMD across bodies. All three change the numeric result,
+so all three want an ablation switch and a scenario-test pass, which is
+a different kind of change from this one.
+
+## Reproducing part three
+
+```bash
+ward exec perf-profile 500 20      # fresh, worst case
+ward exec perf-profile 500 20 1500 # mature, what the site runs
+ward exec debug-sim 400 120 2 12345 # the determinism oracle
+```

@@ -5107,6 +5107,8 @@ fn wrap(value: i32, size: i32) -> i32 {
 
 const NO_CHILD: u32 = u32::MAX;
 
+/// Build-time node. Subdivision needs the bounding box and the one-body
+/// slot; the force walk needs neither, so it reads `HotNode` instead.
 #[derive(Clone)]
 struct Node {
     // Bounding box: centered at (cx, cy), half-side h. Root has cx=cy=h.
@@ -5120,10 +5122,6 @@ struct Node {
     body: u32,
     // Quadrants: NE=0, NW=1, SW=2, SE=3.
     children: [u32; 4],
-    /// Childless, resolved once after the build. The traversal tests this
-    /// per node visit, and re-deriving it from a 4-way child scan every
-    /// visit was measurable at 250k bodies.
-    leaf: bool,
 }
 
 impl Node {
@@ -5137,7 +5135,6 @@ impl Node {
             com_y: 0.0,
             body: NO_CHILD,
             children: [NO_CHILD; 4],
-            leaf: true,
         }
     }
 
@@ -5146,8 +5143,46 @@ impl Node {
     }
 }
 
+/// Traversal-time node: 24 bytes against the build node's 48.
+///
+/// The force walk is the most expensive thing the sim does - 195 node
+/// visits per body, 21 million per tick at size 500 - and every visit is
+/// a random hop into the arena, so bytes per node is the cost that
+/// decides it. Four of the build node's fields are dead by then (`cx`,
+/// `cy`, `body`, and the holes in a four-way child array that is mostly
+/// empty), and `h` is only ever wanted as a squared side length. Dropping
+/// them halves the arena, and the contiguous child block means a node's
+/// children arrive on one or two lines instead of four scattered ones.
+#[derive(Clone, Copy)]
+struct HotNode {
+    com_x: f32,
+    com_y: f32,
+    mass: f32,
+    /// Side length squared, `(2h)^2`. The opening test compares s^2
+    /// against theta^2 d^2, and deriving it cost two multiplies on every
+    /// one of those 21 million visits.
+    s2: f32,
+    /// First of `child_count` children, laid out contiguously by
+    /// `compact`. Meaningless when the count is zero.
+    first_child: u32,
+    /// Zero means leaf. This is the same question the build's `leaf` flag
+    /// used to answer, now free: the count has to be here anyway.
+    child_count: u8,
+}
+
+impl HotNode {
+    const PLACEHOLDER: HotNode = HotNode {
+        com_x: 0.0,
+        com_y: 0.0,
+        mass: 0.0,
+        s2: 0.0,
+        first_child: 0,
+        child_count: 0,
+    };
+}
+
 struct Tree {
-    nodes: Vec<Node>,
+    nodes: Vec<HotNode>,
 }
 
 /// Build the Barnes-Hut quadtree. The root covers (0,0)..(size, size).
@@ -5163,11 +5198,54 @@ fn build_quadtree(px: &[f32], py: &[f32], pm: &[f32], ox: f32, oy: f32, size: f3
         }
         insert(&mut nodes, 0, i as u32, px[i], py[i], pm[i]);
     }
-    // Resolve the leaf flag once, so the traversal never re-derives it.
-    for node in &mut nodes {
-        node.leaf = node.children.iter().all(|&c| c == NO_CHILD);
+    let mut hot: Vec<HotNode> = Vec::with_capacity(nodes.len());
+    hot.push(HotNode::PLACEHOLDER);
+    compact(&nodes, 0, 0, &mut hot);
+    Tree { nodes: hot }
+}
+
+/// Copy the build arena into traversal order: each node is followed by its
+/// children as one contiguous block, and a child's whole subtree lands
+/// before the next sibling's. The force walk is a depth-first descent, so
+/// this puts the node it reads next beside the one it just read. It also
+/// replaces the leaf-flag pass that used to walk the arena after the
+/// build, so the extra sweep is not extra.
+///
+/// `src` is the build node to copy, `slot` the already-reserved place in
+/// `out` to copy it into.
+fn compact(build: &[Node], src: usize, slot: usize, out: &mut Vec<HotNode>) {
+    let n = &build[src];
+
+    // Existing children in quadrant order. The walk pushes them in this
+    // order, exactly as the four-way scan it replaces did: change the
+    // order and every body sums its force terms differently, which moves
+    // the last bits of a result the sim promises is reproducible.
+    let mut kids = [0u32; 4];
+    let mut count = 0usize;
+    for &c in &n.children {
+        if c != NO_CHILD {
+            kids[count] = c;
+            count += 1;
+        }
     }
-    Tree { nodes }
+
+    let first = out.len();
+    for _ in 0..count {
+        out.push(HotNode::PLACEHOLDER);
+    }
+    let s = n.h * 2.0;
+    out[slot] = HotNode {
+        com_x: n.com_x,
+        com_y: n.com_y,
+        mass: n.mass,
+        s2: s * s,
+        first_child: first as u32,
+        child_count: count as u8,
+    };
+
+    for (k, &kid) in kids[..count].iter().enumerate() {
+        compact(build, kid as usize, first + k, out);
+    }
 }
 
 /// Insert body `b` into the subtree at `node_idx`. Indices avoid borrow fights.
@@ -5298,8 +5376,9 @@ impl Tree {
         stack.clear();
         stack.push(0);
 
+        let nodes = self.nodes.as_slice();
         while let Some(idx) = stack.pop() {
-            let n = &self.nodes[idx as usize];
+            let n = &nodes[idx as usize];
             if n.mass == 0.0 {
                 continue;
             }
@@ -5312,10 +5391,7 @@ impl Tree {
                 continue;
             }
 
-            let s = n.h * 2.0; // node side length
-            let s2 = s * s;
-
-            if n.leaf || s2 < theta_sq * d2 {
+            if n.child_count == 0 || n.s2 < theta_sq * d2 {
                 // Accept this node as a point mass.
                 let r2 = d2 + soft;
                 let inv_r = 1.0 / r2.sqrt();
@@ -5328,10 +5404,9 @@ impl Tree {
                 ax += k * dx;
                 ay += k * dy;
             } else {
-                for &c in &n.children {
-                    if c != NO_CHILD {
-                        stack.push(c);
-                    }
+                let first = n.first_child;
+                for c in 0..n.child_count as u32 {
+                    stack.push(first + c);
                 }
             }
         }

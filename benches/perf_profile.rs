@@ -6,24 +6,30 @@
 // scheduler with a timer around each phase, so the attribution follows
 // the declared causal chain instead of a sampled guess.
 //
-// Size and tick count come from argv, so a run can target the size under
-// investigation without a recompile:
+// Size, tick count, warmup, and seed come from argv, so a run can target
+// the size and the regime under investigation without a recompile:
 //   cargo run --release --bin perf_profile -- 500 40
+//   cargo run --release --bin perf_profile -- 500 40 1000   # mature
+//   cargo run --release --bin perf_profile -- 500 40 1000 424242
 
-use galaxy_gen_backend::galaxy::Galaxy;
+use galaxy_gen_backend::galaxy::{Galaxy, Scenario};
 use galaxy_gen_backend::process;
 use std::time::{Duration, Instant};
 
-/// Warm ticks discarded before timing: right after seeding there are no
-/// stars and no queued events, which is not a run in progress.
+/// Clears the seeding transient only - far too few to reach a galaxy
+/// with stars in it. Override from argv; see docs/perf-rewrite.md.
 const WARMUP_TICKS: u32 = 8;
 
 const DT: f32 = 0.5;
 
-fn profile(size: u16, ticks: u32, seed_mass: u16) {
+/// `seed()` draws a fresh master seed per process, so a mature warmup
+/// varies run to run. Held fixed, matching the e2e perf specs.
+const FIXED_SEED: u64 = 424_242;
+
+fn profile(size: u16, ticks: u32, seed_mass: u16, warmup: u32, seed: u64) {
     let mut g = Galaxy::new(size, 0);
-    g = g.seed(seed_mass);
-    for _ in 0..WARMUP_TICKS {
+    g = g.seed_with_mode_seeded(seed_mass, Scenario::IrregularSpiral, seed);
+    for _ in 0..warmup {
         g = g.tick(DT);
     }
 
@@ -81,9 +87,17 @@ fn main() {
         None => vec![250, 500],
     };
     let ticks: u32 = args.get(1).and_then(|s| s.parse().ok()).unwrap_or(30);
+    let warmup: u32 = args
+        .get(2)
+        .and_then(|s| s.parse().ok())
+        .unwrap_or(WARMUP_TICKS);
+    let seed: u64 = args
+        .get(3)
+        .and_then(|s| s.parse().ok())
+        .unwrap_or(FIXED_SEED);
 
-    println!("== galaxy-gen per-process profile ==");
+    println!("== galaxy-gen per-process profile ==  seed={seed}");
     for size in sizes {
-        profile(size, ticks, 25);
+        profile(size, ticks, 25, warmup, seed);
     }
 }
