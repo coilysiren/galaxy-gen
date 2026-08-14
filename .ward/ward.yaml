@@ -91,9 +91,6 @@ capabilities:
   - agentic-os/coding-rust
   - agentic-os/coding-javascript-react
 
-agent:
-  workflow: merge-remote-main
-
 catalog:
   kind: Component
   type: website
