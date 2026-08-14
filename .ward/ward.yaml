@@ -91,9 +91,6 @@ capabilities:
   - agentic-os/coding-rust
   - agentic-os/coding-javascript-react
 
-agent:
-  workflow: merge-remote-main
-
 catalog:
   description: "Procedural galaxy simulation. Rust compiled to WASM, rendered in the browser."
   dependsOn:

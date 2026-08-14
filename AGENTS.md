@@ -1,3 +1,7 @@
+---
+ward:
+  workflow: merge-remote-main
+---
 # Agent instructions
 
 Workspace conventions load globally via `~/.claude/CLAUDE.md` -> `agentic-os-kai/AGENTS.md`. This file covers only what is specific to this repo.
