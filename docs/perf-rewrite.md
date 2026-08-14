@@ -1512,3 +1512,78 @@ ward exec perf-profile 500 20      # fresh, worst case
 ward exec perf-profile 500 20 1500 # mature, what the site runs
 ward exec debug-sim 400 120 2 12345 # the determinism oracle
 ```
+
+---
+
+# Part four — the frame rate we were reporting was not the one anyone sees
+
+Raised from the deployed site: stutter through roughly the first minute of
+a run, and never quite smooth after that. Part two closed with 119.8 fps
+and zero jank at 500 mature, so either the site regressed or that number
+was answering a different question. It was answering a different
+question.
+
+## Two rates, one name
+
+`runtime-perf` sampled `requestAnimationFrame` deltas. The render loop in
+`application.tsx` **skips redraw when no new snapshot has arrived**, so
+rAF keeps firing at display rate whether or not the canvas changed. The
+overlay's `stat-fps`, meanwhile, counts snapshot paints. Both were called
+fps, and only one of them is smoothness.
+
+The probe now reports both, and `paintHz` is the one to believe.
+
+## What the split shows
+
+Headed Chrome, real GPU, `ward exec test-perf`:
+
+| case       | paintHz | gap p50 | rafHz | worker tick | render/frame |
+| ---------- | ------: | ------: | ----: | ----------: | -----------: |
+| 250 fresh  |    18.8 |   50 ms |  97.2 |     16.7 ms |      38.1 ms |
+| 250 mature |    18.3 |   51 ms | 115.8 |      7.7 ms |      10.5 ms |
+| 500 fresh  | **6.3** |  154 ms | 103.8 |    161.8 ms |      34.7 ms |
+| 500 mature |    18.8 |   50 ms | 102.0 |     33.0 ms |      22.5 ms |
+
+The 500 fresh row is the whole report: **the picture updates 6.3 times a
+second while the probe prints 103.8**. That is the case the site is being
+complained about, and the old headline number called it excellent.
+
+## Problem one — the opening is worker-bound, and only worker-bound
+
+161 ms per tick against the 50 ms the 20 ticks/s cap allows. Render is
+34.7 ms and irrelevant: paints are 154 ms apart, so the renderer idles
+two thirds of the time waiting for the worker. Sampling the live site
+every frame for 130 s gives the decay curve:
+
+| run time | worker tick | sim ticks/s |
+| -------: | ----------: | ----------: |
+|      0 s |      129 ms |         7.1 |
+|      6 s |      104 ms |         9.1 |
+|     10 s |       63 ms |        14.5 |
+|     14 s |       44 ms |        18.9 |
+|     24 s |       23 ms |        18.4 |
+
+So the deficit is the uniform-gas Barnes-Hut set draining, and it clears
+in 14-16 s. Prod and this laptop agree within noise, which also confirms
+the WASM penalty over native is only about 1.2x here.
+
+## Problem two — the cap is a paint-rate cap, and headroom does not help
+
+At 500 mature the worker uses 33 of its 50 ms and the renderer 22.5 of
+the 54 ms between paints. Both comfortable, and the galaxy still steps at
+18.8 Hz on a 120 Hz display. Part two's coda said the tick cap sets the
+render rate; this is what that costs in perceived smoothness, and no
+amount of making the tick cheaper fixes it while a paint requires a
+snapshot.
+
+The fix is decoupling: interpolate gas and star positions between
+snapshots by velocity times the elapsed fraction, and paint every rAF.
+That is a JS-side change needing velocities in the per-tick snapshot -
+the stop path already carries them - and it changes how motion reads, so
+it wants a visual pass rather than only a measurement.
+
+## What this part deliberately does not do
+
+Only the instrument changed. Both problems are named, measured, and left
+standing, because one is a physics-cost question and the other is a
+question about how the galaxy should look in motion.

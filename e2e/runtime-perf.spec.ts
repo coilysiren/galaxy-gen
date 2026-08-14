@@ -1,7 +1,7 @@
 import { test, expect, Page } from "@playwright/test";
 
-// Live run probe: stutter is the tail of the frame-interval
-// distribution, not the cost of one frame. See docs/perf-rewrite.md.
+// Live run probe. rafHz is frames offered, paintHz is frames that
+// changed - believe paintHz. See docs/perf-rewrite.md part four.
 
 const FIXED_SEED = 424242;
 const SAMPLE_MS = 6000;
@@ -44,16 +44,28 @@ test.describe("runtime perf", () => {
           // Let the worker fill its pipeline before sampling.
           await new Promise((r) => setTimeout(r, 750));
           const deltas: number[] = [];
+          // Interval between frames whose CONTENT changed - see paintGaps.
+          const paintGaps: number[] = [];
           const startTicks = Number(
             document.querySelector('[data-testid="stat-ticks"]')?.textContent ?? "0"
           );
           await new Promise<void>((resolve) => {
             let last = performance.now();
             const t0 = last;
+            let lastTick = startTicks;
+            let lastPaint = last;
             const step = () => {
               const now = performance.now();
               deltas.push(now - last);
               last = now;
+              const tick = Number(
+                document.querySelector('[data-testid="stat-ticks"]')?.textContent ?? "0"
+              );
+              if (tick !== lastTick) {
+                paintGaps.push(now - lastPaint);
+                lastPaint = now;
+                lastTick = tick;
+              }
               if (now - t0 >= sampleMs) resolve();
               else requestAnimationFrame(step);
             };
@@ -69,18 +81,23 @@ test.describe("runtime perf", () => {
                 ""
               )
             );
-          const sorted = [...deltas].sort((a, b) => a - b);
-          const at = (q: number) =>
-            sorted[Math.min(sorted.length - 1, Math.floor(q * sorted.length))];
+          const pct = (xs: number[], q: number) => {
+            const s = [...xs].sort((a, b) => a - b);
+            return s.length ? s[Math.min(s.length - 1, Math.floor(q * s.length))] : 0;
+          };
           return {
             frames: deltas.length,
-            fps: (deltas.length * 1000) / sampleMs,
-            p50: at(0.5),
-            p95: at(0.95),
-            p99: at(0.99),
-            worst: sorted[sorted.length - 1],
+            rafHz: (deltas.length * 1000) / sampleMs,
+            p50: pct(deltas, 0.5),
+            p95: pct(deltas, 0.95),
+            p99: pct(deltas, 0.99),
+            worst: pct(deltas, 1),
             // Anything past two 60Hz frames reads as a hitch.
             jank: deltas.filter((d) => d > 34).length,
+            paintHz: (paintGaps.length * 1000) / sampleMs,
+            paintGapP50: pct(paintGaps, 0.5),
+            paintGapP95: pct(paintGaps, 0.95),
+            paintGapWorst: pct(paintGaps, 1),
             simTicksPerSec: ((endTicks - startTicks) * 1000) / sampleMs,
             workerTickMs: read("stat-tick-ms"),
             stars: read("stat-stars"),
@@ -90,9 +107,12 @@ test.describe("runtime perf", () => {
         console.log(
           `LIVE size=${String(size).padStart(3)} ${phase.name.padEnd(6)} ` +
             `stars=${String(stats.stars).padStart(5)}  ` +
-            `fps=${stats.fps.toFixed(1)}  ` +
+            `paint=${stats.paintHz.toFixed(1)}Hz ` +
+            `gap p50=${stats.paintGapP50.toFixed(1)}ms p95=${stats.paintGapP95.toFixed(1)}ms ` +
+            `worst=${stats.paintGapWorst.toFixed(1)}ms  ` +
             `sim=${stats.simTicksPerSec.toFixed(1)}tick/s ` +
             `workerTick=${stats.workerTickMs.toFixed(1)}ms  ` +
+            `raf=${stats.rafHz.toFixed(1)}Hz ` +
             `p50=${stats.p50.toFixed(1)}ms p95=${stats.p95.toFixed(1)}ms ` +
             `p99=${stats.p99.toFixed(1)}ms worst=${stats.worst.toFixed(1)}ms  ` +
             `jank=${stats.jank}/${stats.frames}`
