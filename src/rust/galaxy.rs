@@ -8,10 +8,8 @@ use crate::events::{Event, EventQueue};
 use crate::process;
 use crate::stars::{Stage, Stars, NO_BINARY, NO_CLUSTER};
 
-/// Scenario presets: a hardcoded `start => end-shape` pair. The name is
-/// the promise - "bang => ring" seeds a central explosion whose physics
-/// parameters are tuned so the gas vaguely resembles a ring at t ~= 1000
-/// for most seeds. See `seed_with_mode` and `ScenarioParams`.
+/// Scenario presets: a hardcoded `start => end-shape` pair, where the
+/// name is the promise. See docs/scenarios.md.
 #[wasm_bindgen]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Scenario {
@@ -29,53 +27,41 @@ pub enum Scenario {
     IrregularElliptical = 3,
 }
 
-/// Per-scenario physics targets. The start half of a scenario picks the
-/// seeder (`bang`); the end half is carried by the rotation curve and
-/// relaxation constants that steer 1000 ticks of evolution. Values are
-/// hardcoded per variant - noise only textures a scenario, so the end
-/// shape is sturdy across seeds.
+/// Per-scenario physics targets: seeder plus the constants that steer
+/// 1000 ticks toward the promised shape. See docs/scenarios.md.
 pub struct ScenarioParams {
     /// Bang core seeder (true) vs irregular smoke seeder (false).
     pub bang: bool,
-    /// Flat-rotation-curve speed of the static halo potential. The halo
-    /// stands in for dark matter: gas self-gravity alone cannot hold a
-    /// flat curve, and without one the disk either freezes or falls in.
+    /// Flat-curve speed of the static halo, standing in for dark matter.
+    /// Without it the disk freezes or falls in. docs/sim-constants.md.
     pub v_flat: f32,
     /// Rotation-curve turnover radius as a fraction of the disk radius:
     /// v_c(r) = v_flat * r / sqrt(r^2 + rc^2).
     pub halo_core_frac: f32,
-    /// Relaxation rate of gas velocity toward the local circular flow.
-    /// This replaces plain drag: dissipation circularizes instead of
-    /// stopping, which is what keeps the big clouds rotating at t=1000.
+    /// Relaxation rate toward the local circular flow. Replaces plain
+    /// drag, so dissipation circularizes instead of stopping.
     pub flow_drag: f32,
-    /// Fraction of v_c the flow target carries. 1.0 holds orbits where
-    /// they are; below 1.0 the gas is chronically under-supported and
+    /// Fraction of v_c the flow target carries. Below 1.0 the gas
     /// inspirals while rotating - the elliptical's concentration knob.
     pub flow_support: f32,
     /// Seed-time spin multiplier on the self-gravity circular velocity.
     pub rotation_boost: f32,
-    /// Bang: ejection speed as a multiple of the speed needed to climb
-    /// from the core to `eject_target_frac` against self-gravity AND the
-    /// halo potential (the halo well is deep - naive v_esc stalls).
+    /// Bang: ejection speed over what it takes to climb to
+    /// `eject_target_frac`. DRAGON: naive v_esc stalls, the halo is deep.
     pub eject_factor: f32,
     /// Bang: intended turnaround radius as a fraction of disk_r. The
     /// flow drag then circularizes ejecta near it - the ring-radius knob.
     pub eject_target_frac: f32,
     /// Bang: core radius as a fraction of world size.
     pub core_radius_frac: f32,
-    /// Bang: per-cell core fill as a multiple of the seed-mass knob.
-    /// Deliberately UNDER the collapse density threshold: a dense core
-    /// converts to stars before its ejecta travel anywhere, so the bang
-    /// seeds a wide thin core whose cells only reach star-forming
-    /// density where they pile up at the target radius.
+    /// Bang: per-cell core fill. DRAGON: keep it UNDER the collapse
+    /// threshold or the core stars before it ejects. docs/scenarios.md.
     pub core_fill_scale: f32,
     /// Bang: m=2 azimuthal modulation depth on the ejection speed - the
     /// two fast lobes become the spiral arms.
     pub eject_lobes: f32,
-    /// Bang: tangential tilt of the ejection direction, radians from
-    /// radial. Direction is immune to the per-axis movement clamp, so
-    /// this curls arms even while speed is capped - the spiral's
-    /// signature. Also smears the diagonal grid artifact.
+    /// Bang: tangential tilt of ejection, radians. Direction escapes the
+    /// movement clamp, so arms curl even at capped speed.
     pub eject_swirl: f32,
     /// Irregular: amplitude of the seeded two-arm density wave.
     pub spiral_amp: f32,
@@ -102,12 +88,13 @@ pub struct ScenarioParams {
     pub collapse_density_fraction: f32,
     /// Per-scan collapse probability after the sustained-density trigger.
     pub collapse_chance: f32,
+    /// Irradiation level above which a dense cell defers ignition. Higher
+    /// lets more gas ignite near young stars.
+    pub collapse_radiation_resist: f32,
     /// Irregular: power-law contrast of the smoke field (clumpiness).
     pub smoke_contrast: f32,
-    /// Irregular: exponential radial density envelope scale as a
-    /// fraction of disk_r; 0 = flat disk. The elliptical seeds its
-    /// central concentration here - real ellipticals are light-profile
-    /// concentrated, not dynamically collapsed on this timescale.
+    /// Irregular: exponential radial envelope, 0 = flat disk. The
+    /// elliptical seeds its concentration here. docs/scenarios.md.
     pub radial_scale_frac: f32,
     /// Irregular: seeder mass multiplier - rebalances scenarios whose
     /// envelope would otherwise seed a dim galaxy.
@@ -115,26 +102,17 @@ pub struct ScenarioParams {
     /// Isotropic velocity jitter at seed time (pressure support for the
     /// elliptical - it puffs the cloud instead of letting it pancake).
     pub vel_dispersion: f32,
-    /// In-disk star velocity drag. Stars are collisionless, so a young
-    /// swarm slowly evaporates outward; the elliptical uses a whisper of
-    /// drag to settle its swarm into the central glow instead. Zero for
-    /// disk scenarios - their stars must keep orbiting forever.
+    /// In-disk star drag, elliptical only. DRAGON: nonzero on a disk
+    /// scenario spins its stars down. docs/scenarios.md.
     pub star_drag: f32,
-    /// Luminosity below which an unbound main-sequence star stops being
-    /// drawn as a point and becomes diffuse light. Per scenario, because
-    /// what the dim population *is* differs by scenario.
-    ///
-    /// Disk scenarios use `RESOLVED_LUMINOSITY_FLOOR`: their faint field
-    /// stars are a thin haze spread over the whole disk, and deleting
-    /// them outright moves frame brightness by 1.5% (galaxy-gen#72).
-    ///
-    /// The elliptical uses zero. Its defining feature is a concentrated
-    /// stellar spheroid, and that spheroid is *made of* the accumulated
-    /// faint old population - applying the disk floor to it drops
-    /// `spheroid_concentration` from 0.45-0.85 to 0.28-0.32, which is the
-    /// object losing its identity rather than shedding invisible light.
-    /// It needs the retired light rendered before it can have a floor,
-    /// which is tracked on galaxy-gen#72 rather than bodged here.
+    /// Newborn orbital ceiling, as a multiple of its own circular speed.
+    /// DRAGON: past ~1.41 a birth never comes back. docs/stellar-heating.md.
+    pub birth_orbit_ratio_cap: f32,
+    /// Isotropic random birth velocity, in local circular speeds. The
+    /// elliptical's spheroid is made of it. docs/stellar-heating.md.
+    pub birth_velocity_dispersion: f32,
+    /// Point-vs-diffuse luminosity cut. DRAGON: the elliptical uses 0 -
+    /// its spheroid IS the faint population. docs/stellar-population.md.
     pub resolved_luminosity_floor: f32,
 }
 
@@ -164,11 +142,14 @@ impl Scenario {
                 ring_transport: 0.08,
                 collapse_density_fraction: 0.24,
                 collapse_chance: 0.08,
+                collapse_radiation_resist: Galaxy::COLLAPSE_RADIATION_RESIST,
                 smoke_contrast: 1.8,
                 radial_scale_frac: 0.0,
                 seed_gain: 1.0,
                 vel_dispersion: 0.0,
                 star_drag: 0.0,
+                birth_orbit_ratio_cap: Galaxy::BIRTH_ORBIT_RATIO_CAP,
+                birth_velocity_dispersion: Galaxy::DISK_BIRTH_DISPERSION,
                 resolved_luminosity_floor: Galaxy::RESOLVED_LUMINOSITY_FLOOR,
             },
             Scenario::BangSpiral => ScenarioParams {
@@ -194,11 +175,14 @@ impl Scenario {
                 ring_transport: 0.0,
                 collapse_density_fraction: 0.75,
                 collapse_chance: 0.35,
+                collapse_radiation_resist: Galaxy::COLLAPSE_RADIATION_RESIST,
                 smoke_contrast: 1.8,
                 radial_scale_frac: 0.0,
                 seed_gain: 1.0,
                 vel_dispersion: 0.0,
                 star_drag: 0.0,
+                birth_orbit_ratio_cap: Galaxy::BIRTH_ORBIT_RATIO_CAP,
+                birth_velocity_dispersion: Galaxy::DISK_BIRTH_DISPERSION,
                 resolved_luminosity_floor: Galaxy::RESOLVED_LUMINOSITY_FLOOR,
             },
             Scenario::IrregularSpiral => ScenarioParams {
@@ -224,11 +208,14 @@ impl Scenario {
                 ring_transport: 0.0,
                 collapse_density_fraction: 0.75,
                 collapse_chance: 0.35,
+                collapse_radiation_resist: Galaxy::COLLAPSE_RADIATION_RESIST,
                 smoke_contrast: 1.8,
                 radial_scale_frac: 0.0,
                 seed_gain: 1.5,
                 vel_dispersion: 0.0,
                 star_drag: 0.0,
+                birth_orbit_ratio_cap: Galaxy::BIRTH_ORBIT_RATIO_CAP,
+                birth_velocity_dispersion: Galaxy::DISK_BIRTH_DISPERSION,
                 resolved_luminosity_floor: Galaxy::RESOLVED_LUMINOSITY_FLOOR,
             },
             Scenario::IrregularElliptical => ScenarioParams {
@@ -254,11 +241,14 @@ impl Scenario {
                 ring_transport: 0.0,
                 collapse_density_fraction: 0.4,
                 collapse_chance: 0.2,
+                collapse_radiation_resist: Galaxy::ELLIPTICAL_RADIATION_RESIST,
                 smoke_contrast: 0.9,
                 radial_scale_frac: 0.28,
                 seed_gain: 1.5,
                 vel_dispersion: 0.5,
                 star_drag: 0.0015,
+                birth_orbit_ratio_cap: Galaxy::BIRTH_ORBIT_RATIO_CAP,
+                birth_velocity_dispersion: 1.5,
                 resolved_luminosity_floor: 0.0,
             },
         }
@@ -274,10 +264,8 @@ impl Scenario {
     }
 }
 
-/// Per-tick reduction of one stellar association. The authoritative state
-/// remains on each star through `cluster_id`, so worker snapshots need no
-/// second cluster object graph. Rebuilding this compact view keeps removal
-/// and phase mixing compatible with the star SoA's swap-remove semantics.
+/// Per-tick reduction of one association. Authoritative state stays on
+/// each star's `cluster_id`. See docs/stellar-associations.md.
 #[derive(Clone, Copy, Default)]
 struct AssociationAggregate {
     mass: f32,
@@ -336,10 +324,8 @@ pub struct Galaxy {
     events: EventQueue,
 
     pub(crate) stars: Stars,
-    /// Central black hole point mass, set at seed time and live
-    /// thereafter: it grows by accreting core gas and capturing stars,
-    /// and shrinks by (exaggerated) Hawking evaporation. It participates
-    /// in both the stellar field and the shared gas integration step.
+    /// Central black hole point mass, live in both particle systems.
+    /// See docs/black-hole.md.
     bh_mass: f32,
     /// Seed-time black hole mass; the renderer scales the lens depth by
     /// sqrt(bh_mass / bh_mass_initial).
@@ -384,9 +370,8 @@ pub struct Galaxy {
     next_cluster_id: u32,
     next_star_id: u32,
     next_binary_id: u32,
-    /// Causal attribution for shock-boosted collapse heat: the ShockWave
-    /// event id that last boosted each cell, 0 = organic. Lets an induced
-    /// CloudCollapse carry its true parent.
+    /// ShockWave id that last boosted each cell, 0 = organic, so an
+    /// induced CloudCollapse carries its true parent.
     heat_parent: Vec<u64>,
     /// Active scenario - fixes the halo rotation curve and flow-drag
     /// constants every tick, not just at seed time.
@@ -397,112 +382,56 @@ impl Galaxy {
     // See docs/galaxy-rust.md for constant rationale.
     pub const GRAVATIONAL_CONSTANT: f32 = 5.0e-4;
     const SOFTENING_SQ: f32 = 1.0;
-    /// 1.0 = one cell per tick, the transfer scheme's hard ceiling
-    /// (one cell-hop per axis per tick). Doubled from 0.5 so the gas
-    /// visibly flows - the rotation curve runs right at this cap.
+    /// One cell per tick, the transfer scheme's hard ceiling. The
+    /// rotation curve runs right at it. docs/sim-constants.md.
     const MAX_SUBGRID_STEP: f32 = 1.0;
-    /// Integer r² at or below which gravity flips repulsive - a crude
-    /// contact-pressure proxy. Without it every same-cell contact is a
-    /// perfectly inelastic merge and any bound system ratchets down to a
-    /// single max-mass cell. Placeholder until a real equation of state.
+    /// Integer r^2 below which gravity flips repulsive, a contact-pressure
+    /// proxy. DRAGON: without it everything merges to one cell.
     const REPULSE_R2: f32 = 2.0;
-    /// Max mass a transfer may pack into one cell (incompressibility
-    /// floor). A full destination bounces the mover instead of fusing, so
-    /// a bound core saturates into a cluster of full cells rather than a
-    /// point. ~10x the default uniform cell fill. Placeholder EOS, same
-    /// bucket as REPULSE_R2.
+    /// Incompressibility floor: a full destination bounces the mover, so
+    /// cores saturate rather than collapse to a point.
     const CELL_MASS_CAP: u32 = 128;
-    /// Velocity retained when a mover is rejected by a full cell. No sign
-    /// flip: in a co-rotating region a blocked cell is in traffic, not a
-    /// head-on hit, and reflecting it thermalizes the disk's rotation
-    /// within a few hundred ticks. 1.0 - a jammed core is blocked nearly
-    /// every tick, so any per-block bleed spins it down fast. The
-    /// per-scenario flow relaxation is the energy sink instead.
+    /// Velocity kept when a full cell rejects a mover. DRAGON: reflecting
+    /// or damping thermalizes disk rotation. docs/sim-constants.md.
     const BLOCKED_FRICTION: f32 = 1.0;
-    /// Spring stiffness of the circular world boundary for GAS. Beyond
-    /// the disk radius (size/2 - 1) cells feel a gentle inward pull
-    /// proportional to overshoot. Gas is grid-bound anyway; stars use
-    /// the two-tier halo confinement below instead.
-    ///
-    /// This makes the disk radius an equilibrium: a parcel drifting
-    /// outward parks there, so the densest gas ring in the sim sits
-    /// exactly on the domain boundary. That ridge is real, and it was
-    /// what made the boundary visible - the renderer drew it at 0.82
-    /// alpha. The renderer now fades gas to zero inside this radius
-    /// (GAS_FADE_START in dataviz.tsx), so the ridge is no longer drawn.
-    ///
-    /// Spreading the ridge itself, by ramping this pull across a band
-    /// inside the disk radius the way stars got with HARD_CLIP_FACTOR,
-    /// was tried and reverted: at a 0.18 band it perturbs the outer disk
-    /// enough to drop spiral coherence to 0.22, stop ring star
-    /// formation, and break elliptical relaxation. The ridge is load
-    /// bearing for scenario dynamics. Not drawing it is the cheap fix;
-    /// removing it needs the scenario force models retuned with it.
+    /// Gas boundary spring. DRAGON: the density ridge it creates is load
+    /// bearing - banding it broke four tests. docs/boundary-ridge.md.
     const CONFINE_STIFFNESS: f32 = 0.02;
-    /// Stars: hard-clip radius as a multiple of the soft (disk) radius.
-    /// 3x leaves a wide halo band now that the renderer shows past the
-    /// disk edge.
-    /// Between soft and hard lies the halo band with a repulsive
-    /// gradient a = K (r - soft)/(hard - r) - gentle at the soft edge,
-    /// divergent at the hard edge, so no finite speed reaches the hard
-    /// clip. Replaces the old rim hard-stop that parked all ejecta in a
-    /// ring at disk_r + 3.
+    /// Star hard clip, as a multiple of the disk radius. The band between
+    /// diverges at the clip, so nothing reaches it. docs/boundary-ridge.md.
     const HARD_CLIP_FACTOR: f32 = 3.0;
     /// Gradient scale for the halo repulsion.
     const HALO_STIFFNESS: f32 = 0.04;
     /// Acceleration ceiling for the halo gradient (the analytic form
     /// diverges at the hard clip; the clamp keeps integration sane).
     const HALO_ACCEL_MAX: f32 = 2.0;
-    /// Velocity drag applied to stars only while in the halo band. The
-    /// halo spring is conservative - without dissipation ejecta would
-    /// oscillate through the halo forever instead of rejoining the disk.
+    /// Star drag inside the halo band only. The halo spring is
+    /// conservative, so without it ejecta oscillate forever.
     const STAR_HALO_DRAG: f32 = 0.04;
     /// Barnes-Hut opening angle, shared by the gas kernel and the coarse
     /// field builder.
     const THETA: f32 = 0.7;
     /// Coarse gravity-field resolution (per axis).
     const FIELD_RES: usize = 64;
-    /// Stars orbit at half the gas pace: the coarse field they read is
-    /// built at quarter strength (v ~ sqrt(a r)), with its halo term
-    /// using the pre-doubled gas curve. Fast pink rivers of gas around
-    /// a slow drifting star population is the intended look.
+    /// Quarter-strength coarse field, so stars orbit at half the gas
+    /// pace. Intended look, not an accident. docs/sim-constants.md.
     const STAR_FIELD_SCALE: f32 = 0.25;
-    /// Fraction of the gas density-wave force that also acts on stars.
-    ///
-    /// The scenario shaping - spiral arms, the ring annulus - was applied
-    /// to gas only, so stars felt the arms exclusively through a
-    /// quarter-strength field sampled onto a 64 grid, which smears an
-    /// arm a few cells wide into the background. That is why stars never
-    /// traced the structure the sim works hard to carve.
-    ///
-    /// A fraction rather than the full force: stars should be pulled
-    /// toward the arms without being locked to the pattern, since real
-    /// arms are density waves that stars pass through rather than rails
-    /// they ride. See galaxy-gen#66.
+    /// Share of the gas density-wave force that also acts on stars. Zero:
+    /// measured to cost support and buy nothing. docs/stellar-heating.md.
     const STAR_WAVE_COUPLING: f32 = 0.0;
-    /// Multiplier on the gas/star gravity term in the coarse star field,
-    /// applied before STAR_FIELD_SCALE. Raises how hard local gas
-    /// overdensities pull on stars without touching the smooth halo term,
-    /// so the orbital pace set by the halo stays put while clumps and
-    /// arms bite harder.
+    /// Multiplier on the field's gravity term, before STAR_FIELD_SCALE:
+    /// clumps bite harder without changing the halo-set orbital pace.
     const STAR_GAS_FIELD_BOOST: f32 = 1.0;
-    /// Softening for the coarse field build (separate from the gas
-    /// kernel's SOFTENING_SQ). Large on purpose: the star field is a
-    /// mean field. With point-scale softening, stars dive through steep
-    /// cluster wells sampled from a 4-tick-stale field and the
-    /// integration error pumps orbital energy until the disk evaporates
-    /// into the halo.
+    /// Coarse-field softening, large on purpose - it is a mean field.
+    /// DRAGON: point-scale softening evaporates the disk.
     const FIELD_SOFTENING_SQ: f32 = 25.0;
     /// Central black hole mass as a fraction of total seeded mass.
     const BH_MASS_FRACTION: f32 = 0.05;
     /// Primordial gas begins weakly enriched so dust remains visible before
     /// the first stellar generation completes.
     const INITIAL_METALLICITY: f32 = 0.004;
-    // Stellar population. Births sample a Salpeter-flavored IMF
-    // (dN/dm proportional to m^-2.35) between the mass bounds: many
-    // faint red dwarfs, rare blue giants. Luminosity follows a
-    // main-sequence-ish power law and lifetime falls steeply with mass,
-    // so M-dwarfs outlive the session while O-stars die in minutes.
+    // Stellar population: Salpeter-flavored IMF, luminosity ~ m^2,
+    // lifetime falling steeply with mass. docs/stellar-population.md.
     const STAR_MASS_MIN: f32 = 3.0;
     const STAR_MASS_MAX: f32 = 120.0;
     const IMF_ALPHA: f32 = 2.35;
@@ -510,24 +439,8 @@ impl Galaxy {
     const STAR_LIFETIME_COEFF: f32 = 900.0;
     /// Max stars spawned per birth event (render + integration budget).
     const BIRTH_MAX_STARS: usize = 24;
-    /// Luminosity below which an unbound main-sequence star stops being
-    /// drawn as a point and becomes part of the diffuse stellar light.
-    ///
-    /// Luminosity is mass squared, so 100 is ten solar masses. Under the
-    /// Salpeter-flavored IMF that is about 81% of stars carrying about
-    /// 12% of the light, and the population is even more skewed than the
-    /// birth numbers because the massive stars are the ones that die.
-    ///
-    /// This is the population's only real sink. Mass recycles through
-    /// supernovae and the fountain, and only about 4% of stars born reach
-    /// end of life inside a run - half of all births live 64800 ticks - so
-    /// without this the resolved count grows without bound. Measured on
-    /// galaxy-gen#72: 23-30k with the floor against 123-131k without, and
-    /// deleting that light outright costs 1.5% of frame brightness, which
-    /// is why it needs no diffuse-light machinery to replace it.
-    ///
-    /// Association members are exempt whatever their brightness, so a
-    /// cluster reads as a cluster while it is one.
+    /// DRAGON: the population's only real sink - without it the resolved
+    /// count grows without bound. docs/stellar-population.md.
     const RESOLVED_LUMINOSITY_FLOOR: f32 = 100.0;
     /// Radius beyond which a sustained orbit becomes unresolved halo light.
     const STELLAR_HALO_MIX_RADIUS: f32 = 1.18;
@@ -542,20 +455,12 @@ impl Galaxy {
     /// Single white dwarfs remain visible before joining the stellar halo.
     const WHITE_DWARF_RESOLVED_AGE: f32 = 1_200.0;
 
-    // Uniform-seed structure: domain-warped fractal noise shaped into
-    // smoke. Four octaves of smoothstep value noise (fBm) give the
-    // power-law texture, a second fBm field warps the sampling
-    // coordinates so blobs curl into wisps and billows, and a power-law
-    // contrast exponent carves thin filaments and true voids out of
-    // what would otherwise read as smooth milk. A two-arm
-    // logarithmic-spiral overdensity still seeds the density wave that
-    // differential rotation shears into a pinwheel; ROTATION_BOOST
-    // spins the disk slightly super-circular so the shear works.
+    // Uniform-seed structure: domain-warped fBm shaped into smoke, plus a
+    // two-arm overdensity the shear pinwheels. docs/seeding.md.
     pub(crate) const SMOKE_OCTAVE_RES: [usize; 4] = [6, 12, 24, 48];
     const SMOKE_WARP: f32 = 0.11;
-    /// Normalized fBm clusters tightly around its mean - stretch it
-    /// (about a slightly dark center) so voids reach true zero and
-    /// billows saturate, THEN shape with the power law.
+    /// fBm clusters near its mean: stretch about a dark center so voids
+    /// reach zero, THEN shape with the power law. Order matters.
     const SMOKE_STRETCH: f32 = 3.2;
     const SMOKE_CENTER: f32 = 0.44;
     const SMOKE_GAIN: f32 = 2.6;
@@ -564,35 +469,44 @@ impl Galaxy {
     const EDGE_FEATHER_START: f32 = 0.55;
     const SPIRAL_PITCH: f32 = 4.0;
 
-    // Cloud-collapse tuning. A cell must stay above its scenario-owned
-    // density fraction and below the radiation resist level for
-    // COLLAPSE_HEAT_TRIGGER consecutive scans (collapse_watch cadence 16)
-    // before it can roll for collapse. No velocity gate: jammed cells
-    // accumulate large STORED velocity while standing still, so a speed
-    // limit anti-selects exactly the proto-cluster cells.
+    // Cloud collapse: dense and un-irradiated for N consecutive scans.
+    // DRAGON: no velocity gate - it anti-selects proto-clusters.
     const COLLAPSE_HEAT_TRIGGER: u8 = 6;
-    const COLLAPSE_RADIATION_RESIST: f32 = 20.0;
+    /// Disk gate, retuned from 20 with #70's birth cap: capped stars stay
+    /// in the disk and irradiate it, so 20 throttled formation 44%.
+    const COLLAPSE_RADIATION_RESIST: f32 = 80.0;
+    /// DRAGON: the elliptical keeps 20. At 80 its extra supernovae sweep
+    /// gas into an annulus and it fails its own ring check (#70).
+    const ELLIPTICAL_RADIATION_RESIST: f32 = 20.0;
+    /// Resolved gate level for this galaxy's scenario.
+    fn collapse_radiation_resist(&self) -> f32 {
+        crate::ablation::ablation()
+            .collapse_radiation_resist
+            .unwrap_or(self.scenario.params().collapse_radiation_resist)
+    }
     /// Fraction of the collapsing cell's gas consumed into the birth
     /// budget; neighbors contribute half this fraction.
     const COLLAPSE_CONSUME_FRACTION: f32 = 0.55;
     /// Minimum birth budget - collapses thinner than this fizzle.
     const BIRTH_MIN_BUDGET: f32 = 20.0;
-    /// Cap on the gas velocity a newborn star inherits. Jammed cells
-    /// accumulate unbounded STORED velocity while barely moving (the
-    /// movement cap bounds real motion to ~1 cell per time unit) -
-    /// inheriting the raw value launches newborns straight into the
-    /// halo and empties the visible disk.
+    /// Cap on inherited gas velocity. DRAGON: jammed cells store unbounded
+    /// velocity, and the raw value empties the disk.
     const BIRTH_GAS_VEL_CAP: f32 = 1.0;
-    /// Cap on the orbital-support speed given to newborns. In a clumpy
-    /// field the local sample points at the nearest cluster, not the
-    /// center - sqrt(|a| r) from a mis-aimed sample slingshots newborns
-    /// outward.
+    /// Cap on newborn orbital support: in a clumpy field the local sample
+    /// aims at the nearest cluster, not the center.
     const BIRTH_VCIRC_CAP: f32 = 1.5;
+    /// Newborn orbital speed ceiling as a multiple of local circular
+    /// speed. Escape is ~1.41, so anything near it launches the disk.
+    const BIRTH_ORBIT_RATIO_CAP: f32 = 1.06;
+    /// Disk-scenario birth dispersion. Real disks are not perfectly cold,
+    /// and 0.3 costs little rotational support. docs/stellar-heating.md.
+    const DISK_BIRTH_DISPERSION: f32 = 0.3;
+    /// Stars read the azimuthal average of the coarse field, not the
+    /// field itself. Why: docs/stellar-heating.md.
+    const STAR_FIELD_AXISYMMETRIC: bool = true;
 
-    // Stellar associations. Nearby collapse events belong to the same
-    // star-forming complex, receive one center-of-mass orbit, and retain a
-    // temporary softened binding potential. The potential fades with age
-    // and the local galactic tide releases exterior members into streams.
+    // Stellar associations: one shared orbit and a fading binding
+    // potential, tide-released. docs/stellar-associations.md.
     const ASSOCIATION_JOIN_RADIUS: f32 = 3.2;
     const ASSOCIATION_JOIN_MAX_AGE: f32 = 32.0;
     const ASSOCIATION_BIRTH_RADIUS: f32 = 0.9;
@@ -633,10 +547,8 @@ impl Galaxy {
     /// mega-clouds while pressure overflow connects neighboring cells.
     const FOUNTAIN_PACKET_MASS: u16 = 4;
 
-    // Supernova tuning. Main-sequence stars past their lifetime and at
-    // or above the mass threshold detonate; lighter ones fade to
-    // remnants. A supernova returns most of the star's mass to nearby
-    // gas with an outward kick and leaves a neutron star.
+    // Supernovae: heavy stars past lifetime detonate, return most of
+    // their mass, and leave neutron stars. docs/stellar-evolution.md.
     const SN_MASS_THRESHOLD: f32 = 30.0;
     const SN_GAS_RETURN: f32 = 0.8;
     /// Newly synthesized heavy elements as a share of progenitor mass.
@@ -670,14 +582,8 @@ impl Galaxy {
     /// Renderer transient window (ticks) for executed-event flashes.
     const TRANSIENT_WINDOW: u64 = 90;
 
-    // Black hole lifecycle. Accretion eats a fraction of the gas within
-    // BH_ACCRETION_RADIUS of the center each run; stars inside
-    // BH_CAPTURE_RADIUS are swallowed via BlackHoleCapture events.
-    // Hawking evaporation follows the physically-shaped dM/dt =
-    // -HAWKING_COEFF / M^2 (small holes evaporate in a runaway, big
-    // ones barely leak), with the coefficient exaggerated enormously -
-    // a real stellar-mass hole radiates nanokelvins and would outlive
-    // 10^60 sessions.
+    // Black hole lifecycle: accretion, capture, and a wildly exaggerated
+    // Hawking dM/dt = -k/M^2. docs/black-hole.md.
     const BH_ACCRETION_RADIUS: i32 = 2;
     const BH_ACCRETION_FRACTION: f32 = 0.01;
     /// Inner disk over which weak viscosity bleeds angular momentum. The
@@ -685,17 +591,14 @@ impl Galaxy {
     const BH_INFLOW_RADIUS: f32 = 7.0;
     const BH_NUCLEAR_VISCOSITY: f32 = 0.0015;
     const BH_GAS_SOFTENING_SQ: f32 = 9.0;
-    /// Capture needs BOTH deep proximity and low speed - fast stars
-    /// slingshot through the center, only slow ones fall in. Without the
-    /// speed gate every orbit through the core re-rolls the capture dice
-    /// and the hole eats the galaxy.
+    /// Capture needs proximity AND low speed. DRAGON: without the speed
+    /// gate the hole eats the galaxy.
     const BH_CAPTURE_RADIUS: f32 = 0.5;
     const BH_CAPTURE_MAX_SPEED: f32 = 0.8;
     const HAWKING_COEFF: f32 = 12_000.0;
 
-    // Quasar lifecycle. The age floor admits early well-fed nuclei, while
-    // the 1.2x growth gate keeps modest accretion from igniting. The brief
-    // active phase ejects gas in discrete pulses.
+    // Quasar lifecycle: age floor plus a growth gate, then a brief pulsed
+    // active phase. docs/quasar-feedback.md.
     const QUASAR_GROWTH_TRIGGER: f32 = 1.20;
     const QUASAR_RATE_TRIGGER: f32 = 0.00025;
     const QUASAR_EARLIEST_TICK: u64 = 1_000;
@@ -808,9 +711,8 @@ impl Galaxy {
         self.seed_with_mode_seeded(additional, mode, seed)
     }
 
-    /// Reproducible [`seed_with_mode`]: same `(additional, mode, seed)`
-    /// gives byte-identical state, enabling `?seed=...` URL sharing for
-    /// every scenario.
+    /// Reproducible [`seed_with_mode`]: same inputs, byte-identical state.
+    /// This is what `?seed=` sharing rests on.
     pub fn seed_with_mode_seeded(&self, additional: u16, mode: Scenario, seed: u64) -> Galaxy {
         let mut rng = StdRng::seed_from_u64(seed);
         self.seed_mode_kernel(additional, mode, seed, &mut rng)
@@ -842,9 +744,8 @@ impl Galaxy {
         match p.bang {
             false => {
                 if additional > 0 {
-                    // Smoke field: three fBm stacks (density + two warp
-                    // components), each four octaves of smoothstep value
-                    // noise drawn from the seeded RNG.
+                    // Three fBm stacks - density plus two warp components.
+                    // See docs/seeding.md.
                     let make_octaves = |rng: &mut dyn rand::Rng| -> Vec<Vec<f32>> {
                         Galaxy::SMOKE_OCTAVE_RES
                             .iter()
@@ -914,9 +815,8 @@ impl Galaxy {
                         };
                         let u = (x / size + 0.5).clamp(0.0, 1.0);
                         let v = (y / size + 0.5).clamp(0.0, 1.0);
-                        // Domain warp: sample density through a noise
-                        // displacement so structure curls instead of
-                        // pooling.
+                        // Domain warp so structure curls instead of
+                        // pooling. docs/seeding.md.
                         let wu = u + Galaxy::SMOKE_WARP * (fbm(&warp_x_oct, u, v) - 0.5);
                         let wv = v + Galaxy::SMOKE_WARP * (fbm(&warp_y_oct, u, v) - 0.5);
                         let d = fbm(&density_oct, wu, wv);
@@ -937,11 +837,8 @@ impl Galaxy {
                             weights.push((i, w));
                         }
                     }
-                    // Normalize to a deterministic total: the fBm draw's
-                    // mean varies +-35% seed to seed, and thin draws lose
-                    // their seeded structure to dissipation long before
-                    // t=1000. Fixing the budget is what makes the end
-                    // shape sturdy across seeds - noise only textures.
+                    // DRAGON: normalize the budget or thin draws dissolve
+                    // before t=1000. docs/seeding.md.
                     let w_sum: f64 = weights.iter().map(|&(_, w)| w as f64).sum();
                     let target = additional as f64
                         * 0.5
@@ -987,24 +884,19 @@ impl Galaxy {
                     let fill = core_fill.saturating_add(rng.random_range(0..=core_fill / 4));
                     mass[i] = (fill as f32 * edge) as u16;
                 }
-                // Ejection speed keyed to the seeded core's own escape
-                // velocity - a fixed speed stops scaling once core mass
-                // grows with size² and the "explosion" jams into a ball.
+                // Keyed to the core's own escape velocity: a fixed speed
+                // jams into a ball at large sizes. docs/seeding.md.
                 let m_core: f64 = mass.iter().map(|&m| m as f64).sum();
-                // Climb energy to the target radius: self-gravity escape
-                // plus the halo potential difference 2 dPhi = v_flat^2 *
-                // ln((rt^2 + rc^2) / rc^2). Without the halo term the
-                // ejecta stall far short of the intended ring.
+                // DRAGON: budget the halo potential too, or ejecta stall
+                // short of the ring. docs/seeding.md.
                 let v_esc_sq = 2.0 * Galaxy::GRAVATIONAL_CONSTANT * m_core as f32 / core_radius;
                 let rc_b = p.halo_core_frac * disk_r;
                 let rt = p.eject_target_frac * disk_r;
                 let halo_climb_sq =
                     p.v_flat * p.v_flat * ((rt * rt + rc_b * rc_b) / (rc_b * rc_b)).ln();
                 let v_eject = p.eject_factor * (v_esc_sq + halo_climb_sq).sqrt();
-                // Two-lobed ejection (bang => spiral): the fast lobes
-                // race ahead and differential rotation winds them into
-                // arms. Zero depth gives the symmetric shell the ring
-                // scenario circularizes.
+                // Two-lobed ejection winds into arms; zero depth gives the
+                // ring's symmetric shell. docs/seeding.md.
                 let lobe_phase = rng.random_range(0.0f32..std::f32::consts::TAU);
                 let (swirl_cos, swirl_sin) = (p.eject_swirl.cos(), p.eject_swirl.sin());
                 for i in 0..self.n {
@@ -1016,9 +908,8 @@ impl Galaxy {
                     let r = (x * x + y * y).sqrt().max(1e-3);
                     let theta = y.atan2(x);
                     let lobes = 1.0 + p.eject_lobes * (2.0 * theta + lobe_phase).cos();
-                    // Ejection direction: radial tilted prograde by the
-                    // swirl angle. Generous speed jitter breaks up the
-                    // diagonal-travel grid artifact.
+                    // Radial tilted prograde by the swirl angle; jitter
+                    // breaks up the diagonal grid artifact.
                     let jitter = rng.random_range(-0.2f32..=0.2f32);
                     let speed = v_eject * lobes * (1.0 + jitter);
                     let (rx, ry) = (x / r, y / r);
@@ -1029,13 +920,8 @@ impl Galaxy {
             }
         }
 
-        // Every scenario gets orbital support on top of its seeder
-        // velocities: v = boost * sqrt(G·M_enc/r + v_c(r)^2) tangentially,
-        // with M_enc prefix-summed over cells sorted by radius and v_c
-        // the halo rotation curve - seeding at the combined equilibrium
-        // speed, not just self-gravity's. A hand-tuned linear ramp
-        // under-spins the disk and it free-falls to the center within a
-        // few hundred ticks.
+        // DRAGON: seed at the combined self-gravity + halo equilibrium
+        // speed, or the disk free-falls. docs/seeding.md.
         let mut order: Vec<usize> = (0..self.n).collect();
         let r2_of = |i: usize, xs: &[i16], ys: &[i16]| {
             let x = xs[i] as f32 - cx;
@@ -1235,9 +1121,8 @@ impl Galaxy {
         self.phase_mixed_count
     }
 
-    /// Spawn one star directly. Debug/test path - production stars are
-    /// born from CloudCollapse -> StarBirth events. Derived attributes
-    /// (lifetime, luminosity, color) come from mass.
+    /// Spawn one star directly. Debug/test path only - production births
+    /// come from CloudCollapse -> StarBirth.
     pub fn spawn_star(&mut self, x: f32, y: f32, vx: f32, vy: f32, mass: f32) -> usize {
         let m = mass.max(1.0);
         let (lifetime, luminosity, class_index) = Galaxy::star_attrs(m);
@@ -1259,10 +1144,8 @@ impl Galaxy {
         )
     }
 
-    /// Renderer transients: [kind, x, y, ticks_ago, magnitude] per recent
-    /// executed event within the transient window. Magnitude is
-    /// kind-specific physical mass or budget, used only to scale the
-    /// renderer's transient.
+    /// Renderer transients per recent executed event. One-way out of the
+    /// sim. Field order: docs/tick-worker.md.
     pub fn render_transients(&self) -> Vec<f32> {
         let size = self.size as i32;
         let mut out = Vec::new();
@@ -1361,9 +1244,8 @@ impl Galaxy {
         }
     }
 
-    /// Authoritative simulation tick, continuous across worker
-    /// pause/resume (it rides the meta state). f64 because wasm-bindgen
-    /// maps u64 to BigInt and every consumer wants a plain number.
+    /// Authoritative sim tick, continuous across worker pause/resume.
+    /// f64 because wasm-bindgen maps u64 to BigInt.
     pub fn sim_tick(&self) -> f64 {
         self.tick_count as f64
     }
@@ -1445,10 +1327,8 @@ impl Galaxy {
         self.stars = Stars::from_flat(data);
     }
 
-    /// Coarse-field state: [field_ax..., field_ay..., radiation...,
-    /// metal_mass...]. The
-    /// fields are mid-tick derived state - rebuilding after restore would
-    /// use post-tick inputs and fork the trajectory. Opaque to JS.
+    /// Coarse-field state, opaque to JS. DRAGON: mid-tick derived, so
+    /// rebuilding after restore forks the trajectory. docs/tick-worker.md.
     pub fn sim_state_field(&self) -> Vec<f32> {
         let mut out = self.field_ax.clone();
         out.extend_from_slice(&self.field_ay);
@@ -1470,13 +1350,8 @@ impl Galaxy {
         }
     }
 
-    /// Versioned scheduler/event/RNG state: [version=8, tick lo/hi, seed
-    /// lo/hi, bh_mass bits, bh_initial bits, radiated f64 bits lo/hi,
-    /// halo-gas lo/hi, stellar-halo f64 lo/hi, phase-mixed lo/hi,
-    /// next_cluster, next_star, next_binary, scenario, five composition
-    /// ledger f64 values, n_cells, accretion EMA, quasar ticks, cooldown,
-    /// axis, episodes, heat bytes
-    /// packed 4-per-u32, heat_parent lo/hi per cell, then events].
+    /// Versioned scheduler/event/RNG state. Layout and version history:
+    /// docs/tick-worker.md.
     pub fn sim_state_meta(&self) -> Vec<u32> {
         let heat_words = self.n.div_ceil(4);
         let mut out = Vec::with_capacity(35 + heat_words + self.n * 2 + 6);
@@ -1656,10 +1531,8 @@ impl Galaxy {
 /// because `Instant` has no wasm32 clock and `Duration` has no ABI.
 #[cfg(not(target_arch = "wasm32"))]
 impl Galaxy {
-    /// The same scheduler as [`Galaxy::tick`], with a timer around each
-    /// phase. `out` is filled as
-    /// `[clone, ..one entry per registry process.., events]`, so a profile
-    /// follows the declared causal chain rather than a sampled guess.
+    /// [`Galaxy::tick`] with a timer per phase, filling `out` as
+    /// `[clone, ..per process.., events]`. docs/perf-rewrite.md.
     pub fn tick_instrumented(&self, time: f32, out: &mut Vec<std::time::Duration>) -> Galaxy {
         use std::time::{Duration, Instant};
         let registry = process::registry();
@@ -1690,31 +1563,14 @@ impl Galaxy {
 impl Galaxy {
     // Process entry points, referenced by name in process::REGISTRY.
 
-    /// Pitch-aware logarithmic m=2 amplitude of the visible gas disk.
-    /// Unlike a plain azimuthal m=2 score, this rejects bars and opposite
-    /// clumps that do not follow the configured spiral pitch.
+    /// Pitch-aware logarithmic m=2 amplitude: rejects bars and opposite
+    /// clumps that a plain m=2 score would pass.
     pub fn spiral_coherence(&self) -> f32 {
         self.spiral_structure().0
     }
 
-    /// Do stars sit where the gas is? Mean gas density sampled at star
-    /// positions over mean gas density across all disk cells, computed
-    /// per radial bin and averaged.
-    ///
-    /// 1.0 means stars are spread like area - no arm tracing. Above 1.0
-    /// means stars prefer dense gas, which is what makes a spiral read as
-    /// a spiral: young stars sitting in the arms.
-    ///
-    /// Binned by radius on purpose. Both stars and gas concentrate toward
-    /// the centre, so a global ratio would score that radial concentration
-    /// as arm tracing. Normalizing within each radius isolates the
-    /// azimuthal question, which is the one that matters visually.
-    ///
-    /// This is the success metric for arm tracing. Note it is deliberately
-    /// blind to kinematics: a hot, thoroughly mixed population that still
-    /// clusters on the arms scores well here and badly on
-    /// `rotation_dispersion_ratio`, and for the look Kai is after that is
-    /// the right trade. See galaxy-gen#66.
+    /// Do stars sit where the gas is? The arm-tracing metric, blind to
+    /// kinematics on purpose. docs/star-metrics.md.
     pub fn stellar_arm_affinity(&self) -> f32 {
         const BINS: usize = 6;
         const MIN_BIN_STARS: u32 = 20;
@@ -1773,16 +1629,8 @@ impl Galaxy {
         }
     }
 
-    /// Fraction of resolved stars in `[min_age, max_age)` that sit inside
-    /// `radius_frac` of the disk radius.
-    ///
-    /// Paired with the all-ages `star_central` in `debug-sim` this says
-    /// whether a centrally concentrated star field was *born* that way or
-    /// drifted inward afterwards. Young stars have not had time to move,
-    /// so their number is close to the radial shape of star formation
-    /// itself. If the two agree, the concentration is where the gas
-    /// collapses and no star is migrating; if the old number is higher,
-    /// something is pulling the population in. See galaxy-gen#70.
+    /// Central fraction for one age window. Against the all-ages number
+    /// it splits born-concentrated from migrated. docs/star-metrics.md.
     pub fn central_fraction_for_age(&self, min_age: f32, max_age: f32, radius_frac: f32) -> f32 {
         let center = self.size as f32 * 0.5;
         let inner = self.disk_radius() * radius_frac;
@@ -1807,42 +1655,14 @@ impl Galaxy {
         }
     }
 
-    /// Rotational support of the resolved star population: mean streaming
-    /// speed over velocity dispersion (`v_rot / sigma`), averaged across
-    /// radial bins of the luminous disk.
-    ///
-    /// This is the metric that actually separates a disk from a mush,
-    /// because dispersion is what makes a mush a mush. Rotation-dominated
-    /// disks run above ~1.5; pressure-supported spheroids sit below ~0.7.
-    ///
-    /// Prefer this over `star_circular_ratio`, which cannot tell a
-    /// circular orbit from an eccentric one caught at pericenter and so
-    /// scores fast eccentric interlopers well - exactly the population
-    /// that looks like noise on screen. See galaxy-gen#66.
-    ///
-    /// Binned rather than global because a disk's streaming speed varies
-    /// with radius: pooling all radii would charge the radial gradient to
-    /// dispersion and understate rotation everywhere.
-    ///
-    /// Pools every age, which is what "is the visible star layer a disk"
-    /// asks. To ask instead whether stars are being *heated* after birth,
-    /// use `rotation_dispersion_ratio_for_age`: a population whose cohorts
-    /// are each individually cold but born on different mean orbits reads
-    /// as a mush here while no star has been heated at all.
+    /// v_rot / sigma over the luminous disk - the metric that separates a
+    /// disk from a mush. Prefer it over scirc. docs/star-metrics.md.
     pub fn rotation_dispersion_ratio(&self) -> f32 {
         self.rotation_dispersion_ratio_for_age(0.0, f32::INFINITY)
     }
 
-    /// `rotation_dispersion_ratio` restricted to stars whose age falls in
-    /// `[min_age, max_age)`, in sim-time units.
-    ///
-    /// This separates the two ways a star layer loses rotational support,
-    /// which the pooled metric cannot tell apart. If each age cohort is
-    /// cold and only the mixture is hot, the dispersion was written in at
-    /// birth and accumulates as generations pile up - no force is heating
-    /// anything, and ablating forces will not move it. If old cohorts read
-    /// hotter than young ones, something is heating stars after birth and
-    /// the gap between cohorts is the heating rate. See galaxy-gen#66.
+    /// vsig for one age cohort. Separates born-hot from heated-after, which
+    /// the pooled number cannot. docs/star-metrics.md.
     pub fn rotation_dispersion_ratio_for_age(&self, min_age: f32, max_age: f32) -> f32 {
         const BINS: usize = 8;
         /// Below this a bin's dispersion is noise, not a measurement.
@@ -1897,12 +1717,8 @@ impl Galaxy {
             let var_t = (sum_t2[b] / n - mean_t * mean_t).max(0.0);
             let var_r = (sum_r2[b] / n - mean_r * mean_r).max(0.0);
             let sigma = ((var_t + var_r) * 0.5).sqrt();
-            // A bin with near-zero dispersion is perfectly ordered, which
-            // is maximal rotational support - not missing data. Flooring
-            // sigma keeps the ratio finite and large; discarding the bin
-            // instead would report a cold disk as zero rotation, which is
-            // exactly backwards. RATIO_CAP bounds the result so one cold
-            // bin cannot dominate the average across bins.
+            // DRAGON: a near-zero-dispersion bin is maximal support, not
+            // missing data. Floor sigma, never discard the bin.
             total += (mean_t.abs() / sigma.max(SIGMA_FLOOR)).min(RATIO_CAP);
             bins_used += 1;
         }
@@ -1913,27 +1729,8 @@ impl Galaxy {
         }
     }
 
-    /// Mean ratio of resolved-star tangential speed to the circular speed
-    /// of the field those stars actually read, over the luminous disk.
-    ///
-    /// CAVEAT (galaxy-gen#66): this does not distinguish a circular disk
-    /// orbit from an eccentric orbit at pericenter, where tangential
-    /// speed is high by construction, so it scores fast eccentric
-    /// populations well. Do not tune against it. Use
-    /// `rotation_dispersion_ratio` to judge whether the disk is a disk;
-    /// this remains useful only for the narrower question of whether
-    /// stars carry roughly the angular momentum their potential holds.
-    ///
-    /// This is the diagnostic for whether the stellar population is on
-    /// the orbits its own potential supports. 1.0 means a balanced disk.
-    /// Above 1.0 means stars carry more angular momentum than the field
-    /// holds, so they climb outward, phase-mix, and pool past the disk
-    /// edge. Below 1.0 means they fall inward. Either way the population
-    /// randomizes, which is what kills stellar rotation by t~2500.
-    ///
-    /// Weighted by nothing and sampled over disk stars only: halo stars
-    /// are already on plunging orbits by construction and would swamp
-    /// the signal we care about.
+    /// DRAGON: DO NOT TUNE AGAINST THIS - it scores an eccentric orbit at
+    /// pericenter as a good disk. Use vsig. docs/star-metrics.md.
     pub fn star_circular_ratio(&self) -> f32 {
         let center = self.size as f32 * 0.5;
         let disk_r = self.disk_radius();
@@ -1964,10 +1761,8 @@ impl Galaxy {
         }
     }
 
-    /// Companion to `star_circular_ratio`: the same ratio a newborn star
-    /// would be given right now at a representative disk radius. Splits
-    /// "born wrong" from "drifted wrong" - if birth is already off 1.0,
-    /// the orbits never had a chance.
+    /// The same ratio a newborn would be handed right now: splits born
+    /// wrong from drifted wrong. docs/star-metrics.md.
     pub fn birth_circular_ratio(&self, radius_frac: f32) -> f32 {
         let r = (self.disk_radius() * radius_frac).max(1e-3);
         let v_circ = self.association_circular_speed(r);
@@ -1980,19 +1775,19 @@ impl Galaxy {
         // so the worst case a newborn can inherit is that cap.
         let mut target = (Galaxy::BIRTH_GAS_VEL_CAP + stellar_support + background_support)
             .min(Galaxy::ASSOCIATION_ORBIT_SPEED_CAP);
-        // The birth site's ablation clamp has to be mirrored here too. On
-        // #66 the previous sweep reported an uncapped ratio while births
-        // were actually capped, and the retraction that followed cost more
-        // than this branch does. Probe and call site move together.
-        if let Some(ratio) = crate::ablation::ablation().birth_orbit_ratio_cap {
+        // DRAGON: mirror the birth site's clamp exactly. #66 reported an
+        // uncapped ratio while births were capped, and retracted.
+        let ratio = crate::ablation::ablation()
+            .birth_orbit_ratio_cap
+            .unwrap_or(self.scenario.params().birth_orbit_ratio_cap);
+        if ratio > 0.0 {
             target = target.min(v_circ * ratio);
         }
         target / v_circ
     }
 
-    /// Fraction of radial disk bands that carry the same pitched arm phase.
-    /// Sparse clumps can score well globally, so visible morphology requires
-    /// both coherence and radial coverage.
+    /// Fraction of radial bands sharing the arm phase. Sparse clumps score
+    /// well globally, so morphology needs coverage too.
     pub fn spiral_coverage(&self) -> f32 {
         self.spiral_structure().1
     }
@@ -2273,9 +2068,8 @@ impl Galaxy {
         self.gravitate_all();
     }
 
-    /// Apply a rotating logarithmic density-wave potential to gas. The
-    /// force is normal to the configured arm phase, so orbiting gas crosses
-    /// the wave, compresses along it, and can collapse into stars there.
+    /// Rotating logarithmic density-wave potential, normal to the arm
+    /// phase so gas crosses and compresses. docs/spiral-density-waves.md.
     pub(crate) fn process_spiral_density_wave(&mut self, time: f32) {
         let p = self.scenario.params();
         if p.spiral_wave_strength <= 0.0 {
@@ -2316,11 +2110,8 @@ impl Galaxy {
             self.acc_y[i] += force * grad_y;
         }
 
-        // Stars feel the same arms, at a fraction. Without this the wave
-        // that carves the spiral is applied to gas exclusively, and stars
-        // only ever sense a quarter-strength, 64-grid-smoothed echo of the
-        // result - which is why they never traced the arms. A spiral
-        // reads as a spiral because young stars sit in it.
+        // Stars feel the arms at a fraction - currently zero, measured to
+        // buy no arm tracing. docs/stellar-heating.md.
         let coupling = Galaxy::star_wave_coupling();
         if coupling > 0.0 {
             for s in 0..self.stars.len() {
@@ -2352,9 +2143,8 @@ impl Galaxy {
         }
     }
 
-    /// Apply an axisymmetric annular potential to gas. Ejecta cross and
-    /// settle into the minimum while newborn collisionless stars retain
-    /// the orbital velocity inherited from their natal gas.
+    /// Axisymmetric annular potential on gas: ejecta cross and settle into
+    /// the minimum. docs/ring-density-waves.md.
     pub(crate) fn process_ring_density_wave(&mut self, time: f32) {
         let p = self.scenario.params();
         if p.ring_wave_strength <= 0.0 {
@@ -2379,9 +2169,8 @@ impl Galaxy {
             self.acc_y[i] += radial_force * y / r;
         }
 
-        // Stars feel the annulus too, at the same fraction as the spiral
-        // arms. A ring galaxy whose stars ignore the ring is a ring of
-        // gas with a uniform star haze laid over it.
+        // Stars feel the annulus at the same fraction as the arms. See
+        // docs/stellar-heating.md.
         let coupling = Galaxy::star_wave_coupling();
         if coupling > 0.0 {
             for s in 0..self.stars.len() {
@@ -2398,9 +2187,8 @@ impl Galaxy {
         }
     }
 
-    /// Resolve the local isothermal pressure gradient before advection.
-    /// The conservative post-advection flux below carries the same model
-    /// through parcel collisions without inventing mass or momentum.
+    /// Local isothermal pressure gradient, before advection. The
+    /// post-advection flux carries the same model, conservatively.
     pub(crate) fn process_gas_pressure(&mut self, _time: f32) {
         let p = self.scenario.params();
         if p.gas_pressure <= 0.0 {
@@ -2441,9 +2229,8 @@ impl Galaxy {
         self.apply_acceleration(time);
     }
 
-    /// Rebuild the coarse acceleration field from gas + stars + the
-    /// central black hole. Stars read this field (never pairwise forces),
-    /// so the star population adds O(N), not O(N^2).
+    /// Rebuild the coarse field from gas, stars, and the hole. Stars read
+    /// this, never pairwise forces, so they cost O(N).
     pub(crate) fn process_gravity_field(&mut self, _time: f32) {
         let size_f = self.size as f32;
         let active_est = self.stars.len() + 64;
@@ -2474,11 +2261,8 @@ impl Galaxy {
         let res = Galaxy::FIELD_RES;
         let cell = size_f / res as f32;
         let theta_sq = Galaxy::THETA * Galaxy::THETA;
-        // Halo centripetal term baked into the field so stars (and star
-        // births, which sample the field for orbital support) feel the
-        // halo too - but at half the gas curve and quarter total
-        // strength (STAR_FIELD_SCALE), so star orbits run at half the
-        // gas pace.
+        // Halo term baked in so stars and births feel it, at half the gas
+        // curve and quarter strength. docs/sim-constants.md.
         let p = self.scenario.params();
         let center = size_f * 0.5;
         let rc = p.halo_core_frac * self.disk_radius();
@@ -2510,22 +2294,23 @@ impl Galaxy {
         self.apply_field_ablations();
     }
 
-    /// Post-process the freshly built star field for a #66 ablation run.
-    /// Inert unless a switch is set, which is never the case in the wasm
-    /// build or a default native build.
+    /// Post-process the freshly built star field. Axisymmetrization ships;
+    /// the smoothing passes are an ablation and stay inert by default.
     fn apply_field_ablations(&mut self) {
         let ablation = crate::ablation::ablation();
         for _ in 0..ablation.field_smooth_passes {
             self.smooth_star_field();
         }
-        if ablation.axisymmetric_field {
+        if ablation
+            .axisymmetric_field
+            .unwrap_or(Galaxy::STAR_FIELD_AXISYMMETRIC)
+        {
             self.axisymmetrize_star_field();
         }
     }
 
-    /// One 3x3 box-blur pass over the coarse field, edges clamped. Removes
-    /// small-scale clumpiness without changing the field's overall
-    /// magnitude or its large-scale shape.
+    /// One 3x3 box-blur pass, edges clamped. Ablation only: measured not to
+    /// substitute for axisymmetrization. docs/stellar-heating.md.
     fn smooth_star_field(&mut self) {
         let res = Galaxy::FIELD_RES;
         let mut out_x = vec![0.0f32; res * res];
@@ -2549,11 +2334,8 @@ impl Galaxy {
         self.field_ay = out_y;
     }
 
-    /// Replace the field with its azimuthal average about the galactic
-    /// center: radially binned mean inward acceleration, re-emitted as a
-    /// purely radial field. Leaves a potential with no arms, no clumps,
-    /// and no time-varying pattern, while keeping the radial profile - so
-    /// the circular speed at every radius is preserved.
+    /// Azimuthal average of the field: no arms, no clumps, same radial
+    /// profile and circular speed. Ships. docs/stellar-heating.md.
     fn axisymmetrize_star_field(&mut self) {
         let res = Galaxy::FIELD_RES;
         let cell = self.size as f32 / res as f32;
@@ -2600,9 +2382,8 @@ impl Galaxy {
         }
     }
 
-    /// Factor applied to the sim's absolute length constants. 1.0 unless
-    /// a #70 ablation run has asked for lengths proportional to the
-    /// domain, which a default build and the wasm build never do.
+    /// Scale on the sim's absolute length constants. 1.0 unless a #70
+    /// ablation asks otherwise; wasm never does.
     fn length_scale(&self) -> f32 {
         match crate::ablation::ablation().length_reference_size {
             Some(reference) if reference > 1.0 => self.size as f32 / reference,
@@ -2610,9 +2391,8 @@ impl Galaxy {
         }
     }
 
-    /// Effective share of the analytic density-wave force acting on stars.
-    /// `STAR_WAVE_COUPLING` unless a #66 ablation run overrides it, which a
-    /// default build and the wasm build never do.
+    /// Share of the density-wave force acting on stars, unless a #66
+    /// ablation overrides it. wasm never does.
     fn star_wave_coupling() -> f32 {
         crate::ablation::ablation()
             .star_wave_coupling
@@ -2648,9 +2428,8 @@ impl Galaxy {
         (ax, ay)
     }
 
-    /// Reduce star-local cluster ids into deterministic center-of-mass
-    /// aggregates. Cluster ids are allocated densely, so a Vec keeps this
-    /// hot path cheaper and more reproducible than a hash table.
+    /// Reduce cluster ids into deterministic center-of-mass aggregates.
+    /// Dense ids, so a Vec beats a hash table here.
     fn association_aggregates(&self) -> Vec<AssociationAggregate> {
         let mut associations = vec![AssociationAggregate::default(); self.next_cluster_id as usize];
         for i in 0..self.stars.len() {
@@ -2671,10 +2450,8 @@ impl Galaxy {
         associations
     }
 
-    /// Find a still-forming association close enough to share the same
-    /// molecular complex. Distance is measured to young main-sequence
-    /// members rather than an ever-expanding bounding box, preventing a
-    /// long tidal stream from chaining unrelated births across the disk.
+    /// Find a still-forming association to join. DRAGON: measure to young
+    /// members, or a tidal stream chains the whole disk together.
     fn nearby_young_association(&self, x: f32, y: f32) -> Option<u32> {
         let join_radius = Galaxy::ASSOCIATION_JOIN_RADIUS * self.length_scale();
         let join_r2 = join_radius * join_radius;
@@ -2702,11 +2479,8 @@ impl Galaxy {
         best.map(|(_, cluster)| cluster)
     }
 
-    /// Circular support from an azimuthal average of the live stellar
-    /// field. Sampling around the same radius removes the nearest-clump
-    /// direction that makes a local field sample unsuitable for choosing
-    /// an association's galactic orbit, while retaining the actual gas,
-    /// halo, stellar, and black-hole mass already encoded in the field.
+    /// Circular support from an azimuthal average, so a birth orbit is not
+    /// aimed at the nearest clump. docs/stellar-associations.md.
     fn association_circular_speed(&self, radius: f32) -> f32 {
         if radius < 1e-3 {
             return 0.0;
@@ -2724,9 +2498,8 @@ impl Galaxy {
         (mean_inward * radius).sqrt().min(Galaxy::BIRTH_VCIRC_CAP)
     }
 
-    /// Smooth axisymmetric support not captured robustly by a local sample
-    /// of the coarse, clump-dominated field. The weights keep associations
-    /// coupled to the intentionally slower stellar rotation curve.
+    /// Smooth axisymmetric support the clumpy field sample misses, keeping
+    /// associations on the slower stellar curve.
     fn association_background_speed(&self, radius: f32) -> f32 {
         let params = self.scenario.params();
         let halo_core = params.halo_core_frac * self.disk_radius();
@@ -2758,10 +2531,8 @@ impl Galaxy {
             )
     }
 
-    /// Integrate the star population: field gravity + two-tier halo
-    /// confinement, semi-implicit Euler, no movement cap (stars cannot
-    /// jam). Positions may leave the grid into the halo band; field
-    /// sampling clamps internally.
+    /// Integrate stars: field gravity plus two-tier halo confinement, no
+    /// movement cap. Positions may leave the grid; sampling clamps.
     pub(crate) fn process_integrate_stars(&mut self, time: f32) {
         let size_f = self.size as f32;
         let center = size_f * 0.5;
@@ -2770,11 +2541,8 @@ impl Galaxy {
         let halo_drag = (-Galaxy::STAR_HALO_DRAG * time).exp();
         let disk_drag = (-self.scenario.params().star_drag * time).exp();
 
-        // Associations are real but temporary. Once the oldest member has
-        // exhausted the binding lifetime, or a member crosses the local
-        // tidal radius after the embedded-cluster grace period, that star
-        // keeps its exact phase-space state and simply becomes unbound.
-        // The resulting differential galactic acceleration makes a stream.
+        // Release is a lifecycle mutation only: the star keeps its exact
+        // phase-space state. docs/stellar-associations.md.
         let mut associations = self.association_aggregates();
         let tidal_radii: Vec<f32> = associations
             .iter()
@@ -2802,20 +2570,15 @@ impl Galaxy {
             }
         }
 
-        // Rebuild after releases, then calculate a softened association
-        // acceleration for every remaining member. Subtracting each
-        // cluster's mass-weighted mean acceleration makes the internal
-        // force momentum-neutral, so binding cannot propel the cluster's
-        // center of mass or manufacture orbital angular momentum.
+        // DRAGON: subtract each cluster's mean acceleration, or binding
+        // propels its own center of mass.
         associations = self.association_aggregates();
         let mut binding_ax = vec![0.0f32; self.stars.len()];
         let mut binding_ay = vec![0.0f32; self.stars.len()];
         let mut recoil_x = vec![0.0f32; associations.len()];
         let mut recoil_y = vec![0.0f32; associations.len()];
-        // #66 ablation: associations still form, release, and stream, they
-        // just stop pulling on their members. Leaves the binding arrays at
-        // zero rather than skipping the loop, so the release rules above
-        // and the integration below are untouched.
+        // #66 ablation: zero the binding arrays rather than skip the loop,
+        // so release and integration stay untouched.
         let bind = !crate::ablation::ablation().no_association_binding;
         let binding_soften = self.length_scale() * self.length_scale();
         for i in 0..self.stars.len() {
@@ -2956,12 +2719,8 @@ impl Galaxy {
         for i in 0..self.n {
             let m = self.mass[i];
             if m < density_floor {
-                // Only density failure resets - dispersal undoes the
-                // compression. Radiation merely DELAYS ignition: a
-                // shock-compressed cell near a luminous region holds its
-                // heat (and causal parent) and waits to cool, otherwise
-                // every dead giant's afterglow would erase the very
-                // trigger its supernova just planted.
+                // DRAGON: only density failure resets. Radiation DELAYS,
+                // or every afterglow erases its own supernova's trigger.
                 self.collapse_heat[i] = 0;
                 self.heat_parent[i] = 0;
                 continue;
@@ -2976,7 +2735,7 @@ impl Galaxy {
                     continue;
                 }
             }
-            if self.radiation_at_cell(i) >= Galaxy::COLLAPSE_RADIATION_RESIST
+            if self.radiation_at_cell(i) >= self.collapse_radiation_resist()
                 && !crate::ablation::ablation().no_collapse_radiation_resist
             {
                 continue;
@@ -3077,7 +2836,7 @@ impl Galaxy {
                 if m == 0 {
                     continue;
                 }
-                if hot_only && self.radiation_at_cell(i) < Galaxy::COLLAPSE_RADIATION_RESIST {
+                if hot_only && self.radiation_at_cell(i) < self.collapse_radiation_resist() {
                     continue;
                 }
                 let per_cell = if hot_only {
@@ -3194,9 +2953,8 @@ impl Galaxy {
         metals
     }
 
-    /// Retire long-lived outer stars and old dim remnants from the resolved
-    /// particle set into a diffuse stellar-halo reservoir. This is phase
-    /// mixing, not destruction: mass stays in the baryonic ledger.
+    /// Retire outer stars and dim remnants into the diffuse halo. Phase
+    /// mixing, not destruction - mass stays in the ledger.
     pub(crate) fn process_stellar_halo(&mut self, _time: f32) {
         let center = self.size as f32 * 0.5;
         let mix_radius = self.disk_radius() * Galaxy::STELLAR_HALO_MIX_RADIUS;
@@ -3225,9 +2983,8 @@ impl Galaxy {
             let aged_single_white_dwarf = stage == Stage::WhiteDwarf
                 && self.stars.binary_id[i] == NO_BINARY
                 && self.stars.age[i] >= Galaxy::WHITE_DWARF_RESOLVED_AGE;
-            // #72: a field star too faint to read as a point is diffuse
-            // light, not a particle. Association members are exempt -
-            // a cluster should read as a cluster while it is one.
+            // Too faint to read as a point is diffuse light. Association
+            // members exempt. docs/stellar-population.md.
             let unresolvably_faint = floor > 0.0
                 && stage == Stage::MainSequence
                 && self.stars.cluster_id[i] == NO_CLUSTER
@@ -3257,11 +3014,8 @@ impl Galaxy {
         }
     }
 
-    /// Advance stellar ages by the sim time elapsed since the last run
-    /// (dt x cadence, assuming dt is stable between runs - dt changes
-    /// mid-run smear ages slightly, which is acceptable). Massive stars
-    /// core-collapse. Lighter stars expand, shed envelopes, and leave white
-    /// dwarfs that may later produce a delayed thermonuclear supernova.
+    /// Advance ages by dt x cadence, then run the death channels.
+    /// See docs/stellar-evolution.md.
     pub(crate) fn process_stellar_aging(&mut self, time: f32) {
         let elapsed = time * 8.0;
         let tick = self.tick_count;
@@ -3301,9 +3055,8 @@ impl Galaxy {
             let binary_core_collapse = self.stars.binary_id[i] != NO_BINARY
                 && self.stars.mass[i] * 2.0 >= Galaxy::NS_BINARY_SPLIT_MASS;
             if self.stars.mass[i] >= Galaxy::SN_MASS_THRESHOLD || binary_core_collapse {
-                // Target carries the nearest cell index so renderer
-                // transients and the shock handler know where it happened
-                // even after the star is gone.
+                // Target carries the nearest cell so transients and the
+                // shock handler survive the star's removal.
                 let cell = self.cell_index_at(self.stars.pos_x[i], self.stars.pos_y[i]);
                 self.events.emit(
                     tick,
@@ -3614,9 +3367,8 @@ impl Galaxy {
             .min(self.stars.mass[i]);
     }
 
-    /// A mature white-dwarf pair disrupts completely. Integer gas returns
-    /// to the grid, any fractional or capacity-limited remainder enters the
-    /// radiated sink, and thermonuclear burning adds an explicit metal yield.
+    /// A mature white-dwarf pair disrupts completely, with an explicit
+    /// metal yield. docs/lifecycle-chains.md.
     fn handle_type_ia_supernova(&mut self, ev: &Event) {
         let (Some(source), Some(target)) = (
             self.stars.index_of_id(ev.source),
@@ -3674,9 +3426,8 @@ impl Galaxy {
         );
     }
 
-    /// ShockWave: boost collapse heat around the blast so swept gas is
-    /// likelier to collapse - and record parentage so induced collapses
-    /// carry the causal chain.
+    /// Boost collapse heat around the blast and record parentage, so
+    /// induced collapses carry the causal chain.
     fn handle_shock_wave(&mut self, ev: &Event) {
         let cell = ev.target as usize;
         if cell >= self.n {
@@ -3699,9 +3450,8 @@ impl Galaxy {
         }
     }
 
-    /// Merge a resolved neutron-star pair into one compact remnant. A small
-    /// fraction leaves the baryonic system as radiation, and the visible
-    /// gamma-ray burst is emitted as a causal follow-up event.
+    /// Merge a neutron-star pair into one remnant, emitting the burst as a
+    /// causal follow-up. docs/lifecycle-chains.md.
     fn handle_neutron_star_merger(&mut self, ev: &Event) {
         let (Some(source), Some(target)) = (
             self.stars.index_of_id(ev.source),
@@ -3766,9 +3516,8 @@ impl Galaxy {
         );
     }
 
-    /// Deposit the short burst into the coarse radiation field. The event
-    /// itself carries the renderer transient, while this splat briefly
-    /// suppresses collapse in the surrounding gas.
+    /// Splat the burst into the radiation field, briefly suppressing
+    /// collapse nearby. The transient rides the event itself.
     fn handle_gamma_ray_burst(&mut self, ev: &Event) {
         let cell = ev.target as usize;
         if cell >= self.n {
@@ -3792,9 +3541,8 @@ impl Galaxy {
         }
     }
 
-    /// Drive two opposed, radiation-bright gas outflows while the active
-    /// galactic nucleus is lit. Gas stays on the existing integrator and
-    /// dissipation paths, so displaced and heated mass remains accounted.
+    /// Two opposed outflows while the nucleus is lit, on the existing
+    /// integrator paths so mass stays accounted. docs/quasar-feedback.md.
     pub(crate) fn process_quasar_feedback(&mut self, _time: f32) {
         if self.quasar_ticks_remaining == 0 {
             self.quasar_cooldown = self.quasar_cooldown.saturating_sub(1);
@@ -3862,9 +3610,8 @@ impl Galaxy {
         }
     }
 
-    /// The black hole feeds: a fraction of nearby core gas accretes each
-    /// run, and stars inside the capture radius are marked for capture
-    /// (the swallow itself is a BlackHoleCapture event next tick).
+    /// The hole feeds on core gas and marks stars for capture; the swallow
+    /// is next tick's event. docs/black-hole.md.
     pub(crate) fn process_bh_accretion(&mut self, time: f32) {
         if self.bh_mass <= 0.0 {
             return;
@@ -3889,9 +3636,8 @@ impl Galaxy {
                 continue;
             }
 
-            // Weak nuclear viscosity removes only tangential momentum.
-            // The ring remains an orbiting structure while slowly leaking
-            // low-angular-momentum gas into the two-cell sink.
+            // Viscosity removes tangential momentum only, so the nuclear
+            // ring orbits visibly while leaking inward.
             if r > 1e-3 {
                 let radial_weight = 1.0 - r / Galaxy::BH_INFLOW_RADIUS;
                 let damp = (-Galaxy::BH_NUCLEAR_VISCOSITY * elapsed * radial_weight).exp();
@@ -3979,11 +3725,8 @@ impl Galaxy {
         }
     }
 
-    /// Hawking evaporation: dM = -HAWKING_COEFF / M^2 per sim-time unit.
-    /// Negligible while the hole is fat, runaway once it gets small -
-    /// the shape of the real thing, at a wildly exaggerated rate. The
-    /// radiated mass leaves the baryonic ledger through radiated_total
-    /// and heats the core radiation field on its way out.
+    /// Hawking dM = -k/M^2: negligible while fat, runaway once small.
+    /// Real shape, exaggerated rate. docs/black-hole.md.
     pub(crate) fn process_bh_evaporation(&mut self, time: f32) {
         if self.bh_mass <= 0.0 {
             return;
@@ -4047,9 +3790,8 @@ impl Galaxy {
         }
     }
 
-    /// Consume gas around the collapsing cell into a birth budget carried
-    /// on the follow-up StarBirth event. The budget mass is in flight for
-    /// exactly one tick (see pending_birth_mass and the ledger test).
+    /// Consume gas into a birth budget carried on the StarBirth event.
+    /// In flight for exactly one tick - see the ledger test.
     fn handle_cloud_collapse(&mut self, ev: &Event) {
         let i = ev.source as usize;
         if i >= self.n {
@@ -4089,14 +3831,10 @@ impl Galaxy {
         );
     }
 
-    /// Spawn a cluster of stars from the budget, masses drawn from the
-    /// IMF (mostly red dwarfs, occasionally a giant), leftover folded
-    /// into the heaviest draw so the masses sum to the budget exactly
-    /// and the baryonic ledger stays closed. Nearby young births join one
-    /// association. Each batch receives a shared galactic orbit plus a
-    /// momentum-neutral internal spin, rather than independently adding
-    /// circular speed to whatever radial motion the gas happened to carry.
+    /// Spawn a cluster from the budget: IMF draws summing to the budget
+    /// exactly, one shared orbit. docs/stellar-associations.md.
     fn handle_star_birth(&mut self, ev: &Event) {
+        let p = self.scenario.params();
         let i = ev.target as usize;
         if i >= self.n {
             return;
@@ -4130,9 +3868,8 @@ impl Galaxy {
             }
             masses[hi] += remaining;
         }
-        // Split intermediate and core-collapse-scale births into equal
-        // partners. Component mass distinguishes the later white-dwarf
-        // and neutron-star channels without another per-star fate array.
+        // Split heavy births into equal partners; component mass alone
+        // picks the later death channel. docs/lifecycle-chains.md.
         let mut expanded: Vec<f32> = Vec::with_capacity(Galaxy::BIRTH_MAX_STARS);
         let mut binary_ids: Vec<u32> = Vec::with_capacity(Galaxy::BIRTH_MAX_STARS);
         for mass in masses {
@@ -4177,11 +3914,8 @@ impl Galaxy {
             gas_vy *= scale;
         }
 
-        // Choose one center-of-mass orbit from the prograde gas flow plus
-        // the azimuthally smoothed live stellar potential. Dense collapse
-        // gas may be streaming inward, but only a small radial share
-        // survives star formation. Separating the components preserves the
-        // disk's real rotation without inheriting its radial plunge.
+        // DRAGON: keep the prograde component, drop most of the radial one.
+        // Inheriting the plunge empties the disk. docs/stellar-heating.md.
         let rx = cx - center;
         let ry = cy - center;
         let galactic_r = (rx * rx + ry * ry).sqrt().max(1e-3);
@@ -4193,24 +3927,16 @@ impl Galaxy {
             self.association_circular_speed(galactic_r) * Galaxy::ASSOCIATION_ORBIT_SUPPORT;
         let background_support = self.association_background_speed(galactic_r);
         // The smooth floor supplements the deliberately quarter-strength
-        // live field. The cap keeps that compensation inside the old
-        // gas-plus-circular-support birth envelope.
-        //
-        // Measured caveat, see galaxy-gen#66: ASSOCIATION_ORBIT_SPEED_CAP
-        // is an absolute speed and it binds on nearly every birth, which
-        // hands newborns 2.0-3.2x the local circular speed of the field
-        // they will orbit in (`bcirc` in debug-sim). That is past the
-        // ~1.41x escape ratio, so the disk launches most of the stars it
-        // forms. Clamping to a multiple of circular speed instead fixes
-        // that cleanly - and breaks the elliptical scenario, whose
-        // spheroid is currently produced by those over-fast births. Do
-        // not "fix" this in isolation; #66 has the numbers.
+        // live field, and the absolute cap bounds the compensation.
         let smooth_support = stellar_support + background_support;
         let mut target_tangential =
             (gas_tangential.max(0.0) + smooth_support).min(Galaxy::ASSOCIATION_ORBIT_SPEED_CAP);
-        // #66 ablation: clamp to a multiple of the local circular speed
-        // rather than to an absolute speed. Off by default.
-        if let Some(ratio) = crate::ablation::ablation().birth_orbit_ratio_cap {
+        // DRAGON: the absolute cap alone hands newborns 2-3x their own
+        // circular speed, past escape. Ratio cap is load-bearing (#70).
+        let ratio = crate::ablation::ablation()
+            .birth_orbit_ratio_cap
+            .unwrap_or(p.birth_orbit_ratio_cap);
+        if ratio > 0.0 {
             let circular = self.association_circular_speed(galactic_r);
             if circular > 1e-3 {
                 target_tangential = target_tangential.min(circular * ratio);
@@ -4231,9 +3957,8 @@ impl Galaxy {
             (orbital_vx, orbital_vy)
         };
 
-        // A circular footprint reads as a cluster before the
-        // binding process has integrated even one tick. Compact-binary
-        // partners remain much closer than the broader association.
+        // A circular footprint reads as a cluster before binding has
+        // integrated a single tick.
         let mut positions: Vec<(f32, f32)> = Vec::with_capacity(n_stars);
         for k in 0..n_stars {
             let paired_with_previous =
@@ -4299,17 +4024,17 @@ impl Galaxy {
             } else {
                 (0.0, 0.0)
             };
-            // #70 ablation: isotropic random dispersion on top of the
-            // association's own internal motion, scaled to the local
-            // circular speed. Drawn before the mean subtraction below, so
-            // the batch still carries no net momentum.
-            let (ivx, ivy) = match crate::ablation::ablation().birth_velocity_dispersion {
+            // Isotropic dispersion over the association's own motion,
+            // drawn before the mean subtraction. docs/stellar-heating.md.
+            let sigma = crate::ablation::ablation()
+                .birth_velocity_dispersion
+                .unwrap_or(p.birth_velocity_dispersion);
+            let (ivx, ivy) = match Some(sigma) {
                 Some(sigma) if sigma > 0.0 => {
                     let scale = self.association_circular_speed(galactic_r) * sigma;
                     let angle = rng.random_range(0.0f32..std::f32::consts::TAU);
-                    // Rayleigh-ish magnitude from a uniform draw: more
-                    // small kicks than large ones, no hard ceiling at the
-                    // nominal sigma.
+                    // Rayleigh-ish from a uniform draw: mostly small kicks,
+                    // no hard ceiling at sigma.
                     let magnitude = scale * (-rng.random_range(1e-6f32..1.0).ln()).sqrt();
                     (ivx + angle.cos() * magnitude, ivy + angle.sin() * magnitude)
                 }
@@ -4399,10 +4124,8 @@ impl Galaxy {
             + self.radiated_metal_mass
     }
 
-    /// Stateless per-(process, tick) RNG stream. Derivation depends only
-    /// on (master_seed, process_id, tick_count), so streams are
-    /// independent per process, reproducible after a state round-trip,
-    /// and adding a process never shifts another's draw sequence.
+    /// Stateless per-(process, tick) RNG stream, so adding a process never
+    /// shifts another's draws. docs/processes-events.md.
     pub(crate) fn rng_stream(&self, process_id: u64) -> StdRng {
         let mixed = splitmix64(
             self.master_seed
@@ -4411,9 +4134,8 @@ impl Galaxy {
         StdRng::seed_from_u64(mixed)
     }
 
-    /// Derived main-sequence attributes: (lifetime, luminosity,
-    /// class_index). class_index is log-mass normalized 0..1, M -> O;
-    /// the renderer maps it through the stellar-classification colors.
+    /// Derived main-sequence attributes from mass alone.
+    /// See docs/stellar-population.md.
     fn star_attrs(mass: f32) -> (f32, f32, f32) {
         let m = mass.max(1.0);
         let lifetime = Galaxy::STAR_LIFETIME_COEFF * (30.0 / m).powi(2);
@@ -4458,10 +4180,8 @@ impl Galaxy {
         (self.size as f32 * 0.5 - 1.0).max(1.0)
     }
 
-    // (col, row) — x is column, y is row. Matches the pre-rewrite convention.
-    // Indices are usize, not u16: the grid is size² cells, which passes
-    // 65_535 at size 256 and reaches 250_000 at the default 500. Columns
-    // and rows stay u16 because a coordinate is always below `size`.
+    // (col, row), x is column. DRAGON: indices are usize - size^2 passes
+    // 65_535 at size 256. Coordinates stay u16.
     #[inline]
     fn index_to_col_row(&self, index: usize) -> (u16, u16) {
         let size = self.size as usize;
@@ -4572,10 +4292,8 @@ impl Galaxy {
         let size = self.size as i32;
         let max_step = Galaxy::MAX_SUBGRID_STEP;
         let p = self.scenario.params();
-        // Flow relaxation replaces plain drag: velocity decays toward
-        // the local circular flow u(r) = v_c(r) t_hat, not toward rest.
-        // Same dt-scaled exponential, but the attractor state is a
-        // rotating disk - stillness is no longer where the sim settles.
+        // Flow relaxation, not drag: the attractor is a rotating disk.
+        // See docs/integrator.md.
         let flow_decay = (-p.flow_drag * time).exp();
         // Halo rotation curve v_c(r) = v_flat r / sqrt(r^2 + rc^2).
         let center = self.size as f32 * 0.5;
@@ -4583,11 +4301,8 @@ impl Galaxy {
         let rc = p.halo_core_frac * disk_r;
         let rc2 = rc * rc;
         let v_flat2 = p.v_flat * p.v_flat;
-        // Halo centripetal pull plus the circular-boundary spring (see
-        // CONFINE_STIFFNESS). Applied here, not in the force kernels, so
-        // the CPU, Barnes-Hut, and WebGPU paths all get them for free.
-        // The halo makes the circular flow an actual force equilibrium -
-        // relaxation alone would re-aim velocities it cannot sustain.
+        // Halo pull and boundary spring live here, not in the kernels, so
+        // all three force paths inherit them. docs/integrator.md.
         for i in 0..self.n {
             if self.mass[i] == 0 {
                 continue;
@@ -4603,9 +4318,8 @@ impl Galaxy {
             let ah = v_flat2 / (r2 + rc2);
             self.acc_x[i] -= ah * x;
             self.acc_y[i] -= ah * y;
-            // Point-mass pull from the live central hole. Keeping this in
-            // the shared integration step gives CPU, Barnes-Hut, and WebGPU
-            // gas paths the same nuclear potential.
+            // Live hole's point-mass pull, here so every force path gets
+            // the same nuclear potential.
             if self.bh_mass > 0.0 {
                 let softened = r2 + Galaxy::BH_GAS_SOFTENING_SQ;
                 let ab = Galaxy::GRAVATIONAL_CONSTANT * self.bh_mass / (softened * softened.sqrt());
@@ -4631,14 +4345,8 @@ impl Galaxy {
         let mut frac_next_x = vec![0.0f32; self.n];
         let mut frac_next_y = vec![0.0f32; self.n];
 
-        // Pass 1: integrate velocity and record each cell's INTENDED
-        // move. Movement is resolved in a second pass that knows every
-        // resident's intent - resolving in one sequential sweep made a
-        // full destination block its mover even when the resident was
-        // itself leaving this tick, which froze every dense cloud solid
-        // for motion toward higher indices (+x/+y). Bulk cloud motion -
-        // a convoy of full cells advancing together - needs the intent
-        // pass.
+        // Pass 1 records intent only. DRAGON: one sequential sweep freezes
+        // every dense cloud. docs/integrator.md.
         let mut want_vx = vec![0.0f32; self.n];
         let mut want_vy = vec![0.0f32; self.n];
         let mut want_fx = vec![0.0f32; self.n];
@@ -4662,9 +4370,8 @@ impl Galaxy {
             let mut vx = self.vel_x[i] + self.acc_x[i] * time;
             let mut vy = self.vel_y[i] + self.acc_y[i] * time;
 
-            // Relax toward the local circular flow. Doubles as the
-            // energy sink the grid-quantized sim overheats without -
-            // dissipation circularizes orbits instead of stopping them.
+            // Relax toward the local circular flow - also the energy sink
+            // the grid-quantized sim overheats without.
             let x = self.xs_i[i] as f32 + self.frac_x[i] - center;
             let y = self.ys_i[i] as f32 + self.frac_y[i] - center;
             let r2 = x * x + y * y;
@@ -4678,11 +4385,8 @@ impl Galaxy {
             vx = ux + (vx - ux) * flow_decay;
             vy = uy + (vy - uy) * flow_decay;
 
-            // Sub-grid position update. The step cap clamps the VECTOR
-            // norm, not each axis: a per-axis clamp lets diagonal movers
-            // travel sqrt(2) faster than axis-aligned ones, which
-            // funnels every fast transit (bang ejecta) into four
-            // diagonal sectors and shreds rings into a 4-blob pinwheel.
+            // DRAGON: clamp the VECTOR norm, not each axis, or rings shred
+            // into a 4-blob pinwheel. docs/integrator.md.
             let mut dx = vx * time;
             let mut dy = vy * time;
             let step_len_sq = dx * dx + dy * dy;
@@ -4732,16 +4436,8 @@ impl Galaxy {
             want_sy[i] = step_dy as i8;
         }
 
-        // Pass 2: resolve admissions iteratively, like a traffic wave.
-        // A mover is admitted only when its destination has room
-        // counting residents CONFIRMED to be leaving - trusting mere
-        // intent is over-permissive in a jam (everyone intends to move,
-        // nobody actually can) and lets whole clouds collapse onto
-        // their leading edge into one mega-blob. Iterating unwinds a
-        // convoy from its free end: the front car pulls away, the next
-        // fills the gap. Incompressibility semantics are unchanged - a
-        // genuinely full destination still parks the mover at its cell
-        // edge with velocity intact.
+        // Pass 2 admits only against CONFIRMED departures. DRAGON: trusting
+        // intent collapses clouds into a mega-blob. docs/integrator.md.
         const RESOLVE_ITERATIONS: usize = 3;
         // 0 = pending, 1 = moving (admitted), 2 = staying.
         let mut resolved = vec![0u8; self.n];
@@ -4836,12 +4532,8 @@ impl Galaxy {
 
         self.transport_structured_gas(time);
 
-        // Pressure overflow: cells above the cap shed the excess to their
-        // four neighbors, carrying momentum with the shed mass. Without
-        // this a capped region gridlocks permanently (transfer rejection
-        // alone freezes rms_radius within ~500 ticks). Sequential in-place
-        // sweep - a shed can cascade within the same tick, which just
-        // propagates the pressure wave faster.
+        // Overflow shedding. DRAGON: without it a capped region gridlocks
+        // permanently. docs/integrator.md.
         let cap = Galaxy::CELL_MASS_CAP as u16;
         for i in 0..self.n {
             let m = self.mass[i];
@@ -4884,10 +4576,8 @@ impl Galaxy {
         }
     }
 
-    /// Resolve sub-cell isothermal pressure as a conservative mass flux.
-    /// Grid parcels otherwise merge irreversibly whenever their paths meet,
-    /// so acceleration alone cannot keep a diffuse cloud resolved. This
-    /// exchange carries the source metal fraction and momentum exactly.
+    /// Isothermal pressure as a conservative mass flux - acceleration alone
+    /// cannot keep a cloud resolved. docs/integrator.md.
     fn transport_structured_gas(&mut self, time: f32) {
         let p = self.scenario.params();
         let diffusion = (p.gas_pressure * time).clamp(0.0, 0.45);
@@ -4958,9 +4648,8 @@ impl Galaxy {
                 }
             }
 
-            // Cooling gas also drifts a small distance down the rotating
-            // arm potential. This conservative sub-grid transport stops
-            // parcel merging from erasing the density wave between cells.
+            // Cooling gas drifts down the arm potential, so parcel merging
+            // cannot erase the wave between cells.
             if arm_transport > 0.0 && allocated < mass {
                 let x = self.xs_i[i] as f32 + self.frac_x[i] - center;
                 let y = self.ys_i[i] as f32 + self.frac_y[i] - center;
@@ -5000,9 +4689,8 @@ impl Galaxy {
                 }
             }
 
-            // Ring gas drifts toward the annular potential minimum. The
-            // score is radial only, so this cannot introduce an azimuthal
-            // arm or bar into the axisymmetric scenario.
+            // Ring drift is radial only, so it cannot introduce an arm or
+            // bar into an axisymmetric scenario.
             if ring_transport > 0.0 && allocated < mass {
                 let target = disk_r * p.ring_radius_frac;
                 let x = self.xs_i[i] as f32 + self.frac_x[i] - center;
@@ -5143,24 +4831,15 @@ impl Node {
     }
 }
 
-/// Traversal-time node: 24 bytes against the build node's 48.
-///
-/// The force walk is the most expensive thing the sim does - 195 node
-/// visits per body, 21 million per tick at size 500 - and every visit is
-/// a random hop into the arena, so bytes per node is the cost that
-/// decides it. Four of the build node's fields are dead by then (`cx`,
-/// `cy`, `body`, and the holes in a four-way child array that is mostly
-/// empty), and `h` is only ever wanted as a squared side length. Dropping
-/// them halves the arena, and the contiguous child block means a node's
-/// children arrive on one or two lines instead of four scattered ones.
+/// Traversal-time node: 24 bytes against the build node's 48, for a walk
+/// that makes 21M visits a tick. docs/perf-rewrite.md part three.
 #[derive(Clone, Copy)]
 struct HotNode {
     com_x: f32,
     com_y: f32,
     mass: f32,
-    /// Side length squared, `(2h)^2`. The opening test compares s^2
-    /// against theta^2 d^2, and deriving it cost two multiplies on every
-    /// one of those 21 million visits.
+    /// Side length squared. Precomputed: deriving it cost two multiplies
+    /// on every one of 21M visits.
     s2: f32,
     /// First of `child_count` children, laid out contiguously by
     /// `compact`. Meaningless when the count is zero.
@@ -5204,22 +4883,13 @@ fn build_quadtree(px: &[f32], py: &[f32], pm: &[f32], ox: f32, oy: f32, size: f3
     Tree { nodes: hot }
 }
 
-/// Copy the build arena into traversal order: each node is followed by its
-/// children as one contiguous block, and a child's whole subtree lands
-/// before the next sibling's. The force walk is a depth-first descent, so
-/// this puts the node it reads next beside the one it just read. It also
-/// replaces the leaf-flag pass that used to walk the arena after the
-/// build, so the extra sweep is not extra.
-///
-/// `src` is the build node to copy, `slot` the already-reserved place in
-/// `out` to copy it into.
+/// Copy the build arena into depth-first traversal order, children
+/// contiguous. Replaces the old leaf-flag pass. docs/perf-rewrite.md.
 fn compact(build: &[Node], src: usize, slot: usize, out: &mut Vec<HotNode>) {
     let n = &build[src];
 
-    // Existing children in quadrant order. The walk pushes them in this
-    // order, exactly as the four-way scan it replaces did: change the
-    // order and every body sums its force terms differently, which moves
-    // the last bits of a result the sim promises is reproducible.
+    // DRAGON: keep quadrant order. Reorder and every body sums its force
+    // terms differently, breaking reproducibility.
     let mut kids = [0u32; 4];
     let mut count = 0usize;
     for &c in &n.children {
@@ -5356,11 +5026,8 @@ fn subdivide_and_insert(
 }
 
 impl Tree {
-    /// Force on (bx, by). Theta criterion: s/d < theta accepts subtree CoM.
-    ///
-    /// `stack` is caller-owned scratch. The traversal runs once per active
-    /// cell - 250k times per tick at size 500 - so a `Vec` allocated per
-    /// call put a quarter-million malloc/free pairs on the hot path.
+    /// Force on (bx, by); s/d < theta accepts a subtree's CoM. `stack` is
+    /// caller-owned - a per-call Vec was 250k mallocs a tick.
     fn force(
         &self,
         bx: f32,
@@ -5692,9 +5359,8 @@ mod tests_initial_generation {
 
     #[test]
     fn test_tick_with_accel_keeps_scenario_pressure_when_external_forces_are_zero() {
-        // External acceleration replaces gravity only. Scenario-owned
-        // pressure must still redistribute an isolated dense cell while
-        // preserving the total mass ledger.
+        // External acceleration replaces gravity only; scenario pressure
+        // still runs and the ledger still closes.
         let mut g = Galaxy::new(8, 2);
         g.scenario = Scenario::IrregularElliptical;
         g.mass[2 * 8 + 3] = 30;
@@ -5716,18 +5382,8 @@ mod tests_initial_generation {
 mod tests_dynamics {
     use super::*;
 
-    /// Calibration for `rotation_dispersion_ratio` against two populations
-    /// whose answer is known by construction, because a metric nobody has
-    /// checked against a known answer is how galaxy-gen#66 went wrong the
-    /// first time.
-    ///
-    /// A cold rotating ring must score high; the same stars with their
-    /// velocities randomized must score near zero. Without this, a metric
-    /// that silently returns garbage still produces a plausible curve.
-    /// Calibration for `stellar_arm_affinity` against a gas pattern whose
-    /// answer is known by construction: an m=2 bar of dense cells with
-    /// empty gaps between. Stars placed inside the dense region must
-    /// score well above 1; stars spread over all angles must score near 1.
+    /// Known-answer calibration for vsig and arm affinity.
+    /// Why these exist at all: docs/metric-calibration.md.
     #[test]
     fn test_stellar_arm_affinity_detects_stars_sitting_in_the_gas() {
         let size = 80u16;
@@ -5857,27 +5513,8 @@ mod tests_dynamics {
         );
     }
 
-    /// Calibration for the age-resolved split against the two ways a star
-    /// layer loses pooled rotational support, which pooled `vsig` reports
-    /// identically and the split has to tell apart.
-    ///
-    /// Generational offset: cohorts each perfectly cold, streaming at
-    /// different speeds. Pooling charges the gap between them to
-    /// dispersion, so pooled reads far below either cohort while nothing
-    /// has been heated.
-    ///
-    /// Heating: the old cohort's own velocities randomized. Pooled falls
-    /// too, but now the old cohort reads hot measured on its own.
-    ///
-    /// The discriminator is therefore the *cohort* number, not the pooled
-    /// one. Worth stating precisely, because the offset effect is weaker
-    /// than it looks: two cold cohorts a factor of two apart in speed
-    /// still pool to about 4.2, so generational offset alone cannot drive
-    /// pooled `vsig` under 1.0 unless the old cohort has lost nearly all
-    /// of its streaming - which is heating again.
-    ///
-    /// Without this the age split is just three more plausible curves, and
-    /// galaxy-gen#66 already spent one round on those.
+    /// Known-answer calibration for the age split: generational offset
+    /// against real heating. docs/metric-calibration.md.
     #[test]
     fn test_age_split_tells_generational_offset_from_actual_heating() {
         let size = 100u16;
@@ -5887,9 +5524,8 @@ mod tests_dynamics {
         let sample = |k: usize| std::f32::consts::TAU * k as f32 / N as f32;
         let radius = |k: usize| disk_r * (0.3 + 0.4 * ((k % 7) as f32 / 7.0));
 
-        // Two cold cohorts on the same orbits at different speeds: the
-        // young one at 2.0, the old one lagging at 1.0. Real disks do this
-        // - it is asymmetric drift - and it is not heating.
+        // Two cold cohorts at different speeds. Real disks do this -
+        // asymmetric drift - and it is not heating.
         let mut layered = Galaxy::new(size, 0);
         for (age, speed) in [(10.0f32, 2.0f32), (800.0, 1.0)] {
             for k in 0..N {
@@ -5923,9 +5559,8 @@ mod tests_dynamics {
              either cohort: pooled {pooled}, young {young}, old {old}"
         );
 
-        // Contrast: genuine heating of the old cohort, same mean speed.
-        // Here the split must report the old cohort itself as hot, so a
-        // low pooled number cannot be blamed on generational offset.
+        // Contrast: genuine heating at the same mean speed, so the split
+        // must report the old cohort itself as hot.
         let mut heated = Galaxy::new(size, 0);
         for k in 0..N {
             let angle = sample(k);
@@ -6013,12 +5648,8 @@ mod tests_dynamics {
             .collect()
     }
 
-    /// The axisymmetric-field ablation (galaxy-gen#66) has to remove
-    /// azimuthal structure *without* changing the rotation curve, or a run
-    /// under it measures a different galaxy rather than the same galaxy
-    /// with its arms removed. Checked against a field whose answer is
-    /// known by construction, for the reason recorded on the vsig
-    /// calibration above.
+    /// Axisymmetrization must not change the rotation curve, or it measures
+    /// a different galaxy. docs/metric-calibration.md.
     #[test]
     fn test_axisymmetrizing_the_field_keeps_the_rotation_curve_and_drops_the_arms() {
         let size = 200u16;
@@ -6055,9 +5686,8 @@ mod tests_dynamics {
         );
     }
 
-    /// The smoothed-field ablation must remove cell-scale roughness while
-    /// leaving the field's overall strength alone - otherwise it doubles
-    /// as a rotation-curve change and its result cannot be attributed.
+    /// Smoothing must leave field strength alone, or its result cannot be
+    /// attributed. docs/metric-calibration.md.
     #[test]
     fn test_smoothing_the_field_removes_roughness_without_moving_the_mean() {
         let size = 200u16;
@@ -6220,20 +5850,8 @@ mod tests_dynamics {
         }
     }
 
-    /// Domain size for the scenario-identity tests.
-    ///
-    /// These ran at 50 for years, which is a tenth of the 500 the site
-    /// actually serves, and several of the sim's length scales are
-    /// absolute cell counts rather than fractions of the disk radius - so
-    /// size 50 is not a small picture of size 500, it is a different
-    /// physical setup. Thresholds calibrated there were describing a
-    /// regime nobody ships. See galaxy-gen#70.
-    ///
-    /// 250 is the compromise. It is past the point where the size-sensitive
-    /// behaviour settles down (measured on #70: central concentration
-    /// converges to the size-500 answer at 250 and does not at 150), while
-    /// staying inside a test budget - about 10s per scenario against about
-    /// 100s at 500. The remaining gap to 500 is real and recorded on #70.
+    /// Scenario-test domain. DRAGON: the sim's length scales are absolute,
+    /// so a smaller size is a different setup. docs/stellar-heating.md.
     pub(super) const SCENARIO_TEST_SIZE: u16 = 250;
 
     #[test]
@@ -6294,9 +5912,8 @@ mod tests_dynamics {
             min_coverage.1,
             min_coverage.0
         );
-        // Scaled with the domain: about 9000 cells stay lit at size 250,
-        // against a few hundred at size 50. The bar is a collapse
-        // detector, not a fit.
+        // Scaled with the domain. The bar is a collapse detector, not a
+        // fit to the current numbers.
         assert!(
             min_occupied.0 >= 3000,
             "tick {} had only {} gas cells",
@@ -6573,12 +6190,8 @@ mod tests_dynamics {
 
     #[test]
     fn test_gas_dissipation_relaxes_toward_circular_flow_not_rest() {
-        // Mechanism guard for the rotation reflow: dissipation must pull
-        // velocity toward the local circular flow u(r), NOT toward zero
-        // (the old plain drag froze every galaxy into a static blob by
-        // t=1000). A lone cell at rest spins UP toward prograde
-        // tangential motion, and the gap to the flow closes by exactly
-        // exp(-flow_drag dt) per tick after the halo kick.
+        // Mechanism guard: dissipation pulls toward the circular flow, NOT
+        // toward zero. A cell at rest must spin UP. docs/integrator.md.
         let mut g = Galaxy::new(20, 0);
         // Isolate axisymmetric flow relaxation from the spiral scenarios'
         // additional non-axisymmetric density-wave force.
@@ -6590,9 +6203,8 @@ mod tests_dynamics {
         let disk_r = g.disk_radius();
         let rc = p.halo_core_frac * disk_r;
         let r = 5.0f32;
-        // Prograde tangential direction at (-5, 0) is (0, -1) for the
-        // seeded (-y, x) rotation sense... (-y, x)/r with y=0, x=-5 is
-        // (0, -1) scaled - i.e. negative vy.
+        // Prograde at (-5, 0) is (0, -1) for the seeded (-y, x) sense,
+        // i.e. negative vy.
         let vc = p.flow_support * p.v_flat * r / (r * r + rc * rc).sqrt();
         g.process_gravity(0.5);
         g.process_integrate_gas(0.5);
@@ -6604,9 +6216,8 @@ mod tests_dynamics {
             .map(|(i, &mass)| mass as f32 * g.vel_y[i])
             .sum::<f32>()
             / total_mass;
-        // After one tick from rest: v = a_halo dt + (v0 + a dt - u) part;
-        // radially the halo pulls +x (toward center), tangentially the
-        // relaxation closes the gap from 0 toward -vc by (1 - decay).
+        // One tick from rest: the halo pulls +x, and relaxation closes the
+        // tangential gap toward -vc by (1 - decay).
         let decay = (-p.flow_drag * 0.5f32).exp();
         let expected_vt = -vc * (1.0 - decay);
         assert!(
@@ -6636,11 +6247,8 @@ mod tests_golden {
         h
     }
 
-    /// Golden values pin the mass field after 100 ticks per scenario
-    /// (size 50, dt 0.5). Last recaptured for the persistent spiral
-    /// density wave and conservative gas-pressure transport.
-    /// If another deliberate change lands, recapture and say so in the
-    /// commit.
+    /// Mass field after 100 ticks per scenario. Last recaptured for #70.
+    /// DRAGON: recapture only for a deliberate change, and say so.
     #[test]
     fn test_golden_mass_field_per_scenario() {
         let cases = [
@@ -6663,7 +6271,7 @@ mod tests_golden {
                 17258326762361164472u64,
                 304165973445909694,
                 8148704436941916108,
-                1191255914182549640,
+                6116147315684281173,
             ]
         );
     }
@@ -7248,9 +6856,8 @@ mod tests_causal_loop {
 
     #[test]
     fn test_determinism_same_seed_same_trajectory_at_two_depths() {
-        // Same seed + same dt sequence -> identical star arrays and
-        // event log, checked at two depths to catch cadence-boundary
-        // nondeterminism. Both depths reach into the star-formation era.
+        // Two depths, both inside the star-formation era, to catch
+        // cadence-boundary nondeterminism.
         fn run(n: usize) -> (Vec<f32>, Vec<f32>, Vec<f32>, u64, [u64; 5]) {
             let mut g = Galaxy::new(50, 0).seed_with_mode_seeded(25, Scenario::IrregularSpiral, 42);
             for _ in 0..n {
@@ -7384,9 +6991,8 @@ mod tests_black_hole {
 
     #[test]
     fn test_hawking_evaporation_runs_away_for_a_small_hole() {
-        // Small seeded mass -> small hole. dM/dt = -H/M^2 barely leaks
-        // while fat and runs away once small - it must fully evaporate,
-        // land in the radiated sink, and take the lens with it.
+        // A small hole must fully evaporate, land in the radiated sink,
+        // and take the lens with it.
         let mut g = Galaxy::new(20, 0).seed_with_mode_seeded(2, Scenario::IrregularSpiral, 7);
         let bh0 = g.bh_mass_value();
         assert!(
@@ -7673,9 +7279,8 @@ mod tests_state_transfer {
             g.quasar_pulse_strength()
         );
 
-        // Ticking the fully rehydrated galaxy should produce the same next
-        // state. Gas arrays alone no longer suffice because the live black
-        // hole participates in gas acceleration.
+        // The rehydrated galaxy must tick identically. Gas arrays alone no
+        // longer suffice - the live hole accelerates gas.
         let next_orig = g.tick(1.0);
         let next_rehyd = rehydrated.tick(1.0);
         assert_eq!(next_orig.mass, next_rehyd.mass);
@@ -7736,11 +7341,8 @@ mod tests_indexing {
         assert_eq!((x, y), (0, 2));
     }
 
-    /// Regression: at the default size the grid holds 250_000 cells, so a
-    /// u16 index space wraps past row 131 and every neighbor lookup in
-    /// gas pressure and gas transport lands on the wrong cell. Walk the
-    /// whole grid - the size-3 cases above all fit in u16 and so proved
-    /// nothing about the size the app actually ships.
+    /// DRAGON: a u16 index space wraps past row 131 at the shipped size.
+    /// Walk the whole grid - the size-3 cases prove nothing.
     #[test]
     fn test_index_roundtrip_at_default_size() {
         let size: usize = 500;

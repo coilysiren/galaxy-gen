@@ -31,3 +31,9 @@ Struct-of-arrays (parallel `Vec<f32>` / `Vec<u16>`) so the physics inner loop is
 - [stellar-model.md](stellar-model.md) - star storage, births, associations, the spheroid.
 - [black-hole.md](black-hole.md) - accretion, quasar episodes, evaporation.
 - [processes-events.md](processes-events.md) - the scheduler and the event queue.
+- [integrator.md](integrator.md) - the gas integrator's four load-bearing decisions.
+- [seeding.md](seeding.md) - how an initial condition is built.
+- [stellar-population.md](stellar-population.md) - the IMF and the resolved-luminosity floor.
+- [stellar-heating.md](stellar-heating.md) - birth orbits and rotational support.
+- [star-metrics.md](star-metrics.md) - which star metrics to trust.
+- [boundary-ridge.md](boundary-ridge.md) - gas confinement and the star halo.

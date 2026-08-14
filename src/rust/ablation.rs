@@ -37,9 +37,9 @@ pub struct Ablation {
     /// 3x3 box-blur passes over the coarse star field after each rebuild, cutting
     /// small-scale clumpiness while keeping the large-scale pattern.
     pub field_smooth_passes: u32,
-    /// Replace the coarse star field with its azimuthal average. Removes clumps
-    /// and the spiral pattern both, bounding non-axisymmetric heating.
-    pub axisymmetric_field: bool,
+    /// Override the shipped axisymmetric star field. `0` restores the raw
+    /// clumpy field - the control the #70 numbers were taken against.
+    pub axisymmetric_field: Option<bool>,
     /// Leave stars out of the quadtree the star field is built from, isolating
     /// stellar self-gravity from gas clumpiness.
     pub no_star_self_gravity: bool,
@@ -49,8 +49,8 @@ pub struct Ablation {
     /// Zero the internal velocity newborns receive about their association's
     /// center of mass, so the population is born cold.
     pub no_birth_dispersion: bool,
-    /// Clamp a newborn association's orbital speed to this multiple of local
-    /// circular speed instead of `ASSOCIATION_ORBIT_SPEED_CAP`. 1.06 is just above.
+    /// Override the per-scenario newborn orbital ratio cap. `0` disables it,
+    /// leaving only the absolute cap - the pre-#70 control.
     pub birth_orbit_ratio_cap: Option<f32>,
     /// Override `STAR_WAVE_COUPLING`, normally 0.0: the fraction of the analytic
     /// spiral and ring density-wave force that also acts on stars.
@@ -58,8 +58,11 @@ pub struct Ablation {
     /// Bypass the `COLLAPSE_RADIATION_RESIST` gate in the collapse watch, so a
     /// dense cell ignites however irradiated it is.
     pub no_collapse_radiation_resist: bool,
-    /// Isotropic random birth velocity as a multiple of local circular speed, on
-    /// top of the association's own motion. Momentum-neutral within the batch.
+    /// Override `COLLAPSE_RADIATION_RESIST`, the irradiation level above which
+    /// a dense cell defers ignition. Higher lets more gas ignite.
+    pub collapse_radiation_resist: Option<f32>,
+    /// Override the per-scenario isotropic birth dispersion, as a multiple of
+    /// local circular speed. `0` births cold - the pre-#70 control.
     pub birth_velocity_dispersion: Option<f32>,
     /// Reference domain size for the sim's absolute length constants. Every length
     /// is scaled by `size / reference`, making any run a scaled copy.
@@ -88,8 +91,8 @@ impl Ablation {
         if self.field_smooth_passes > 0 {
             parts.push(format!("field-smooth={}", self.field_smooth_passes));
         }
-        if self.axisymmetric_field {
-            parts.push("axisymmetric-field".to_string());
+        if let Some(axisymmetric) = self.axisymmetric_field {
+            parts.push(format!("axisymmetric-field={axisymmetric}"));
         }
         if self.no_star_self_gravity {
             parts.push("no-star-self-gravity".to_string());
@@ -108,6 +111,9 @@ impl Ablation {
         }
         if self.no_collapse_radiation_resist {
             parts.push("no-collapse-radiation-resist".to_string());
+        }
+        if let Some(resist) = self.collapse_radiation_resist {
+            parts.push(format!("collapse-radiation-resist={resist}"));
         }
         if let Some(sigma) = self.birth_velocity_dispersion {
             parts.push(format!("birth-velocity-dispersion={sigma}"));
@@ -150,13 +156,14 @@ fn load() -> Ablation {
     Ablation {
         field_cadence: parse_env("GALAXY_ABL_FIELD_CADENCE"),
         field_smooth_passes: parse_env("GALAXY_ABL_FIELD_SMOOTH").unwrap_or(0),
-        axisymmetric_field: flag_env("GALAXY_ABL_AXISYMMETRIC_FIELD"),
+        axisymmetric_field: parse_env::<u8>("GALAXY_ABL_AXISYMMETRIC_FIELD").map(|v| v != 0),
         no_star_self_gravity: flag_env("GALAXY_ABL_NO_STAR_SELF_GRAVITY"),
         no_association_binding: flag_env("GALAXY_ABL_NO_ASSOCIATION_BINDING"),
         no_birth_dispersion: flag_env("GALAXY_ABL_NO_BIRTH_DISPERSION"),
         birth_orbit_ratio_cap: parse_env("GALAXY_ABL_BIRTH_ORBIT_RATIO_CAP"),
         star_wave_coupling: parse_env("GALAXY_ABL_STAR_WAVE_COUPLING"),
         no_collapse_radiation_resist: flag_env("GALAXY_ABL_NO_COLLAPSE_RADIATION_RESIST"),
+        collapse_radiation_resist: parse_env("GALAXY_ABL_COLLAPSE_RADIATION_RESIST"),
         birth_velocity_dispersion: parse_env("GALAXY_ABL_BIRTH_VELOCITY_DISPERSION"),
         length_reference_size: parse_env("GALAXY_ABL_LENGTH_REFERENCE_SIZE"),
         resolved_luminosity_floor: parse_env("GALAXY_ABL_RESOLVED_LUMINOSITY_FLOOR"),

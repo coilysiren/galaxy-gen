@@ -75,4 +75,5 @@ physical setup from size 500 and not a smaller picture of it. Compare like with
 like - same size, same tick count - or the age effect and the size effect will
 be indistinguishable.
 
+The fix that came out of this is in [stellar-heating.md](stellar-heating.md).
 Full numbers on galaxy-gen#70, which compiles #65 and #66.
