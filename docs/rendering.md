@@ -51,6 +51,9 @@ frame cost, and gas exposure, from grid resolution.
 
 ## See also
 
+- [rendering-fades.md](rendering-fades.md) - fades, vignette, and the lens.
+- [rendering-gas.md](rendering-gas.md) - gas sprites, screen-space blocks, dust.
+- [rendering-stars.md](rendering-stars.md) - star batching, glow, transients.
 - [FEATURES.md](FEATURES.md) - the inventory entry this expands.
 - [starfield.md](starfield.md) - the seeded backdrop.
 - [co-rotating-frame.md](co-rotating-frame.md) - the reference frame.

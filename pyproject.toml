@@ -19,7 +19,6 @@ excludes = [
   ".github/workflows/action.yml",
   ".github/workflows/trufflehog.yml",
   ".pre-commit-config.yaml",
-  "src/js/lib/dataviz.tsx",
   "src/rust/galaxy.rs",
 ]
 
