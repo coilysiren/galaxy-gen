@@ -95,11 +95,6 @@ agent:
   workflow: merge-remote-main
 
 catalog:
-  kind: Component
-  type: website
-  system: shared
-  owner: kai
-  lifecycle: production
   description: "Procedural galaxy simulation. Rust compiled to WASM, rendered in the browser."
   dependsOn:
     - forgejo.coilysiren.me/coilyco-bridge/deploy
