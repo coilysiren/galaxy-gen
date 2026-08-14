@@ -5,6 +5,22 @@ build_wasm() {
   wasm-pack build
 }
 
+# DRAGON: the pinned channel is fetched per build and the CDN times out.
+# Retry it here, not in CI. See galaxy-gen#84.
+ensure_toolchain() {
+  command -v rustup >/dev/null 2>&1 || return 0
+  local attempt
+  for attempt in 1 2 3; do
+    if rustup show active-toolchain >/dev/null 2>&1; then
+      return 0
+    fi
+    echo "toolchain fetch attempt ${attempt} failed; retrying" >&2
+    sleep $((attempt * 15))
+  done
+  # Fall through: let the real command produce the real error.
+  return 0
+}
+
 test_rust() {
   cargo check
   cargo test -- --color always
@@ -39,8 +55,9 @@ case "${1:-}" in
     npm install --package-lock-only
     ;;
   ci-setup)
-    # Lockfile-exact deps plus the wasm package, which check-js needs for the
-    # galaxy_gen_backend types. CI installs no toolchain: dev-base supplies it.
+    # Lockfile-exact deps plus the wasm package check-js needs. dev-base
+    # supplies the toolchain; ensure_toolchain absorbs a slow fetch (#84).
+    ensure_toolchain
     npm ci
     build_wasm
     npm install ./pkg --no-save
