@@ -7,9 +7,8 @@ export interface Cell {
   y: number;
 }
 
-/** Mirror of Rust `Scenario`. Kept in sync manually. A scenario is a
- * hardcoded `start => end-shape` pair - the seeder plus the physics
- * constants that steer the run toward its promised shape at t ~= 1000. */
+/** Mirror of Rust `Scenario`, kept in sync manually. A `start => end-shape`
+ * pair - seeder plus steering constants. See docs/scenarios.md. */
 export enum Scenario {
   BangRing = 0,
   BangSpiral = 1,

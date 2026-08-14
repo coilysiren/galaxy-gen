@@ -137,10 +137,8 @@ impl Stars {
         self.id.iter().position(|&x| x == id)
     }
 
-    /// Renderer packing:
-    /// [x, y, luminosity, color_index, stage, cluster_id, age] per star.
-    /// The renderer derives size, birth reveal, and association glow from
-    /// these values. Nothing flows back into the simulation.
+    /// Renderer packing, one-way out of the sim.
+    /// Field order: docs/tick-worker.md.
     pub fn render_data(&self) -> Vec<f32> {
         let n = self.len();
         let mut out = Vec::with_capacity(n * RENDER_FLOATS);
@@ -156,11 +154,8 @@ impl Stars {
         out
     }
 
-    /// Full flat serialization for the worker state round-trip. Layout per
-    /// star: [x, y, vx, vy, mass, age, lifetime, stage, luminosity,
-    /// color_index, cluster_id, binary_id, halo_dwell, id, metal_mass]. Integer ids
-    /// survive f32 because live ids stay far below 2^24. The u32::MAX
-    /// sentinels round-trip through Rust's saturating float cast.
+    /// Full flat serialization for the worker state round-trip.
+    /// Field order and the id-in-f32 argument: docs/tick-worker.md.
     pub fn to_flat(&self) -> Vec<f32> {
         let n = self.len();
         let mut out = Vec::with_capacity(n * STAR_FLOATS);

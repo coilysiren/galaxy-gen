@@ -1,7 +1,7 @@
 # galaxy-gen feature inventory
 
-Coarse inventory of what ships. Pairs with `README.md` (pitch) and
-`development.md` (architecture).
+What ships. Pairs with `README.md` (pitch) and
+[development.md](development.md) (architecture).
 
 ## Simulation core (`src/rust/galaxy.rs`)
 

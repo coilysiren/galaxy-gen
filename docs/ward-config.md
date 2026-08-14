@@ -49,4 +49,4 @@ no privileged operations.
 ## See also
 
 - [AGENTS.md](../AGENTS.md) - agent operating context, including the landing workflow.
-- [development.md](../development.md) - architecture and the dev loop these verbs drive.
+- [development.md](development.md) - architecture and the dev loop these verbs drive.

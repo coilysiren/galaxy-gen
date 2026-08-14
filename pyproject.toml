@@ -1,9 +1,6 @@
 [tool.agentic-os.documentation-layout]
 # Exact legacy docs predate current placement or size caps. Cleanup: #46.
 excludes = [
-  "development.md",
-  "docs/galaxy-rust.md",
-  "docs/processes-events.md",
   "docs/perf-rewrite.md",
   ".agents/skills/coding-galaxy-gen-astrophysics/SKILL.md",
   ".agents/skills/coding-galaxy-gen-astrophysics/references/wikipedia-concepts.md",
@@ -18,19 +15,12 @@ excludes = [
 [tool.agentic-os.code-comments]
 # Exact legacy teaching sources grandfathered for the #46 migration.
 excludes = [
-  "playwright.config.ts",
   ".agents/skills/categories.yaml",
   ".github/workflows/action.yml",
   ".github/workflows/trufflehog.yml",
   ".pre-commit-config.yaml",
-  "src/js/lib/application.tsx",
   "src/js/lib/dataviz.tsx",
-  "src/js/lib/galaxy.ts",
-  "src/js/lib/tick-worker.ts",
-  "src/rust/events.rs",
   "src/rust/galaxy.rs",
-  "src/rust/process.rs",
-  "src/rust/stars.rs",
 ]
 
 [tool.agentic-os.dead-cross-links]

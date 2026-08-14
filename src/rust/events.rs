@@ -137,9 +137,8 @@ impl EventQueue {
         ev.id
     }
 
-    /// Drain every event due at or before `tick`, in stable (tick, seq)
-    /// order. Emission order is monotonic in id, so pending is already
-    /// sorted and a split preserves ordering.
+    /// Drain events due at or before `tick` in stable (tick, seq) order.
+    /// Pending is already sorted by id, so a split preserves ordering.
     pub fn take_due(&mut self, tick: u64) -> Vec<Event> {
         let mut due = Vec::new();
         let mut rest = Vec::with_capacity(self.pending.len());
@@ -183,10 +182,8 @@ impl EventQueue {
         self.executed_counts.iter().sum()
     }
 
-    /// Flat u32 serialization for the worker state round-trip. Layout:
-    /// [next_id lo/hi, seq_tick lo/hi, seq_in_tick, n_pending, then 12
-    /// u32 per pending event]. The instrumentation ring and counters are
-    /// intentionally dropped - they are diagnostics, not sim state.
+    /// Flat u32 serialization for the worker state round-trip.
+    /// Layout and what it drops: docs/tick-worker.md.
     pub fn to_flat(&self) -> Vec<u32> {
         let mut out = Vec::with_capacity(6 + self.pending.len() * 12);
         out.push(self.next_id as u32);

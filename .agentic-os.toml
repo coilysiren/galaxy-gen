@@ -4,15 +4,13 @@
 # 4000 chars and enforce flat skill folders + a root-Markdown allowlist. The
 # entries below are pre-existing doc debt surfaced by that tightening, not by
 # the catalog migration. They are excluded to unblock the bump; the real
-# cleanup (relocate development.md, split perf-rewrite.md
-# and the oversized skills, restructure AGENTS.md for catalog-trifecta) is
-# tracked as a follow-up.
+# cleanup (split perf-rewrite.md and the oversized skills, restructure
+# AGENTS.md for catalog-trifecta) is tracked as a follow-up.
 
 [documentation-layout]
 excludes = [
   "AGENTS.md",
   "README.md",
-  "development.md",
   "docs/FEATURES.md",
   "docs/perf-rewrite.md",
   "pkg/",

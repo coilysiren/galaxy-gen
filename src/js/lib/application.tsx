@@ -6,15 +6,12 @@ import * as recorder from "./recorder";
 
 const wasm = import("galaxy_gen_backend/galaxy_gen_backend");
 
-/// Fixed sim time-step per tick. Was user-tunable (?dt= plus arrow-key
-/// scaling); retired as a config surface - the physics tuning assumes
-/// this value anyway.
+/// Fixed sim time-step. Retired as a config surface - the physics
+/// tuning assumes this value. See docs/ui-controls.md.
 const DT = 0.5;
 
-/// 500x500 = 250k cells. Raised from 250 once the renderer stopped
-/// scaling its per-frame work with the grid: gas is composited per
-/// screen-space block rather than per cell, so a finer sim costs the
-/// canvas almost nothing. See docs/perf-rewrite.md.
+/// 500x500 = 250k cells. Raised from 250 once gas composited per
+/// screen-space block instead of per cell. See docs/perf-rewrite.md.
 const DEFAULT_GALAXY_SIZE = 500;
 /// Fixed seed-mass intensity. Was the ?mass= URL knob; retired.
 const SEED_MASS = 25;
@@ -75,9 +72,8 @@ interface InitialParams {
   /// `?debug=1`: dev surfaces - camera interaction, single-step, and the
   /// full lifecycle counter table.
   debug: boolean;
-  /// `?ui=0`: start with the control panel hidden. Makes a chrome-free
-  /// frame addressable, so a permalink or a recording can be clean
-  /// without hiding the panel by hand first.
+  /// `?ui=0`: start with the panel hidden, so a permalink or recording
+  /// is addressable chrome-free. See docs/ui-controls.md.
   uiHidden: boolean;
   /// `?t=N`: with a seed, auto-generate and fast-forward to this tick -
   /// (seed, size, t) is a complete address for a moment in time.
@@ -158,8 +154,7 @@ function writeUrlParams(p: {
   params.set("scenario", scenarioToSlug(p.scenario));
   if (p.seedLocked) params.set("lock", "1");
   // Generate rebuilds the query from scratch, so view-state params have
-  // to be re-applied or a generate would silently drop them from a URL
-  // the viewer is about to copy.
+  // to be re-applied or a generate silently drops them.
   if (p.debug) params.set("debug", "1");
   if (p.uiHidden) params.set("ui", "0");
   const next = `${window.location.pathname}?${params.toString()}${window.location.hash}`;
@@ -172,9 +167,8 @@ export function Interface() {
   const [galaxySize, setGalaxySize] = React.useState(initial.galaxySize);
   // Seed stays a string; parse at Init/Seed time. Empty means fresh random.
   const [seed, setSeed] = React.useState<string>(initial.seed);
-  // Generate cycles the seed unless ?lock=1 pins it. A URL-provided seed
-  // is honored for the FIRST generate either way, so shared links
-  // reproduce.
+  // Generate cycles the seed unless ?lock=1 pins it; a URL seed is
+  // honored for the FIRST generate either way, so shared links reproduce.
   const seedLocked = initial.seedLocked;
   const debug = initial.debug;
   // Chrome visibility. Mirrored to `?ui=0` so a clean frame is a
@@ -373,9 +367,8 @@ export function Interface() {
     }
   }, []);
 
-  /// `forceReuse` is the reset path: rebuild the *same* universe at tick
-  /// zero rather than rolling a fresh seed. Generate passes false and
-  /// keeps the existing cycle-unless-locked behaviour.
+  /// `forceReuse` is the reset path: same universe at tick zero. Generate
+  /// passes false and keeps cycle-unless-locked.
   const regenerate = (forceReuse: boolean) => {
     const module = wasmModuleRef.current;
     if (!module) {
@@ -395,9 +388,8 @@ export function Interface() {
     }
     latestSnapshotRef.current = null;
     renderedTickIdRef.current = -1;
-    // Always have a shareable seed on the URL after init. Reuse the
-    // current seed only when locked or on the first generate of a
-    // seed-bearing URL; otherwise every press rolls a fresh galaxy.
+    // Always leave a shareable seed on the URL. Reuse it only when locked
+    // or on the first generate of a seed-bearing URL.
     let effectiveSeed = seed;
     const reuse =
       parseSeed(effectiveSeed) != null && (forceReuse || seedLocked || !hasGeneratedRef.current);
@@ -571,9 +563,8 @@ export function Interface() {
     rafRef.current = requestAnimationFrame(loop);
   }, []);
 
-  /// Start capture, or stop and hand the finished GIF to the browser.
-  /// The recorder samples the render funnel, so a capture spans whatever
-  /// the run does next - play it, step it, or leave it running.
+  /// Start capture, or stop and hand the GIF to the browser. It samples
+  /// the render funnel, so a capture spans whatever the run does next.
   const handleRecordToggle = async () => {
     if (recorderStatus.recording) {
       const blob = await recorder.stop();
@@ -848,11 +839,8 @@ export function Interface() {
               </div>
             </div>
 
-            {/* Instrumentation, not viewer-facing. The sim tick is the
-                one number a viewer can act on (it addresses a moment via
-                `?t=`), so it lives as a caption under the canvas instead.
-                A table so a plain copy-paste yields "label<TAB>value" per
-                line - no copy button needed. */}
+            {/* Instrumentation, not viewer-facing; the sim tick is the one
+                actionable number and is captioned under the canvas. */}
             {debug && (
               <table className="input-label mt-5 w-full border-separate border-spacing-y-1">
                 <tbody>
