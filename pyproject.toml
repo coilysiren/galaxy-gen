@@ -1,4 +1,5 @@
 [tool.agentic-os.documentation-layout]
+band = "small"
 # Not debt, and #78 measured each one. perf-rewrite.md is a chronological
 # engineering journal; no split satisfies a 4000-char cap without shredding
 # it. The .agents/skills entries fail a cap their own spec disclaims -
