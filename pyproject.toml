@@ -1,5 +1,9 @@
 [tool.agentic-os.documentation-layout]
-band = "small"
+# Large, not small. 40 docs against the small band's 20-doc cap was never
+# reachable without deleting half of them, and the per-subsystem docs run to 80
+# lines against the large cap of 120. A sweep stamped small fleet-wide during
+# the agentic-os#1108 rollout; Kai re-picked per repo.
+band = "large"
 # Not debt, and #78 measured each one. perf-rewrite.md is a chronological
 # engineering journal; no split satisfies a 4000-char cap without shredding
 # it. The .agents/skills entries fail a cap their own spec disclaims -
