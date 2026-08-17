@@ -7,14 +7,14 @@ result is attributable.
 Run the matrix:
 
 ```bash
-ward exec ablation-sweep                       # 2500 ticks, size 500, 2 seeds
-ward exec ablation-sweep 5000 500 3 12345 2    # ticks size seeds start-seed scenario
+just ablation-sweep                       # 2500 ticks, size 500, 2 seeds
+just ablation-sweep 5000 500 3 12345 2    # ticks size seeds start-seed scenario
 ```
 
 Or set a switch on a single `debug-sim` run:
 
 ```bash
-GALAXY_ABL_AXISYMMETRIC_FIELD=1 ward exec debug-sim 2500 500 2 12345 2
+GALAXY_ABL_AXISYMMETRIC_FIELD=1 just debug-sim 2500 500 2 12345 2
 ```
 
 The switches are listed in [ablation-switches.md](ablation-switches.md). The

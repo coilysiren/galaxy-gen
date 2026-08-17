@@ -18,7 +18,7 @@
 # the first cargo call in any environment, so the gate still judges the exact
 # compiler that builds the deployed artifact. Bumping it costs one toolchain
 # download per build until dev-base's default catches up, which is the trade we
-# want in that direction. Bump it, then run `ward exec lint-rust`.
+# want in that direction. Bump it, then run `just lint-rust`.
 [toolchain]
 channel = "1.90.0"
 components = ["clippy", "rustfmt"]

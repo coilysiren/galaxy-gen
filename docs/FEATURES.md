@@ -74,6 +74,6 @@ deterministic event queue, and per-(process, tick) RNG streams from the
 
 - [README.md](../README.md) - human-facing intro.
 - [AGENTS.md](../AGENTS.md) - agent-facing operating rules.
-- [.ward/ward.yaml](../.ward/ward.yaml) - allowlisted commands.
+- [justfile](../justfile), [.ward/ward.yaml](../.ward/ward.yaml).
 
 Cross-reference convention from agentic-os#59.

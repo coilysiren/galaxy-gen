@@ -17,9 +17,9 @@ lanes and shock-swept [OIII] glow.
 ## Quick start
 
 ```bash
-ward exec install
-ward exec dev
-ward exec test
+just install
+just dev
+just test
 ```
 
 See [.ward/ward.yaml](.ward/ward.yaml) for the full command catalog and
@@ -86,18 +86,19 @@ rollout, and public ingress.
 Validate the local image and publisher through Ward:
 
 ```bash
-ward exec image-publish-check
-ward exec build-docker
+just image-publish-check
+just build-docker
 ```
 
 ## Commands
 
-Dev commands are declared in [`.ward/ward.yaml`](.ward/ward.yaml). Run them as `ward exec <verb>`.
+Dev commands are declared in the [`justfile`](justfile). Run them as `just <verb>`, and run `just` alone to list every one.
 
 ## See also
 
 - [AGENTS.md](AGENTS.md) - agent-facing operating rules.
 - [docs/FEATURES.md](docs/FEATURES.md) - inventory of what ships today.
-- [.ward/ward.yaml](.ward/ward.yaml) - allowlisted commands.
+- [justfile](justfile) - dev verbs.
+- [.ward/ward.yaml](.ward/ward.yaml) - catalog metadata only.
 
 Cross-reference convention from agentic-os#59.

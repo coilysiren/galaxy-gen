@@ -1,18 +1,19 @@
-# Ward config
+# Repo config
 
-What the blocks in [`.ward/ward.yaml`](../.ward/ward.yaml) mean. The file itself
-carries a three-line pointer here, because YAML comments are only legal above
-the first content line and long prose belongs in docs.
+What the blocks in [`.ward/ward.yaml`](../.ward/ward.yaml) mean, plus the verb
+surface that moved out of it. The file itself carries a three-line pointer here,
+because YAML comments are only legal above the first content line and long prose
+belongs in docs.
 
-## commands
+## verbs
 
-Ward is the canonical entry point for dev verbs. Agents run `ward exec <verb>`,
-never the bare tool, and the lockdown denies direct `cargo`, `wasm-pack`, and
-`npx` invocations. Add a verb here before invoking it.
+The [`justfile`](../justfile) is the canonical entry point for dev verbs since
+coilysiren/inbox#366. Agents run `just <verb>`, never the bare tool, and the
+lockdown denies direct `cargo`, `wasm-pack`, and `npx` invocations. Add a recipe
+there before invoking it.
 
-Verb names follow ward's `[a-z0-9-]` rule. Argv validation rejects shell
-metacharacters at invocation time, so flags forward verbatim through ward's argv
-handling. Multi-step workflows live in one focused helper,
+Flags forward verbatim, because `set positional-arguments` hands a recipe its
+trailing arguments untouched. Multi-step workflows live in one focused helper,
 `scripts/ward-command.sh`, rather than being spelled out inline.
 
 ## capabilities

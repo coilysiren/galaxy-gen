@@ -1314,7 +1314,7 @@ moved to 500.
 
 ## What is still on the table
 
-- **Gravity is ~78% of the worker tick** (`ward exec perf-profile`
+- **Gravity is ~78% of the worker tick** (`just perf-profile`
   attributes it), and a freshly seeded 500 grid is its worst case: gas
   fills every cell, so the Barnes-Hut active set is at its largest and
   the tick runs ~30ms. That is what set the tick cap below. SIMD or an
@@ -1328,8 +1328,8 @@ moved to 500.
 ## Reproducing part two
 
 ```bash
-ward exec perf-profile 500 30   # which process owns the tick
-ward exec test-perf             # render frame + live pacing, real GPU
+just perf-profile 500 30   # which process owns the tick
+just test-perf             # render frame + live pacing, real GPU
 ```
 
 `test-perf` needs the system Chrome. Running the perf specs under the
@@ -1432,7 +1432,7 @@ mature was comparable run to run.
 
 ## Where the tick goes, measured properly
 
-Native release, seed 424242, `ward exec perf-profile`:
+Native release, seed 424242, `just perf-profile`:
 
 | regime      | per tick | gravity  | share |
 | ----------- | -------: | -------: | ----: |
@@ -1508,9 +1508,9 @@ a different kind of change from this one.
 ## Reproducing part three
 
 ```bash
-ward exec perf-profile 500 20      # fresh, worst case
-ward exec perf-profile 500 20 1500 # mature, what the site runs
-ward exec debug-sim 400 120 2 12345 # the determinism oracle
+just perf-profile 500 20      # fresh, worst case
+just perf-profile 500 20 1500 # mature, what the site runs
+just debug-sim 400 120 2 12345 # the determinism oracle
 ```
 
 ---
@@ -1535,7 +1535,7 @@ The probe now reports both, and `paintHz` is the one to believe.
 
 ## What the split shows
 
-Headed Chrome, real GPU, `ward exec test-perf`:
+Headed Chrome, real GPU, `just test-perf`:
 
 | case       | paintHz | gap p50 | rafHz | worker tick | render/frame |
 | ---------- | ------: | ------: | ----: | ----------: | -----------: |

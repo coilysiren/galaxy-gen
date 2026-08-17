@@ -20,7 +20,7 @@ the file can still reach the exact galaxy that produced it.
 
 Recording captures the canvas only, so no control panel appears in the output.
 Pair it with the chrome toggle (or load `?ui=0`) if you also want the live page
-clean while recording. For a maintainer asset, `ward exec capture-readme`
+clean while recording. For a maintainer asset, `just capture-readme`
 remains the headless path and is unaffected by any of this.
 
 ## Choosing a format

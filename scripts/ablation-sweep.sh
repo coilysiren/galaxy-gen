@@ -9,7 +9,7 @@
 # read by the kernel itself (src/rust/ablation.rs) and echoed in the run's
 # own header, so what ran and what is reported cannot drift apart.
 #
-# Usage: ward exec ablation-sweep [ticks] [size] [seeds] [start-seed] [scenario]
+# Usage: just ablation-sweep [ticks] [size] [seeds] [start-seed] [scenario]
 # Defaults match the measurements recorded on the issue. Configurations run
 # concurrently - each debug_sim process is single-threaded.
 set -euo pipefail

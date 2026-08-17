@@ -33,14 +33,14 @@ Load-bearing files you will touch most often:
 ## Dev Loop
 
 ```bash
-ward exec install
-ward exec test-rust
-ward exec test-e2e
-ward exec test
-ward exec dev
-ward exec dev-js
-ward exec dev-rust
-ward exec build-js-prod
+just install
+just test-rust
+just test-e2e
+just test
+just dev
+just dev-js
+just dev-rust
+just build-js-prod
 ```
 
 Raw commands: `cargo test`, `cargo clippy -- -D warnings`, `cargo fmt`, `wasm-pack build` (output `pkg/`, gitignored), `npm run dev` (HMR :8081), `npm run test:e2e[:ui]` (Playwright), `npm run lint` / `format`.
@@ -75,7 +75,7 @@ shipped artifact share one toolchain. Nothing in CI installs a toolchain: rust,
 node, wasm-pack, and a pinned binaryen all arrive with the image
 (agentic-os#986, the aos CI-in-dev-base convention).
 
-- `.forgejo/workflows/ci.yml` - `gate` on pull requests - `ward exec ci-setup` / `lint-rust` / `test-rust` / `check-js`
+- `.forgejo/workflows/ci.yml` - `gate` on pull requests - `just ci-setup` / `lint-rust` / `test-rust` / `check-js`
 - `.forgejo/workflows/build-publish.yml` - `test` on push to `main` - the same four verbs, then the `publish` job
 
 GitHub Actions (`.github/workflows/action.yml`) still runs `rust`, `js`, and
@@ -93,8 +93,8 @@ a finished change on a task branch waiting for a human to merge it, and do not
 open a pull request for the default case.
 
 Pushing to `main` publishes the image, so the gate is the test suite rather
-than a review. Land only with `ward exec test-rust`, `ward exec check-js`, and
-`ward exec test-e2e` green, and never with `--no-verify`.
+than a review. Land only with `just test-rust`, `just check-js`, and
+`just test-e2e` green, and never with `--no-verify`.
 
 It does not roll the public site. The deploy repo pins an exact source SHA and
 rolls only when its own `services/galaxy-gen/**` changes. Auto-rolling from an
@@ -123,7 +123,7 @@ earns it - a `wasm-pack` fetch hung for the full 30-minute job timeout on
 The image build is a two-stage Dockerfile whose builder stage is that same
 dev-base image, so `docker build` needs a `forgejo.coilysiren.me` login before
 it can pull its own base. `scripts/publish-image.sh` already logs in first. A
-local `ward exec build-docker` needs that login too, where the old public Rust
+local `just build-docker` needs that login too, where the old public Rust
 base needed none.
 
 Browser e2e stays on GitHub PR CI because the in-cluster runner cannot reach
@@ -140,9 +140,9 @@ does not build this source. Never add deploy manifests back here.
 
 ## Commands
 
-Route every dev command through Ward, which reads [`.ward/ward.yaml`](.ward/ward.yaml). Run verbs with `ward exec <verb>`. The lockdown denies bare invocations of the underlying tools (`cargo`, `wasm-pack`, `npx`, etc.). Add new verbs to that file before invoking them.
+Route every dev command through the [`justfile`](justfile). Run verbs with `just <verb>`. The lockdown denies bare invocations of the underlying tools (`cargo`, `wasm-pack`, `npx`, etc.). Add new verbs to that file before invoking them.
 
-Run `ward exec image-publish-check` and `ward exec build-docker` when changing
+Run `just image-publish-check` and `just build-docker` when changing
 the Forgejo OCI publisher.
 
 ## Checkout residency
@@ -158,6 +158,7 @@ switching tasks, or ending a session. The remote is the only durable artifact.
 
 - [README.md](README.md) - human-facing intro.
 - [docs/FEATURES.md](docs/FEATURES.md) - inventory of what ships today.
-- [.ward/ward.yaml](.ward/ward.yaml) - allowlisted commands (`ward exec`).
+- [justfile](justfile) - dev verbs (`just <verb>`).
+- [.ward/ward.yaml](.ward/ward.yaml) - catalog metadata only.
 
 Cross-reference convention from agentic-os#59.

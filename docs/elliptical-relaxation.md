@@ -35,4 +35,4 @@ The fixed size-50, seed-42 run is checked at every tick from 900 through 1000:
 - spiral coherence stays at most `0.35` and ring concentration at most `0.25`
 - star births and phase-mixed stars both increase during the window
 
-`ward exec debug-sim -- 5000 50 3 42` reports these values as `econ`, `esm`, `axis`, `ext`, and `erot`. Its checkpoints extend through tick 5000 for longer-run inspection. The deterministic golden hash separately pins the scenario's mass field at tick 100.
+`just debug-sim 5000 50 3 42` reports these values as `econ`, `esm`, `axis`, `ext`, and `erot`. Its checkpoints extend through tick 5000 for longer-run inspection. The deterministic golden hash separately pins the scenario's mass field at tick 100.

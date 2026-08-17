@@ -1,91 +1,11 @@
-# Per-repo command allowlist for galaxy-gen. Ward is the canonical entry point
-# for dev verbs here. See docs/ward-config.md for the naming, capabilities, and
-# catalog rules this file follows.
+# Catalog metadata for the cross-repo knowledge graph.
+#
+# Dev verbs used to live here as a `commands:` block. They are recipes in the
+# justfile now. This file survives only because check_catalog_block pins this
+# exact path and catalog-trifecta wants README, AGENTS, and FEATURES to link
+# it, both upstream in agentic-os.
 
 name: coilyco-gaming/galaxy-gen
-
-commands:
-  install:
-    run: bash scripts/ward-command.sh install
-    description: Install Rust, WASM, and JS deps (cargo build + wasm-pack + npm install + playwright install).
-  deps-sync:
-    run: bash scripts/ward-command.sh deps-sync
-    description: Refresh package-lock.json after an intentional package.json change.
-  ci-setup:
-    run: bash scripts/ward-command.sh ci-setup
-    description: "CI dependency setup: lockfile-exact npm ci plus the wasm package. Takes Rust, Node, wasm-pack, and binaryen from the dev-base image instead of from install."
-  test-rust:
-    run: bash scripts/ward-command.sh test-rust
-    description: cargo check + cargo test.
-  format-rust:
-    run: bash scripts/ward-command.sh format-rust
-    description: Format Rust sources with rustfmt.
-  lint-rust:
-    run: bash scripts/ward-command.sh lint-rust
-    description: "The Rust lint gate: clippy across all targets with warnings denied, plus a rustfmt check. CI runs this same script."
-  build-rust:
-    run: bash scripts/ward-command.sh build-rust
-    description: Build Rust + WASM (debug).
-  build-wasm:
-    run: bash scripts/ward-command.sh build-wasm
-    description: Compile Rust to WASM via wasm-pack (pkg/).
-  debug-sim:
-    run: bash scripts/ward-command.sh debug-sim
-    description: Run the native seeded physics probe with ticks, size, seed-count, and start-seed arguments.
-  ablation-sweep:
-    run: bash scripts/ablation-sweep.sh
-    description: Run the stellar-heating ablation matrix (galaxy-gen#66) and print vsig per configuration.
-  build-js-prod:
-    run: bash scripts/ward-command.sh build-js-prod
-    description: Production webpack build.
-  check-js:
-    run: bash scripts/ward-command.sh check-js
-    description: Check JS/TS lint rules and types.
-  format-files:
-    run: npx prettier --write
-    description: Format explicitly named JS, TS, CSS, JSON, or Markdown files.
-  capture-readme:
-    run: bash scripts/ward-command.sh capture-readme
-    description: Capture the fixed-seed README GIF candidate from a running dev server.
-  promote-readme:
-    run: bash scripts/ward-command.sh promote-readme
-    description: Replace the tracked README GIF with an inspected capture candidate.
-  dev:
-    run: bash scripts/ward-command.sh dev
-    description: Run the Rust/WASM watcher and webpack dev server. GALAXY_DEV_PORT overrides port 8081.
-  dev-js:
-    run: bash scripts/ward-command.sh dev-js
-    description: Run only the JS dev server with HMR.
-  dev-rust:
-    run: bash scripts/ward-command.sh dev-rust
-    description: Run only the Rust/WASM watcher.
-  test-e2e:
-    run: bash scripts/ward-command.sh test-e2e
-    description: Run Playwright end-to-end tests.
-  perf-profile:
-    run: bash scripts/ward-command.sh perf-profile
-    description: Attribute one native tick to each process in the registry. Takes size and tick count.
-  test-perf:
-    run: bash scripts/ward-command.sh test-perf
-    description: Run the render-frame and live frame-pacing probes against system Chrome on real GPU.
-  test-e2e-ui:
-    run: bash scripts/ward-command.sh test-e2e-ui
-    description: Run Playwright tests in UI mode.
-  build-docker:
-    run: bash scripts/ward-command.sh build-docker
-    description: Build the docker image locally with BuildKit cache.
-  image-publish-check:
-    run: bash -n scripts/publish-image.sh
-    description: Parse the trusted Forgejo OCI publisher shell contract.
-  run-docker:
-    run: bash scripts/ward-command.sh run-docker
-    description: Serve the locally built image on :8080 (mirrors the k8s Deployment).
-  test:
-    run: bash scripts/ward-command.sh test
-    description: Run the Rust and Playwright test suites.
-  precommit:
-    run: pre-commit run --all-files
-    description: Run all pre-commit hooks against every file.
 
 capabilities:
   - agentic-os/coding-rust

@@ -32,19 +32,19 @@ The Galaxy is immutable-style — methods like `seed()`, `tick()` return new Gal
 
 ### CI
 
-- Forgejo (`.forgejo/workflows/ci.yml` on PRs, `build-publish.yml` on `main`): the Rust and JS gates, run inside the dev-base image through `ward exec` verbs. The image supplies rust, node, wasm-pack, and a pinned binaryen, so CI installs no toolchain and the gate matches what `docker build` ships.
+- Forgejo (`.forgejo/workflows/ci.yml` on PRs, `build-publish.yml` on `main`): the Rust and JS gates, run inside the dev-base image through `just` verbs. The image supplies rust, node, wasm-pack, and a pinned binaryen, so CI installs no toolchain and the gate matches what `docker build` ships.
 - GitHub Actions (`.github/workflows/action.yml`): browser e2e, which stays there because the in-cluster runner cannot reach the Playwright browser CDN. Its `rust` and `js` jobs now duplicate the Forgejo gate and are queued for removal (galaxy-gen#74).
 
 ## Commands
 
 ```bash
-ward exec install
-ward exec dev
-ward exec test
-ward exec build-js-prod
+just install
+just dev
+just test
+just build-js-prod
 ```
 
-To refresh the README animation, start the dev server and run `ward exec capture-readme`. Set `GALAXY_CAPTURE_URL` when the server is not on port 8081. The command writes `docs/project-galaxy-gen.next.gif` and refuses to overwrite either an earlier candidate or the tracked GIF. After inspection, `ward exec promote-readme` replaces the tracked asset with that candidate.
+To refresh the README animation, start the dev server and run `just capture-readme`. Set `GALAXY_CAPTURE_URL` when the server is not on port 8081. The command writes `docs/project-galaxy-gen.next.gif` and refuses to overwrite either an earlier candidate or the tracked GIF. After inspection, `just promote-readme` replaces the tracked asset with that candidate.
 
 ## Key Conventions
 

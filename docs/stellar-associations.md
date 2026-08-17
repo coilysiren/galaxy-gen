@@ -56,5 +56,5 @@ There is no serialized association object. `cluster_id` and `next_cluster_id` al
 Rust tests cover nearby joining, distinct distant formation, suppressed radial
 inheritance, prograde support, momentum-neutral binding, tidal release, and
 the seven-float render contract. The native
-`ward exec debug-sim -- <ticks> <size> <seed-count> <start-seed>` probe
+`just debug-sim <ticks> <size> <seed-count> <start-seed>` probe
 accepts an exact URL seed for deterministic tuning before browser inspection.
