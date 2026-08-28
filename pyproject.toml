@@ -4,14 +4,17 @@
 # lines against the large cap of 120. A sweep stamped small fleet-wide during
 # the agentic-os#1108 rollout; Kai re-picked per repo.
 band = "large"
-# Not debt, and #78 measured each one. perf-rewrite.md is a chronological
-# engineering journal; no split satisfies a 4000-char cap without shredding
-# it. The .agents/skills entries fail a cap their own spec disclaims -
+# Not debt, and #78 measured each one. docs/journal/perf-rewrite.md is a
+# chronological engineering journal; no split satisfies a size cap without
+# shredding it, so it lives in a journal tree sized by what it accumulates. The .agents/skills entries fail a cap their own spec disclaims -
 # tooling-skill-authoring says SKILL.md is capped at 500 lines / 10 KB and
 # "Reference files are not capped" - so two validators disagree and the fix
 # is upstream. pkg/** is generated wasm-pack output.
+# The journal is a chronological record rather than a reference page, so its
+# size belongs to the history it accumulates. `excludes` reaches placement only.
+size_excludes = ["docs/journal/"]
 excludes = [
-  "docs/perf-rewrite.md",
+  "docs/journal/**",
   ".agents/skills/coding-galaxy-gen-astrophysics/SKILL.md",
   ".agents/skills/coding-galaxy-gen-astrophysics/references/wikipedia-concepts.md",
   ".agents/skills/coding-galaxy-gen-cosmology/SKILL.md",

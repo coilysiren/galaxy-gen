@@ -44,7 +44,7 @@ let running = false;
 let scheduled = false;
 
 // Tick-rate ceiling, and the paint rate with it - the main thread draws
-// once per snapshot. Why 20: docs/perf-rewrite.md parts two and four.
+// once per snapshot. Why 20: docs/journal/perf-rewrite.md parts two and four.
 const MAX_TICKS_PER_SEC = 20;
 const MIN_TICK_INTERVAL_MS = 1000 / MAX_TICKS_PER_SEC;
 

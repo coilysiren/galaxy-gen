@@ -28,16 +28,14 @@ repos:
 
   # BEGIN managed by agentic-os/scripts/apply-agentic-os-hooks.py
   - repo: https://forgejo.coilysiren.me/coilyco-flight-deck/agentic-os
-    rev: aos-precommit-v0.18.0
+    rev: aos-precommit-v0.52.0
     hooks:
-      - id: catalog-doc-size
       - id: catalog-trifecta
       - id: documentation-layout
       - id: context-load-points
       - id: code-comments
       - id: actions-run-one-line
       - id: source-doc-refs
-      - id: catalog-block-present
       - id: check-skills
       - id: dead-cross-links
       - id: repo-pointer-skills
@@ -45,6 +43,8 @@ repos:
       - id: agent-compose-size
       - id: agent-compose-dedup
       - id: trufflehog
+      - id: pr-guard
+      - id: git-workflow
   - repo: https://github.com/pre-commit/pre-commit-hooks
     rev: v6.0.0
     hooks:
@@ -58,6 +58,7 @@ repos:
       - id: check-illegal-windows-names
       - id: mixed-line-ending
       - id: check-json
+        exclude: (^|/)\.vscode/
       - id: check-toml
   - repo: https://github.com/rhysd/actionlint
     rev: v1.7.12
@@ -82,5 +83,6 @@ repos:
     rev: v1.48.0
     hooks:
       - id: typos
-        args: []
+        # Report, do not rewrite. --force-exclude keeps _typos.toml binding.
+        args: [--force-exclude]
   # END managed by agentic-os/scripts/apply-agentic-os-hooks.py

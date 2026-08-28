@@ -77,4 +77,4 @@ problem, which is most of why it looks better.
 ## See also
 
 - [recording.md](recording.md) - the user-facing surface.
-- [perf-rewrite.md](perf-rewrite.md) - where the frame budget went.
+- [perf-rewrite.md](journal/perf-rewrite.md) - where the frame budget went.

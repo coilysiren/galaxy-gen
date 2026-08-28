@@ -52,7 +52,7 @@ deterministic event queue, and per-(process, tick) RNG streams from the
   See [ui-controls.md](ui-controls.md).
 - Layered canvas renderer with a gravitational-lens post-process. See
   [rendering.md](rendering.md), [starfield.md](starfield.md),
-  [co-rotating-frame.md](co-rotating-frame.md), [perf-rewrite.md](perf-rewrite.md).
+  [co-rotating-frame.md](co-rotating-frame.md), [perf-rewrite.md](journal/perf-rewrite.md).
 - Client-side GIF and MP4 capture of a reproducible run.
   See [recording.md](recording.md).
 

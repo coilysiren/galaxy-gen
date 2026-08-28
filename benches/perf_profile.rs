@@ -17,7 +17,7 @@ use galaxy_gen_backend::process;
 use std::time::{Duration, Instant};
 
 /// Clears the seeding transient only - far too few to reach a galaxy
-/// with stars in it. Override from argv; see docs/perf-rewrite.md.
+/// with stars in it. Override from argv; see docs/journal/perf-rewrite.md.
 const WARMUP_TICKS: u32 = 8;
 
 const DT: f32 = 0.5;

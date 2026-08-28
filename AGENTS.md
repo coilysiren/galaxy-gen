@@ -58,7 +58,7 @@ Raw commands: `cargo test`, `cargo clippy -- -D warnings`, `cargo fmt`, `wasm-pa
 ## Scope-shape signals
 
 README lists nine inspirational sibling projects. Consult it when evaluating
-scope adds. `docs/perf-rewrite.md` is load-bearing for the inner loop.
+scope adds. `docs/journal/perf-rewrite.md` is load-bearing for the inner loop.
 
 ## Key References
 

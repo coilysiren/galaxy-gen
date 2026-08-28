@@ -57,4 +57,4 @@ frame cost, and gas exposure, from grid resolution.
 - [FEATURES.md](FEATURES.md) - the inventory entry this expands.
 - [starfield.md](starfield.md) - the seeded backdrop.
 - [co-rotating-frame.md](co-rotating-frame.md) - the reference frame.
-- [perf-rewrite.md](perf-rewrite.md) - the inner-loop rewrite.
+- [perf-rewrite.md](journal/perf-rewrite.md) - the inner-loop rewrite.

@@ -52,4 +52,4 @@ interlock during recording, and a live run.
 
 - [recording-internals.md](recording-internals.md) - funnel, backpressure, tuning.
 - [FEATURES.md](FEATURES.md) - inventory of what ships.
-- [perf-rewrite.md](perf-rewrite.md) - where the frame budget went.
+- [perf-rewrite.md](journal/perf-rewrite.md) - where the frame budget went.

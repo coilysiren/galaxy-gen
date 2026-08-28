@@ -11,7 +11,7 @@ const wasm = import("galaxy_gen_backend/galaxy_gen_backend");
 const DT = 0.5;
 
 /// 500x500 = 250k cells. Raised from 250 once gas composited per
-/// screen-space block instead of per cell. See docs/perf-rewrite.md.
+/// screen-space block instead of per cell. See docs/journal/perf-rewrite.md.
 const DEFAULT_GALAXY_SIZE = 500;
 /// Fixed seed-mass intensity. Was the ?mass= URL knob; retired.
 const SEED_MASS = 25;

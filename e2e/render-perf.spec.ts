@@ -1,7 +1,7 @@
 import { test, expect, Page } from "@playwright/test";
 
 // Render-only probe: physics is in the worker, so the canvas frame on
-// its own is what decides whether the UI stutters. See docs/perf-rewrite.md.
+// its own is what decides whether the UI stutters. See docs/journal/perf-rewrite.md.
 
 // Fresh vs mature stress opposite layers: full gas vs a full star field.
 const PHASES: { name: string; warp: number }[] = [

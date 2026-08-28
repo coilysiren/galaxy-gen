@@ -1,7 +1,7 @@
 import { test, expect, Page } from "@playwright/test";
 
 // Live run probe. rafHz is frames offered, paintHz is frames that
-// changed - believe paintHz. See docs/perf-rewrite.md part four.
+// changed - believe paintHz. See docs/journal/perf-rewrite.md part four.
 
 const FIXED_SEED = 424242;
 const SAMPLE_MS = 6000;

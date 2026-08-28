@@ -1532,7 +1532,7 @@ impl Galaxy {
 #[cfg(not(target_arch = "wasm32"))]
 impl Galaxy {
     /// [`Galaxy::tick`] with a timer per phase, filling `out` as
-    /// `[clone, ..per process.., events]`. docs/perf-rewrite.md.
+    /// `[clone, ..per process.., events]`. docs/journal/perf-rewrite.md.
     pub fn tick_instrumented(&self, time: f32, out: &mut Vec<std::time::Duration>) -> Galaxy {
         use std::time::{Duration, Instant};
         let registry = process::registry();
@@ -4832,7 +4832,7 @@ impl Node {
 }
 
 /// Traversal-time node: 24 bytes against the build node's 48, for a walk
-/// that makes 21M visits a tick. docs/perf-rewrite.md part three.
+/// that makes 21M visits a tick. docs/journal/perf-rewrite.md part three.
 #[derive(Clone, Copy)]
 struct HotNode {
     com_x: f32,
@@ -4884,7 +4884,7 @@ fn build_quadtree(px: &[f32], py: &[f32], pm: &[f32], ox: f32, oy: f32, size: f3
 }
 
 /// Copy the build arena into depth-first traversal order, children
-/// contiguous. Replaces the old leaf-flag pass. docs/perf-rewrite.md.
+/// contiguous. Replaces the old leaf-flag pass. docs/journal/perf-rewrite.md.
 fn compact(build: &[Node], src: usize, slot: usize, out: &mut Vec<HotNode>) {
     let n = &build[src];
 

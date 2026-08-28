@@ -1,0 +1,5 @@
+# BEGIN managed by agentic-os/scripts/apply-agentic-os-hooks.py
+* text=auto eol=lf
+*.bat text eol=crlf
+*.cmd text eol=crlf
+# END managed by agentic-os/scripts/apply-agentic-os-hooks.py
