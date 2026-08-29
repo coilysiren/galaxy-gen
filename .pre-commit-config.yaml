@@ -28,7 +28,7 @@ repos:
 
   # BEGIN managed by agentic-os/scripts/apply-agentic-os-hooks.py
   - repo: https://forgejo.coilysiren.me/coilyco-flight-deck/agentic-os
-    rev: aos-precommit-v0.52.0
+    rev: aos-precommit-v0.55.0
     hooks:
       - id: catalog-trifecta
       - id: documentation-layout
