@@ -6,7 +6,7 @@ What a star is made of, how bright it is, and when it stops being drawn.
 
 Births sample a Salpeter-flavored IMF, `dN/dm` proportional to `m^-2.35`, between the mass bounds: many faint red dwarfs, rare blue giants. Luminosity follows a main-sequence-ish power law - roughly `m^2` - and lifetime falls steeply with mass (`900 * (30/m)^2` in sim time), so M-dwarfs outlive the session while O-stars die in minutes.
 
-`class_index` is log-mass normalized to 0..1, M through O, and the renderer maps it through stellar-classification colors.
+`class_index` is log-mass normalized to 0..1, M through O. It is sim state only - the renderer keys resolved-star color on `age` instead, so nothing in the frame currently reads it. See [rendering-stars.md](rendering-stars.md).
 
 ## The resolved-luminosity floor
 

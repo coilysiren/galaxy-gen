@@ -12,7 +12,8 @@ covers the sim.
 
 Galaxy size (default 500), scenario dropdown (the four start => end pairs),
 generate, play-pause, reset, and record. Seed mass and dt are fixed constants,
-both retired as config surfaces.
+both retired as config surfaces. Star color is not a control: the resolved
+layer is always keyed by age. See [rendering-stars.md](rendering-stars.md).
 
 Reset rebuilds the current seed at tick zero and drops the spent `t` from the
 address. That is distinct from generate, which rolls a fresh universe unless

@@ -672,6 +672,25 @@ test.describe("Galaxy Generator", () => {
     await expect(page.getByTestId("select-scenario")).toHaveValue("3");
   });
 
+  test("the age ramp spans the measured population rather than collapsing", async ({ page }) => {
+    // A ramp scaled to the wrong span still paints every star, just all one
+    // color. Why this asserts the ramp, not pixels: docs/rendering-stars.md.
+    await page.goto("/");
+    await waitForWasm(page);
+
+    // The population measured at t=1500: 4 to 700, median 244, p95 516.
+    const buckets = await page.evaluate(() =>
+      [4, 244, 516, 700].map((age) => (window as any).__galaxyGen.dataviz.starAgeBucket(age))
+    );
+
+    // Monotonic, and the measured range has to reach across the ramp rather
+    // than bunching at one end.
+    expect(buckets).toEqual([...buckets].sort((a, b) => a - b));
+    expect(buckets[0]).toBeLessThan(4);
+    expect(buckets[2]).toBeGreaterThan(16);
+    expect(new Set(buckets).size).toBe(4);
+  });
+
   test("run button ticks via the worker and pause resumes state cleanly", async ({ page }) => {
     // Asserts single-step still works after a pause/restore round-trip.
     await page.goto("/?debug=1");

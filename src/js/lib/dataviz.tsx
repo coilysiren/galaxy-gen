@@ -1408,32 +1408,31 @@ function drawTransients(s: State, toCx: (x: number) => number, toCy: (y: number)
   }
 }
 
-// Stellar-classification sequence M -> O, keyed by log-mass class_index.
-// Render-only. See docs/rendering-stars.md.
-const CLASS_STOPS: [number, [number, number, number]][] = [
-  [0.0, [255, 184, 128]],
-  [0.2, [255, 210, 164]],
-  [0.4, [255, 238, 214]],
-  [0.55, [255, 249, 240]],
-  [0.7, [242, 246, 255]],
-  [0.85, [198, 214, 255]],
-  [1.0, [160, 186, 255]],
+// Newborn cyan to deep amber, with no white stop on purpose. Render-only.
+// See docs/rendering-stars.md.
+const AGE_STOPS: [number, [number, number, number]][] = [
+  [0.0, [120, 226, 255]],
+  [0.18, [96, 178, 255]],
+  [0.4, [186, 202, 255]],
+  [0.6, [255, 214, 150]],
+  [0.8, [255, 158, 72]],
+  [1.0, [226, 88, 62]],
 ];
 
 // Color quantized into buckets with CSS strings built once; opacity moves
 // to globalAlpha. Why: docs/rendering-stars.md.
-const STAR_CLASS_BUCKETS = 24;
-const STAR_BUCKET_RED_GIANT = STAR_CLASS_BUCKETS;
-const STAR_BUCKET_WHITE_DWARF = STAR_CLASS_BUCKETS + 1;
-const STAR_BUCKET_NEUTRON = STAR_CLASS_BUCKETS + 2;
+const STAR_AGE_BUCKETS = 24;
+const STAR_BUCKET_RED_GIANT = STAR_AGE_BUCKETS;
+const STAR_BUCKET_WHITE_DWARF = STAR_AGE_BUCKETS + 1;
+const STAR_BUCKET_NEUTRON = STAR_AGE_BUCKETS + 2;
 
 let starColors: string[] = [];
 
 function buildStarColors() {
   if (starColors.length > 0) return;
   const colors: string[] = [];
-  for (let i = 0; i < STAR_CLASS_BUCKETS; i++) {
-    const [r, g, b] = classColor((i + 0.5) / STAR_CLASS_BUCKETS);
+  for (let i = 0; i < STAR_AGE_BUCKETS; i++) {
+    const [r, g, b] = rampColor(AGE_STOPS, (i + 0.5) / STAR_AGE_BUCKETS);
     colors.push(`rgb(${r},${g},${b})`);
   }
   colors.push("rgb(255,132,92)"); // red giant
@@ -1444,7 +1443,7 @@ function buildStarColors() {
 
 // Discs batched into (color, alpha) buckets, one path per bucket; alpha
 // quantized on a sqrt curve. See docs/rendering-stars.md.
-const STAR_COLOR_COUNT = STAR_CLASS_BUCKETS + 3;
+const STAR_COLOR_COUNT = STAR_BUCKET_NEUTRON + 1;
 const STAR_ALPHA_LEVELS = 24;
 const STAR_BATCH_BUCKETS = STAR_COLOR_COUNT * STAR_ALPHA_LEVELS;
 /// x, y, radius per queued disc.
@@ -1518,13 +1517,16 @@ function starBatchFlush(ctx: CanvasRenderingContext2D) {
   starBatchReset();
 }
 
-function classColor(ci: number): [number, number, number] {
-  let lo = CLASS_STOPS[0];
-  let hi = CLASS_STOPS[CLASS_STOPS.length - 1];
-  for (let k = 0; k < CLASS_STOPS.length - 1; k++) {
-    if (ci >= CLASS_STOPS[k][0] && ci <= CLASS_STOPS[k + 1][0]) {
-      lo = CLASS_STOPS[k];
-      hi = CLASS_STOPS[k + 1];
+function rampColor(
+  stops: [number, [number, number, number]][],
+  ci: number
+): [number, number, number] {
+  let lo = stops[0];
+  let hi = stops[stops.length - 1];
+  for (let k = 0; k < stops.length - 1; k++) {
+    if (ci >= stops[k][0] && ci <= stops[k + 1][0]) {
+      lo = stops[k];
+      hi = stops[k + 1];
       break;
     }
   }
@@ -1667,13 +1669,15 @@ function drawStars(
             ? 0.36
             : 0.3
         : Math.pow(Math.min(stars[i + 2], maxLum) / maxLum, 0.25);
+    // A lifecycle transition resets `age`, so only the main sequence carries a
+    // birth age. Giants and remnants keep their own fixed colors.
     const bucket = redGiant
       ? STAR_BUCKET_RED_GIANT
       : compact
         ? whiteDwarf
           ? STAR_BUCKET_WHITE_DWARF
           : STAR_BUCKET_NEUTRON
-        : Math.min(STAR_CLASS_BUCKETS - 1, Math.max(0, (stars[i + 3] * STAR_CLASS_BUCKETS) | 0));
+        : ageBucket(stars[i + 6]);
     const core = compact ? 0.7 + 0.24 * b : 0.38 + 1.42 * b;
     const alpha = (0.3 + 0.64 * b) * fade;
     if (b > 0.82) {
@@ -1700,6 +1704,24 @@ function drawStars(
   starBatchFlush(ctx);
   ctx.globalAlpha = 1.0;
   ctx.globalCompositeOperation = "source-over";
+}
+
+/// Saturation age, calibrated against the measured population rather than the
+/// tick count. Why that distinction matters: docs/rendering-stars.md.
+const AGE_RAMP_FULL = 550;
+/// Mildly sub-linear: lifts the young tail clear of the floor.
+const AGE_RAMP_CURVE = 0.8;
+
+function ageBucket(age: number): number {
+  const u = Math.pow(Math.min(Math.max(age, 0) / AGE_RAMP_FULL, 1), AGE_RAMP_CURVE);
+  const b = (u * STAR_AGE_BUCKETS) | 0;
+  return Math.min(STAR_AGE_BUCKETS - 1, b);
+}
+
+/// The ramp as the frame resolves it. Why a pixel check cannot stand in for
+/// this: docs/rendering-stars.md.
+export function starAgeBucket(age: number): number {
+  return ageBucket(age);
 }
 
 export function resetView() {

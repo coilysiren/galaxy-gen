@@ -1,10 +1,18 @@
 # Stars, associations, and transients
 
-Stars are bright glowing points over the gas layer. Color runs cool - light stars, warm cream - to hot, heavy stars, blue-white; size and halo derive from luminosity. Render-only exaggeration is fine here, because none of it flows back into the sim.
+Stars are bright glowing points over the gas layer. Color runs young - newborn cyan - to old, a deep amber disk; size and halo derive from luminosity. Render-only exaggeration is fine here, because none of it flows back into the sim.
 
 ## Color is quantized, and so is alpha
 
-The stellar-classification sequence runs M to O, keyed by the sim's log-mass `class_index` (0 is a red dwarf, 1 a blue giant). Real perceived star colors are subtle: warm orange through cream and white to blue-white.
+Main-sequence color is keyed by the sim's `age`, running newborn cyan through pale blue to a deep amber old disk, so the arms read as where stars are *young* rather than merely where stars are. Only the main sequence carries this ramp, because a lifecycle transition resets `age` and a giant's age is not a birth age - giants, white dwarfs, and compact remnants keep their own fixed colors.
+
+The ramp is calibrated against the measured population, not the tick count - resolved main-sequence age ran 4 to 700 at t=1500 while retirement turned the population over - and it carries no white stop, because additive compositing washes a white midpoint straight back to an undifferentiated cream.
+
+The star layer says age and does not say mass. The log-mass `class_index` the sim still emits no longer reaches color; it survives as sim state, not as a channel the frame speaks. That is a deliberate trade of one reading for another rather than an addition, and the mass signal is currently unrendered.
+
+A young galaxy is close to monochrome by construction. Before retirement turns the population over, every resolved star sits in the low end of the ramp and the disk reads blue throughout, so the ramp only separates a field once the run has matured.
+
+The ramp is guarded by asserting `starAgeBucket` across the measured population, not by sampling canvas pixels. A pixel check cannot tell a working ramp from a collapsed one: red giants paint `rgb(255,132,92)` from a fixed color that never touches the ramp, so warm pixels survive on the frame even when every main-sequence star has been crushed into the cyan end. The first version of that test passed against a ramp deliberately broken to 100x its span.
 
 Color is quantized into buckets whose CSS strings are built once. A galaxy in progress resolves tens of thousands of stars, and composing an `rgba(...)` string per star per layer - then making the canvas re-parse it - cost more than the disc it painted. Opacity moves to `globalAlpha`, which is a plain number, so each star still composites separately and a dense swarm still accumulates into a glow.
 

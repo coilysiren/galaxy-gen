@@ -50,6 +50,9 @@ deterministic event queue, and per-(process, tick) RNG streams from the
   (`src/js/lib/webgpu.ts`).
 - Controls, URL round-trip, and the chrome toggle.
   See [ui-controls.md](ui-controls.md).
+- Resolved stars are colored by stellar age, so star-forming structure reads
+  directly off the frame. Replaces the stellar-class ramp, which is gone.
+  See [rendering-stars.md](rendering-stars.md).
 - Layered canvas renderer with a gravitational-lens post-process. See
   [rendering.md](rendering.md), [starfield.md](starfield.md),
   [co-rotating-frame.md](co-rotating-frame.md), [perf-rewrite.md](journal/perf-rewrite.md).
