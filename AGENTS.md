@@ -1,6 +1,6 @@
 ---
 ward:
-  workflow: merge-remote-main
+  workflow: pull-request-and-merge
 ---
 # Agent instructions
 
@@ -166,7 +166,7 @@ Cross-reference convention from agentic-os#59.
 <!-- BEGIN managed by agentic-os/scripts/apply-git-workflow.py -->
 ### Git workflow
 
-**This repo runs the `merge-remote-main` lane**, declared as `ward.workflow` in this file's frontmatter. The agent commits, pushes straight to `main`, and closes the issue. Pushing `main` here is the expected path, not an escalation.
+**This repo runs the `pull-request-and-merge` lane**, declared as `ward.workflow` in this file's frontmatter. The agent commits to a task branch, pushes it, opens a Forgejo pull request, and **merges that pull request itself** once it is green. The author of the code is the one who merges it. Opening the pull request is a step, never the stopping point.
 
 The fleet runs two lanes, and both authorize the same core actions:
 
