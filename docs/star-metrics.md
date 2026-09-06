@@ -47,6 +47,14 @@ Deliberately blind to kinematics. A hot, thoroughly mixed population that still 
 
 `central_fraction_for_age`. Against the all-ages number, this says whether a concentrated star field was *born* that way or drifted inward: young stars have not had time to move, so they track the radial shape of star formation itself. If the two agree, nothing is migrating.
 
+## cden - the amount, where the rest are shape
+
+`core_star_density`, resolved stars per unit area inside 0.35 disk radii. Every other bar on this page and all five spheroid measures divide by a total, so they describe how what remains is arranged and cannot see the population emptying underneath them.
+
+Measured on galaxy-gen#7051: a luminosity floor on the elliptical retires 81% of the stars and 47% of the mass, and `econ` does not move. Across three seeds it read 1.02x, 1.06x, 0.84x of its unfloored value, and at a harsher floor it went *up*. **A count fraction fails the same way** - `core/total` on counts read 1.06x to 1.18x as the body emptied, because it is another normalized ratio. Only the unnormalized density tracked the damage, at 0.30x and then 0.13x.
+
+**It encodes central concentration, so it belongs to the elliptical alone.** A ring is hollow by construction and a spiral keeps its light in the arms, so those two guard the same property with a plain minimum star count instead.
+
 ## See also
 
 - [metric-calibration.md](metric-calibration.md) - why every one of these has a known-answer test.

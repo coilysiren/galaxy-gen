@@ -60,6 +60,9 @@ struct Metrics {
     /// The same ratio a newborn is handed at 0.5 disk_r. Separates
     /// "born wrong" from "drifted wrong".
     birth_circ_ratio: f64,
+    /// Resolved stars per unit area inside 0.35 disk radii. Amount, where the
+    /// five below are shape.
+    core_star_density: f64,
     /// Resolved stellar spheroid measurements.
     spheroid_concentration: f64,
     spheroid_smoothness: f64,
@@ -188,6 +191,7 @@ fn metrics(g: &Galaxy, size: u16) -> Metrics {
         v_over_sigma_mid: g.rotation_dispersion_ratio_for_age(150.0, 500.0) as f64,
         v_over_sigma_old: g.rotation_dispersion_ratio_for_age(500.0, f32::INFINITY) as f64,
         birth_circ_ratio: g.birth_circular_ratio(0.5) as f64,
+        core_star_density: g.core_star_density() as f64,
         spheroid_concentration: g.spheroid_concentration() as f64,
         spheroid_smoothness: g.spheroid_smoothness() as f64,
         spheroid_axis_ratio: g.spheroid_axis_ratio() as f64,
@@ -265,7 +269,7 @@ fn main() {
                 }
                 let m = metrics(&g, size);
                 println!(
-                    "t={cp:5}  nz={:5}  gas={:6}  vt={:+.3}  rot={:+.2}  r_pk={:.2}  ctr={:.2}  m2={:.2}  spi={:.2}  cov={:.2}  ring={:.2}  hollow={:.2}  rcov={:.2}  rw={:.2}  svt={:+.3}  sctr={:.2}  sctry={:.2}  arm={:.2}  vsig={:.2}  vsy={:.2}  vsm={:.2}  vso={:.2}  scirc={:.2}  bcirc={:.2}  econ={:.2}  esm={:.2}  axis={:.2}  ext={:.2}  erot={:.2}  bh={:.2}  q={:.2}  qep={}  qrate={:.5}  stars={:5}  mixed={:5}  ev(col/b/sn/sh/d/cap/nsm/grb/pn/ia/q)={}/{}/{}/{}/{}/{}/{}/{}/{}/{}/{}",
+                    "t={cp:5}  nz={:5}  gas={:6}  vt={:+.3}  rot={:+.2}  r_pk={:.2}  ctr={:.2}  m2={:.2}  spi={:.2}  cov={:.2}  ring={:.2}  hollow={:.2}  rcov={:.2}  rw={:.2}  svt={:+.3}  sctr={:.2}  sctry={:.2}  arm={:.2}  vsig={:.2}  vsy={:.2}  vsm={:.2}  vso={:.2}  scirc={:.2}  bcirc={:.2}  cden={:.4}  econ={:.2}  esm={:.2}  axis={:.2}  ext={:.2}  erot={:.2}  bh={:.2}  q={:.2}  qep={}  qrate={:.5}  stars={:5}  mixed={:5}  ev(col/b/sn/sh/d/cap/nsm/grb/pn/ia/q)={}/{}/{}/{}/{}/{}/{}/{}/{}/{}/{}",
                     m.nonzero,
                     m.total,
                     m.vt,
@@ -289,6 +293,7 @@ fn main() {
                     m.v_over_sigma_old,
                     m.star_circ_ratio,
                     m.birth_circ_ratio,
+                    m.core_star_density,
                     m.spheroid_concentration,
                     m.spheroid_smoothness,
                     m.spheroid_axis_ratio,

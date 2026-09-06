@@ -32,6 +32,9 @@ The fixed size-50, seed-42 run is checked at every tick from 900 through 1000:
 - extent stays from `0.30` through `0.65`
 - rotational support stays at most `0.60`
 - at least 150 gas cells and 500 resolved stars remain
+- core star density stays at least `0.55`, which is the only bar that reads amount rather than
+  shape: the five above all divide by total stellar mass, so a cut that retires most of the
+  population moves none of them. galaxy-gen#7051
 - spiral coherence stays at most `0.35` and ring concentration at most `0.25`
 - star births and phase-mixed stars both increase during the window
 

@@ -1968,6 +1968,35 @@ impl Galaxy {
         )
     }
 
+    /// Resolved stars per unit area inside 0.35 disk radii: the amount, where
+    /// every other star metric reads shape. docs/star-metrics.md.
+    pub fn core_star_density(&self) -> f32 {
+        let center = self.size as f32 * 0.5;
+        let disk_r = self.disk_radius();
+        let core_r = disk_r * 0.35;
+        let mut core = 0usize;
+        for i in 0..self.stars.len() {
+            if self.stars.mass[i] <= 0.0 {
+                continue;
+            }
+            let x = self.stars.pos_x[i] - center;
+            let y = self.stars.pos_y[i] - center;
+            let r_sq = x * x + y * y;
+            if r_sq > disk_r * disk_r {
+                continue;
+            }
+            if r_sq <= core_r * core_r {
+                core += 1;
+            }
+        }
+        let area = std::f32::consts::PI * core_r * core_r;
+        if area > 0.0 {
+            core as f32 / area
+        } else {
+            0.0
+        }
+    }
+
     fn spheroid_structure(&self) -> (f32, f32, f32, f32, f32) {
         const HARMONICS: usize = 4;
         let center = self.size as f32 * 0.5;
@@ -5863,6 +5892,7 @@ mod tests_dynamics {
         let mut min_coverage = (f32::INFINITY, 0);
         let (mut sum_coherence, mut sum_coverage, mut window_ticks) = (0.0f32, 0.0f32, 0u32);
         let mut min_occupied = (usize::MAX, 0);
+        let mut min_stars = (usize::MAX, 0);
         for tick in 1..=1100 {
             g = g.tick(0.5);
             if tick < 1000 {
@@ -5871,6 +5901,7 @@ mod tests_dynamics {
             let coherence = g.spiral_coherence();
             let coverage = g.spiral_coverage();
             let occupied = g.mass.iter().filter(|&&mass| mass > 0).count();
+            let stars = g.stars.len();
             let births = g.events_executed(crate::events::EventKind::StarBirth as u32);
             start_births.get_or_insert(births);
             sum_coherence += coherence;
@@ -5885,7 +5916,13 @@ mod tests_dynamics {
             if occupied < min_occupied.0 {
                 min_occupied = (occupied, tick);
             }
+            if stars < min_stars.0 {
+                min_stars = (stars, tick);
+            }
         }
+        // Nothing asserted the star field existed, so an over-firing drain took
+        // this to 2% with every bar green. Seed 42 runs 7.4k. galaxy-gen#7051.
+        assert!(min_stars.0 >= 4000, "star field collapsed at {min_stars:?}");
         // Mean plus floor, not a bare min: real arms are transient (galaxy-gen#70).
         // Bars calibrated on linux, which ships. macOS reads higher (galaxy-gen#73).
         let mean_coherence = sum_coherence / window_ticks as f32;
@@ -5945,6 +5982,7 @@ mod tests_dynamics {
         let mut max_rotation = (0.0f32, 0);
         let mut min_gas_cells = (usize::MAX, 0);
         let mut min_stars = (usize::MAX, 0);
+        let mut min_core_density = (f32::INFINITY, 0);
         let mut max_spiral = (0.0f32, 0);
         let mut max_ring = (0.0f32, 0);
         for tick in 1..=1000 {
@@ -5959,6 +5997,7 @@ mod tests_dynamics {
             let rotation = g.spheroid_rotational_support();
             let gas_cells = g.mass.iter().filter(|&&mass| mass > 0).count();
             let stars = g.stars.len();
+            let core_density = g.core_star_density();
             let spiral = g.spiral_coherence();
             let ring = g.ring_concentration();
             start_births
@@ -5991,6 +6030,9 @@ mod tests_dynamics {
             if stars < min_stars.0 {
                 min_stars = (stars, tick);
             }
+            if core_density < min_core_density.0 {
+                min_core_density = (core_density, tick);
+            }
             if spiral > max_spiral.0 {
                 max_spiral = (spiral, tick);
             }
@@ -6022,6 +6064,12 @@ mod tests_dynamics {
         assert!(
             min_gas_cells.0 >= 150,
             "gas unresolved at {min_gas_cells:?}"
+        );
+        // The only bar here that reads amount rather than shape.
+        // galaxy-gen#7051, docs/star-metrics.md.
+        assert!(
+            min_core_density.0 >= 0.55,
+            "resolved core emptied at {min_core_density:?}"
         );
         assert!(
             min_stars.0 >= 500,
@@ -6084,6 +6132,7 @@ mod tests_dynamics {
         let mut min_coverage = (f32::INFINITY, 0);
         let mut max_width = (0.0f32, 0);
         let mut min_occupied = (usize::MAX, 0);
+        let mut min_stars = (usize::MAX, 0);
         for tick in 1..=1500 {
             g = g.tick(0.5);
             if tick < 1400 {
@@ -6094,6 +6143,7 @@ mod tests_dynamics {
             let coverage = g.ring_coverage();
             let width = g.ring_width();
             let occupied = g.mass.iter().filter(|&&mass| mass > 0).count();
+            let stars = g.stars.len();
             let births = g.events_executed(crate::events::EventKind::StarBirth as u32);
             start_births.get_or_insert(births);
             if concentration < min_concentration.0 {
@@ -6110,6 +6160,9 @@ mod tests_dynamics {
             }
             if occupied < min_occupied.0 {
                 min_occupied = (occupied, tick);
+            }
+            if stars < min_stars.0 {
+                min_stars = (stars, tick);
             }
         }
         assert!(
@@ -6136,6 +6189,9 @@ mod tests_dynamics {
             max_width.1,
             max_width.0
         );
+        // "star_forming" is in the name and nothing measured it: an over-firing
+        // drain empties this to zero stars. Shipped 12.6-14.1k. galaxy-gen#7051.
+        assert!(min_stars.0 >= 5000, "star field collapsed at {min_stars:?}");
         assert!(
             min_occupied.0 >= 250,
             "tick {} had only {} gas cells",
