@@ -20,9 +20,11 @@ Deleting that light outright costs 1.5% of frame brightness, which is why the fl
 
 ## DRAGON: the elliptical uses zero
 
-Its defining feature is a concentrated stellar spheroid, and **that spheroid is made of the accumulated faint old population**. Applying the disk floor to it drops `spheroid_concentration` from 0.45-0.85 to 0.28-0.32, which is the object losing its identity rather than shedding invisible light.
+Its defining feature is a concentrated stellar spheroid, and **that spheroid is made of the accumulated faint old population**. Applying the disk floor to it deletes the object rather than shedding invisible light: the warm concentrated body around the nucleus goes, and the frame reads as a gas cloud with stars scattered through it.
 
-It needs its retired light actually rendered before it can have a floor. Tracked on galaxy-gen#72, not bodged here - and it means the elliptical's population is currently unbounded.
+**No metric catches that, and the scenario test passes with the floor on.** Re-measured 2026-09-05 on three seeds at size 500: the floor holds the count at 4.2-6.3k against 22-38k unbounded, and leaves `spheroid_concentration` at 0.49-0.57 and `spheroid_extent` at 0.42-0.49, both inside their acceptance bands. At the test's own size 250 seed 42, concentration is 0.66-0.67 either way. The earlier reading of 0.28-0.32 does not reproduce. So the only thing that refuses this change is a capture, and the reason to trust the DRAGON is the picture rather than the number.
+
+It needs its retired light actually rendered before it can have a floor. Tracked on galaxy-gen#72, not bodged here - and it means the elliptical's population is currently unbounded. The blind spot in the acceptance window is galaxy-gen#7051.
 
 ## See also
 
